@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "agent-memory"
+version = "0.1.0"
+description = "A comprehensive agent memory system with short-term, long-term, and knowledge graph layers"
+authors = [{ name = "Sisyphus" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "chromadb>=0.5.0",
+    "tiktoken>=0.7.0",
+    "pydantic>=2.0",
+    "dulwich>=0.22.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["memory*"]

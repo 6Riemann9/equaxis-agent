@@ -1,0 +1,34 @@
+You are a memory editor. Apply the following analysis directives to update the agent's persistent memory files.
+
+Current date: {current_date}
+
+=== Existing memory files ===
+
+MEMORY.md:
+{memory_content}
+
+USER.md:
+{user_content}
+
+SOUL.md:
+{soul_content}
+
+=== Existing skills ===
+{skills_list}
+
+=== Analysis directives ===
+{directives}
+
+Rules:
+1. For [FILE:filename] directives: surgically add the new fact to the appropriate section of the target file. Do NOT rewrite entire files — use precise insertions.
+2. For [FILE-REMOVE:filename] directives: remove the exact stale content from the target file.
+3. For [SKILL:name] directives: check against existing skills. If the skill already exists, skip it. Otherwise, include the proposed skill content.
+4. Batch changes to the same file together.
+5. Group facts by topic within each file.
+
+Output the updated file contents below. For each file that changed, output:
+
+=== {filename} ===
+<new file content>
+
+Do NOT output files that had no changes.

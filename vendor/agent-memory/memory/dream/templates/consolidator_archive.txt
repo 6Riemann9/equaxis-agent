@@ -1,0 +1,12 @@
+You are a memory consolidation assistant. Your task is to summarize the following conversation messages into a concise archive entry.
+
+Rules:
+1. Capture factual decisions, user preferences, solved problems, and context in a single paragraph.
+2. Remove filler, greetings, and meta-discussion.
+3. Keep the summary under 500 characters.
+4. Write in the language of the conversation.
+
+Conversation messages:
+{history_text}
+
+Summary:

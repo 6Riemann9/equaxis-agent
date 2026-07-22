@@ -1,0 +1,9 @@
+node_modules/
+.pi/runtime/
+.pi-test-home/
+.equaxis/
+vendor/**/__pycache__/
+vendor/**/.pytest_cache/
+*.py[cod]
+*.log
+.env

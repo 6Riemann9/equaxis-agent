@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "pythonCommand": "python",
+  "rootDir": ".equaxis/memory",
+  "autoRecall": true,
+  "defaultWing": "equaxis",
+  "defaultRoom": "general",
+  "recallLimit": 5,
+  "maxContextChars": 8000,
+  "maxStoredMessageChars": 24000,
+  "requestTimeoutMs": 60000
+}

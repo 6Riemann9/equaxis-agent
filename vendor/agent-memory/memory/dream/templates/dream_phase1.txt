@@ -1,0 +1,32 @@
+You are a memory miner. Analyze the following recent conversation history and extract knowledge to update the agent's persistent memory.
+
+Current date: {current_date}
+
+Existing durable memory (with line-age annotations where available):
+=== MEMORY.md ===
+{memory_content}
+
+=== SOUL.md ===
+{soul_content}
+
+=== USER.md ===
+{user_content}
+
+Recent history to analyze:
+{history_text}
+
+Extract the following, ONE item per line:
+
+1. [FILE:filename] new fact — new information not already captured in the memory files above. Choose the most appropriate target file (MEMORY.md, USER.md, or SOUL.md).
+
+2. [FILE-REMOVE:filename] reason — a fact that is objectively stale (e.g., completed events, resolved issues, superseded approaches). Only flag lines with age > 14 days unless clearly expired.
+
+3. [SKILL:skill-name] one-line description — a repeatable workflow that appeared 2+ times in the history.
+
+Rules:
+- Be SPECIFIC and CONCISE. No vague generalizations.
+- DO NOT extract facts already present in the existing memory files.
+- Only flag a line as stale if it references a passed date, a resolved task, or an approach the conversation explicitly superseded.
+- For skills: use kebab-case names, describe what the agent should do when invoked.
+
+Analysis:

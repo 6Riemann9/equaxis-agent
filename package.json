@@ -1,0 +1,33 @@
+{
+  "name": "equaxis-agent",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Equaxis: a governed, observable and reliable agent runtime powered by Pi.",
+  "scripts": {
+    "equaxis": "pi --extension ./.pi/extensions/provider.ts --extension ./.pi/extensions/reliability-harness.ts --extension ./.pi/extensions/memory.ts --extension ./.pi/extensions/web-crawler.ts --extension ./.pi/extensions/tool-catalog.ts --extension ./.pi/extensions/tool-scheduler.ts",
+    "pi": "pi --extension ./.pi/extensions/provider.ts --extension ./.pi/extensions/reliability-harness.ts --extension ./.pi/extensions/memory.ts --extension ./.pi/extensions/web-crawler.ts --extension ./.pi/extensions/tool-catalog.ts --extension ./.pi/extensions/tool-scheduler.ts",
+    "pi:raw": "pi --no-extensions",
+    "pi:explicit": "pi --extension ./.pi/extensions/provider.ts --extension ./.pi/extensions/reliability-harness.ts --extension ./.pi/extensions/memory.ts --extension ./.pi/extensions/web-crawler.ts --extension ./.pi/extensions/tool-catalog.ts --extension ./.pi/extensions/tool-scheduler.ts",
+    "pi:json": "pi --mode json --extension ./.pi/extensions/provider.ts --extension ./.pi/extensions/reliability-harness.ts --extension ./.pi/extensions/memory.ts --extension ./.pi/extensions/web-crawler.ts --extension ./.pi/extensions/tool-catalog.ts --extension ./.pi/extensions/tool-scheduler.ts",
+    "mcp:eval": "node scripts/mcp-eval-server.mjs",
+    "setup:memory": "python -m pip install -e ./vendor/agent-memory",
+    "test:memory": "python bridge/run_memory_tests.py",
+    "check": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "verify": "npm run check && npm test",
+    "verify:full": "npm run verify && npm run test:memory"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "typebox": "^1.1.38"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-tui": "^0.80.10",
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "mode": "enforce",
+  "traceDir": ".pi/runtime",
+  "protectPaths": [
+    ".env",
+    ".git/",
+    "node_modules/",
+    "*.pem",
+    "*.key"
+  ],
+  "approval": {
+    "highRiskBash": true,
+    "writesOutsideWorkspace": true,
+    "sessionFork": false
+  },
+  "limits": {
+    "maxToolCallsPerTurn": 30,
+    "maxHighRiskCallsPerTurn": 3,
+    "maxRepairAttemptsPerError": 2
+  },
+  "toolRouting": {
+    "enabled": true,
+    "maxCandidates": 5
+  }
+}
