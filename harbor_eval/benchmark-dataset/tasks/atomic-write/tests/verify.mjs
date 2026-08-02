@@ -1,0 +1,1 @@
+import assert from 'node:assert/strict';import fs from 'node:fs/promises';import {solve} from '/app/solution.mjs';await fs.writeFile('/app/value.txt','old');await solve('/app/value.txt','new');assert.equal(await fs.readFile('/app/value.txt','utf8'),'new');

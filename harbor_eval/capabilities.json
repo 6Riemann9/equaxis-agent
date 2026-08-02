@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "tasks": {
+    "dedupe-stable": {"taskArea": "data-transformation", "capabilityTags": ["collection-transform", "order-preservation"], "expectedSuccessRate": 0.8},
+    "group-counts": {"taskArea": "data-transformation", "capabilityTags": ["collection-transform", "aggregation"], "expectedSuccessRate": 0.8},
+    "sort-semver": {"taskArea": "parsing-and-ordering", "capabilityTags": ["semantic-versioning", "numeric-reasoning"], "expectedSuccessRate": 0.8},
+    "flatten-record": {"taskArea": "data-transformation", "capabilityTags": ["object-traversal", "structured-data-navigation"], "expectedSuccessRate": 0.8},
+    "parse-duration": {"taskArea": "input-validation", "capabilityTags": ["input-validation", "unit-conversion"], "expectedSuccessRate": 0.8},
+    "retry-after": {"taskArea": "input-validation", "capabilityTags": ["protocol-parsing", "input-validation"], "expectedSuccessRate": 0.8},
+    "csv-quotes": {"taskArea": "parsing-and-ordering", "capabilityTags": ["string-parsing", "state-machine-reasoning"], "expectedSuccessRate": 0.8},
+    "redact-secrets": {"taskArea": "security", "capabilityTags": ["security-redaction", "string-transformation"], "expectedSuccessRate": 0.9},
+    "normalize-path": {"taskArea": "filesystem-runtime", "capabilityTags": ["path-reasoning", "boundary-handling"], "expectedSuccessRate": 0.85},
+    "deep-freeze": {"taskArea": "data-transformation", "capabilityTags": ["recursive-reasoning", "immutability"], "expectedSuccessRate": 0.8},
+    "paginate": {"taskArea": "input-validation", "capabilityTags": ["pagination", "boundary-handling"], "expectedSuccessRate": 0.85},
+    "top-k": {"taskArea": "data-transformation", "capabilityTags": ["ranking", "numeric-filtering"], "expectedSuccessRate": 0.8},
+    "slugify": {"taskArea": "text-processing", "capabilityTags": ["text-normalization", "string-transformation"], "expectedSuccessRate": 0.85},
+    "env-boolean": {"taskArea": "input-validation", "capabilityTags": ["boolean-parsing", "input-validation"], "expectedSuccessRate": 0.85},
+    "merge-intervals": {"taskArea": "algorithmic-reasoning", "capabilityTags": ["interval-reasoning", "numeric-reasoning"], "expectedSuccessRate": 0.8},
+    "dependency-order": {"taskArea": "algorithmic-reasoning", "capabilityTags": ["dependency-reasoning", "cycle-detection"], "expectedSuccessRate": 0.8},
+    "json-pointer": {"taskArea": "parsing-and-ordering", "capabilityTags": ["protocol-parsing", "structured-data-navigation"], "expectedSuccessRate": 0.8},
+    "mask-email": {"taskArea": "input-validation", "capabilityTags": ["input-validation", "string-transformation"], "expectedSuccessRate": 0.85},
+    "bounded-concurrency": {"taskArea": "async-and-concurrency", "capabilityTags": ["async-control", "bounded-concurrency"], "expectedSuccessRate": 0.8},
+    "atomic-write": {"taskArea": "filesystem-runtime", "capabilityTags": ["filesystem-safety", "atomicity"], "expectedSuccessRate": 0.85}
+  }
+}

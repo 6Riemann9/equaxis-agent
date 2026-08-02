@@ -1,0 +1,1 @@
+Fix the implementation in `/app/solution.mjs`. Export async solve(items, limit, worker) preserving result order and never exceeding limit. Preserve the exported `solve` API and run the available tests.

@@ -1,0 +1,93 @@
+# Dataset manifest for equaxis/capability-baseline
+# Add tasks using: harbor add <org>/<name>
+# Publish using: harbor publish
+
+[dataset]
+name = "equaxis/capability-baseline"
+description = "Paired Equaxis versus raw Pi benchmark"
+keywords = []
+[[dataset.authors]]
+name = "Equaxis"
+email = "eval@equaxis.local"
+
+
+[[tasks]]
+name = "equaxis/atomic-write"
+digest = "sha256:afad16da1a494ad11f9c679fca95e64f5876cf2af3fa60371faf1b1a1cb82431"
+
+[[tasks]]
+name = "equaxis/bounded-concurrency"
+digest = "sha256:dd10cb6f754050b9a738cd4b0c4535f18077602e37542abd4d4fefebd99bba5a"
+
+[[tasks]]
+name = "equaxis/csv-quotes"
+digest = "sha256:7f64901f2e586aec50db29f9ffc0f7077cdfc21733f5712115249830c0f9440a"
+
+[[tasks]]
+name = "equaxis/dedupe-stable"
+digest = "sha256:f719994dba39f0d63e165317ebedb7e9a73705b237deaa1c62303bf4b4be37b1"
+
+[[tasks]]
+name = "equaxis/deep-freeze"
+digest = "sha256:49fdb4fabfae7fc24143c24b640a457c621fe9ddc7af169ac35c12ed52adad5c"
+
+[[tasks]]
+name = "equaxis/dependency-order"
+digest = "sha256:06bedc2a0fb979e55f15d313eb3cac74daa9be566803fea0633cc4876fea2679"
+
+[[tasks]]
+name = "equaxis/env-boolean"
+digest = "sha256:1a8906a81a244468c433233d2f655d03930c95c0a1322107b209e373212ed2e4"
+
+[[tasks]]
+name = "equaxis/flatten-record"
+digest = "sha256:31fa4773ad55faad5fe057c95cfa0248ff6fbe478f757115b098925e6771c86e"
+
+[[tasks]]
+name = "equaxis/group-counts"
+digest = "sha256:12ddf1e850e852252da5222a131ebdd3b0914eaf5712c27421a6b54262fc858e"
+
+[[tasks]]
+name = "equaxis/json-pointer"
+digest = "sha256:22c10ae03cbd2e2da3f25294944dc2fba0ac5334c97e619c1afd89d9fdf45803"
+
+[[tasks]]
+name = "equaxis/mask-email"
+digest = "sha256:646c717aeeb2cc697e2eebaa57bcb49fec15239781a7b1f16aecfdd0ffd12ca2"
+
+[[tasks]]
+name = "equaxis/merge-intervals"
+digest = "sha256:7d3c1aa3cfec63acd1635df0818e23a0adbb055b4acf00784f7f7b4c249fc886"
+
+[[tasks]]
+name = "equaxis/normalize-path"
+digest = "sha256:5eb8ebb148d6a0e47b942a78ff4a3f7144e6aaeaac5904ccc006b8c167dfd88d"
+
+[[tasks]]
+name = "equaxis/paginate"
+digest = "sha256:e07948189b3ad021b8a37ec36317a3021756231d869c405c9eec6d2f80004ba6"
+
+[[tasks]]
+name = "equaxis/parse-duration"
+digest = "sha256:465409c3bacbd7ae34e7a07290e5f40af07f383055fb0f89d953a29c8b67baaf"
+
+[[tasks]]
+name = "equaxis/redact-secrets"
+digest = "sha256:ffe3889b3092da0ad831b360f24981b013b2af7d117f0fc8a58f4b968361b676"
+
+[[tasks]]
+name = "equaxis/retry-after"
+digest = "sha256:3315a5fd5f7038a99ed721700f7f67501475c088cc391df48c03e133ad7f587b"
+
+[[tasks]]
+name = "equaxis/slugify"
+digest = "sha256:157865505a4afdf90fe852ed1ca58d75d6630849e8b642cebddc1e58d5670162"
+
+[[tasks]]
+name = "equaxis/sort-semver"
+digest = "sha256:92f082cbf1309d872fe727159a01ec79a5af8adfcf55013449473327839b0656"
+
+[[tasks]]
+name = "equaxis/top-k"
+digest = "sha256:8f2c967f20d79abc6a80fc3f7b7cfaaa588fe60470a6d6b8eea1cb9202556d14"
+

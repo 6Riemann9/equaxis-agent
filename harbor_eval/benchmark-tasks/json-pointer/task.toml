@@ -1,0 +1,21 @@
+version = "1.0"
+
+[task]
+name = "equaxis/json-pointer"
+
+[metadata]
+author_name = "Equaxis"
+author_email = "eval@equaxis.local"
+difficulty = "medium"
+category = "coding"
+tags = ["paired-control", "javascript", "json-pointer"]
+
+[agent]
+timeout_sec = 600.0
+
+[verifier]
+timeout_sec = 60.0
+
+[environment]
+build_timeout_sec = 600.0
+network_mode = "no-network"

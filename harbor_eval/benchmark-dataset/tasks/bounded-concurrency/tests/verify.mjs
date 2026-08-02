@@ -1,0 +1,1 @@
+import assert from 'node:assert/strict';import {solve} from '/app/solution.mjs';let active=0,max=0;const got=await solve([1,2,3,4],2,async x=>{active++;max=Math.max(max,active);await new Promise(r=>setTimeout(r,5));active--;return x*2});assert.deepEqual(got,[2,4,6,8]);assert.ok(max<=2);

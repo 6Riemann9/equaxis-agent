@@ -1,0 +1,1 @@
+Fix the implementation in `/app/solution.mjs`. Export async solve(file, text) that atomically replaces file contents using a sibling temporary file and rename. Preserve the exported `solve` API and run the available tests.

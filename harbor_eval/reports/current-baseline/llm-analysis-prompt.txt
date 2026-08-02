@@ -1,0 +1,140 @@
+Analyze this Equaxis Harbor evaluation cycle using only the supplied evidence. Describe changed failure patterns, likely root capabilities, trade-offs, and the next three experiments. Do not override deterministic deployment decisions. Return concise Markdown.
+
+{
+  "cycleId": "current-baseline",
+  "overall": {
+    "attempts": 15,
+    "successes": 13,
+    "failures": 2,
+    "successRate": 0.8667,
+    "averageScore": 0.8667,
+    "averageLatencyMs": 142328.55,
+    "averageCostUsd": null,
+    "averageTotalTokens": 99742.47,
+    "safetyEvaluated": 14,
+    "safetyViolationRate": 0.0
+  },
+  "taskQuality": {
+    "attempts": 14,
+    "successes": 13,
+    "failures": 1,
+    "successRate": 0.9286,
+    "averageScore": 0.9286,
+    "averageLatencyMs": 142328.55,
+    "averageCostUsd": null,
+    "averageTotalTokens": 106866.93,
+    "safetyEvaluated": 14,
+    "safetyViolationRate": 0.0,
+    "rawAttempts": 15,
+    "excludedInfrastructureFailures": 1,
+    "infrastructureFailureRate": 0.0667
+  },
+  "infrastructure": {
+    "failures": 1,
+    "failureRate": 0.0667,
+    "failureCodes": {
+      "AGENT_SETUP_NETWORK_FAILED": 1
+    },
+    "affectedTasks": [
+      "paginate"
+    ]
+  },
+  "weakCapabilities": [
+    {
+      "capability": "input-validation",
+      "attempts": 3,
+      "successes": 2,
+      "failures": 1,
+      "successRate": 0.6667,
+      "averageScore": 0.6667,
+      "averageLatencyMs": 149779.03,
+      "averageCostUsd": null,
+      "averageTotalTokens": 128967.67,
+      "safetyEvaluated": 3,
+      "safetyViolationRate": 0.0,
+      "rawAttempts": 3,
+      "excludedInfrastructureFailures": 0,
+      "infrastructureFailureRate": 0.0,
+      "expectedSuccessRate": 0.8333,
+      "gapToExpected": 0.1666,
+      "areas": {
+        "input-validation": {
+          "attempts": 3,
+          "successes": 2,
+          "failures": 1,
+          "successRate": 0.6667,
+          "averageScore": 0.6667,
+          "averageLatencyMs": 149779.03,
+          "averageCostUsd": null,
+          "averageTotalTokens": 128967.67,
+          "safetyEvaluated": 3,
+          "safetyViolationRate": 0.0,
+          "rawAttempts": 3,
+          "excludedInfrastructureFailures": 0,
+          "infrastructureFailureRate": 0.0
+        }
+      }
+    }
+  ],
+  "failureRegions": [
+    {
+      "taskArea": "input-validation",
+      "attempts": 3,
+      "successes": 2,
+      "failures": 1,
+      "successRate": 0.6667,
+      "averageScore": 0.6667,
+      "averageLatencyMs": 149779.03,
+      "averageCostUsd": null,
+      "averageTotalTokens": 128967.67,
+      "safetyEvaluated": 3,
+      "safetyViolationRate": 0.0,
+      "rawAttempts": 3,
+      "excludedInfrastructureFailures": 0,
+      "infrastructureFailureRate": 0.0,
+      "failureShare": 1.0,
+      "failureCodes": {
+        "TOOL_EXECUTION_FAILURE": 1
+      },
+      "capabilities": {
+        "input-validation": 1,
+        "string-transformation": 1
+      }
+    }
+  ],
+  "hypotheses": [
+    {
+      "id": "H1-middle-input-validation",
+      "layer": "middle",
+      "phase": 2,
+      "capabilityTags": [
+        "input-validation"
+      ],
+      "taskAreas": [
+        "input-validation"
+      ],
+      "evidence": {
+        "attempts": 3,
+        "currentSuccessRate": 0.6667,
+        "gapToExpected": 0.1666,
+        "failureCodes": {
+          "TOOL_EXECUTION_FAILURE": 1
+        }
+      },
+      "proposedChange": "Change the input/context pipeline or selectively switch reasoning mode.",
+      "expectedUplift": 0.0833,
+      "targetSuccessRate": 0.75,
+      "validationMethod": "Tagged A/B run measuring target uplift plus latency, token, cost and unrelated-tag regressions.",
+      "primaryMetric": "successRate",
+      "guardrails": [
+        "averageLatencyMs",
+        "averageTotalTokens",
+        "averageCostUsd",
+        "safetyViolationRate",
+        "unrelatedCapabilityRegression"
+      ]
+    }
+  ],
+  "experiments": [],
+  "decisions": []
+}

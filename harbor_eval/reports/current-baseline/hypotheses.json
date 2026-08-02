@@ -1,0 +1,33 @@
+[
+  {
+    "id": "H1-middle-input-validation",
+    "layer": "middle",
+    "phase": 2,
+    "capabilityTags": [
+      "input-validation"
+    ],
+    "taskAreas": [
+      "input-validation"
+    ],
+    "evidence": {
+      "attempts": 3,
+      "currentSuccessRate": 0.6667,
+      "gapToExpected": 0.1666,
+      "failureCodes": {
+        "TOOL_EXECUTION_FAILURE": 1
+      }
+    },
+    "proposedChange": "Change the input/context pipeline or selectively switch reasoning mode.",
+    "expectedUplift": 0.0833,
+    "targetSuccessRate": 0.75,
+    "validationMethod": "Tagged A/B run measuring target uplift plus latency, token, cost and unrelated-tag regressions.",
+    "primaryMetric": "successRate",
+    "guardrails": [
+      "averageLatencyMs",
+      "averageTotalTokens",
+      "averageCostUsd",
+      "safetyViolationRate",
+      "unrelatedCapabilityRegression"
+    ]
+  }
+]

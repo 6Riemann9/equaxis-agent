@@ -1,0 +1,18 @@
+version = "1.0"
+
+[metadata]
+author_name = "Equaxis"
+author_email = "eval@equaxis.local"
+difficulty = "easy"
+category = "coding"
+tags = ["javascript", "debugging", "nested-data"]
+
+[agent]
+timeout_sec = 300.0
+
+[verifier]
+timeout_sec = 60.0
+
+[environment]
+build_timeout_sec = 600.0
+network_mode = "public"

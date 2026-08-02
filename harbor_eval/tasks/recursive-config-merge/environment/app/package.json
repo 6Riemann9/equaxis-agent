@@ -1,0 +1,6 @@
+{
+  "name": "recursive-config-merge-task",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}

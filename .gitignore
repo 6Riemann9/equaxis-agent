@@ -6,4 +6,5 @@ vendor/**/__pycache__/
 vendor/**/.pytest_cache/
 *.py[cod]
 *.log
+harbor_eval/jobs/
 .env

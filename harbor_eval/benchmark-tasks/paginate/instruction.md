@@ -1,0 +1,1 @@
+Fix the implementation in `/app/solution.mjs`. Return the requested 1-based page without mutating the input. Invalid pages return an empty array. Preserve the exported `solve` API and run the available tests.
