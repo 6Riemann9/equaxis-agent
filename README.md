@@ -1,165 +1,274 @@
 # 衡枢 Equaxis Agent
 
-**Equaxis — Reliable Agent Runtime powered by Pi**
+Reliable agent runtime powered by the official Pi Coding Agent.
 
-衡枢 Equaxis 是一个“官方 Pi Coding Agent + Reliability Harness + Agent Memory”的生产级 Agent 工程样例。
+![Node](https://img.shields.io/badge/node-%3E%3D22.19-339933)
+![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB)
+![Pi](https://img.shields.io/badge/pi-0.80.10-111111)
+![Evaluation](https://img.shields.io/badge/evaluation-Harbor-blue)
 
-它不是用 Python 重新实现 Pi，也不是套壳聊天页面。模型调用、TUI、工具、会话、分支、模型切换和扩展系统都由官方 `@earendil-works/pi-coding-agent` 提供；本项目只通过 Pi 的 Extension API 增加确定性的安全治理。
+Equaxis 是一个面向真实工程环境的 Agent runtime 样例：它不重写 Pi，不包一层聊天壳，而是在官方 `@earendil-works/pi-coding-agent` 之上，通过 Extension API 加上可靠性治理、工具安全、Memory、Trace 和离线评测闭环。
+
+它适合你研究或搭建这类系统：
+
+- 如何给 coding agent 加确定性 guardrails，而不是让模型自己判断风险。
+- 如何把工具调用、权限、结果校验、trace、memory 和评测放进同一条工程链路。
+- 如何用 Harbor benchmark 把“任务失败”映射到“能力缺陷”，再做分阶段实验。
 
 ```text
-┌───────────────────────────────────────────────────────────┐
-│                 Official Pi Coding Agent                  │
-│  TUI · Models · Sessions · Branching · read/bash/edit/... │
-└────────────────────────────┬──────────────────────────────┘
-                             │ Pi Extension events
-┌────────────────────────────▼──────────────────────────────┐
-│                  Reliability Harness                     │
-│ Policy · Guardrail · HITL · State · Trace · Evaluation   │
-└────────────────────────────┬──────────────────────────────┘
-                             │ governed memory operations
-┌────────────────────────────▼──────────────────────────────┐
-│                    Agent Memory Core                      │
-│ Short-term · ChromaDB · Knowledge Graph · Dream Core     │
-└───────────────────────────────────────────────────────────┘
+Official Pi Coding Agent
+  TUI · Models · Sessions · Branching · Tools · Extensions
+        |
+        v
+Equaxis Reliability Harness
+  Policy · Guardrails · HITL · Tool Repair · Trace · Evaluation
+        |
+        v
+Agent Memory + Evaluation Core
+  Short-term Memory · Knowledge Graph · Harbor Adapter · Capability Matrix
 ```
 
-## 快速开始
+## Quick Start
 
-要求 Node.js 22.19+、Python 3.10+。
+Requirements:
+
+- Node.js `>= 22.19`
+- Python `>= 3.10`
+- A Pi-compatible OpenAI API key
 
 ```powershell
-git clone <repository-url> equaxis-agent
+git clone https://github.com/6Riemann9/equaxis-agent.git
 cd equaxis-agent
 npm install
 npm run setup:memory
 npm run verify:full
+```
+
+Set your API key through either an environment variable:
+
+```powershell
+$env:OPENAI_API_KEY = "<your-api-key>"
+```
+
+or a local ignored credentials file:
+
+```powershell
+New-Item -ItemType Directory -Force .equaxis/credentials
+Set-Content .equaxis/credentials/openai.key "<your-api-key>"
+```
+
+Start the full Equaxis runtime:
+
+```powershell
 npm run equaxis -- --approve
 ```
 
-`npm run equaxis -- --approve` 启动完整 Pi TUI，并显式加载 Equaxis Harness。第一次运行时，`--approve` 表示信任当前项目的 `.pi` 本地资源。后续可以按你的 Pi 配置直接启动：
+The first `--approve` tells Pi to trust this repository's local `.pi` extensions. After that, you can usually start with:
 
 ```powershell
-# 完整 Pi + 强制治理（默认）
+npm run equaxis
+```
+
+## What You Get
+
+| Area | What Equaxis adds |
+|---|---|
+| Reliability Harness | Deterministic tool risk classification, protected paths, high-risk approval, per-turn limits |
+| Tool Validation | Semantic argument checks after SDK schema validation, repair feedback, retry exhaustion |
+| Tool Catalog | `tool_search` exposes a small ranked candidate set instead of dumping every tool into context |
+| Tool Scheduler | `tool_schedule` builds DAG waves for safe parallel reads and serialized side effects |
+| Result Middleware | Distinguishes transport success from business-usable output with evidence and predicate checks |
+| MCP Adapter | Normalizes text, structured content, resources and protocol errors into one envelope |
+| Context Budget | Keeps tool/skill manifests compact and trims activated context under a hard token budget |
+| Memory | Short-term history, long-term semantic memory, knowledge graph, and governed memory writes |
+| Web Crawl | Public HTTP/HTTPS crawler with localhost/private-network blocking and redirect checks |
+| Trace | JSONL audit trail for decisions, approvals, tool timings and results |
+| Evaluation | Harbor adapter, capability matrix, layered hypotheses, A/B analysis and deployment decisions |
+
+## Commands
+
+```powershell
+# Full Pi + Equaxis extensions
 npm run equaxis
 
-# 审计但不拦截，用于观察策略命中情况
-npm run equaxis -- --equaxis-mode audit
-
-# 关闭全部扩展，确认原始 Pi 仍可独立使用
+# Raw Pi, no extensions
 npm run pi:raw
 
-# JSON 模式；高风险动作因没有审批 UI 而默认拒绝
-npm run pi:json -- "检查项目并修复问题"
+# JSON mode. High-risk actions are rejected when no approval UI exists.
+npm run pi:json -- "inspect this repo and summarize risks"
+
+# Static TypeScript check and Node tests
+npm run verify
+
+# Memory bridge tests
+npm run test:memory
+
+# Full local verification
+npm run verify:full
 ```
 
-Pi 的 API Key、模型配置、快捷键和会话操作保持原样。可在 TUI 中使用 Pi 自带的模型切换、会话恢复和分支功能。
+Inside the Pi TUI:
 
-## 默认模型
-
-Equaxis 默认注册并选择：
-
-- Provider：`openai-inprior`
-- Model：`gpt-5.5`
-- API：OpenAI Responses
-- Base URL：`https://api.inprior.com`
-- Context：1,000,000 tokens
-- Max output：100,000 tokens
-- Thinking：`xhigh`
-- Response storage：关闭，Responses 请求固定使用 `store: false`
-- Auto compaction：约 900,000 tokens 时触发，为回复预留 100,000 tokens
-
-凭据读取顺序是环境变量 `OPENAI_API_KEY`，然后是本地文件 `.equaxis/credentials/openai.key`。该目录已被 Git 忽略。Provider 定义位于 [`.pi/extensions/provider.ts`](.pi/extensions/provider.ts)，默认模型设置位于 [`.pi/settings.json`](.pi/settings.json)。
-
-## Memory 能做什么
-
-- 在 `before_agent_start` 自动召回身份、持久记忆、近期历史和相关向量记忆。
-- 自动记录每轮用户输入和最终助手回复，形成跨 Pi 会话的短期历史。
-- 提供 `memory_search`、`memory_remember`、`memory_add_fact`、`memory_query_entity` 四个模型工具。
-- 用 ChromaDB 保存长期语义记忆，用 SQLite 保存时序知识图谱。
-- Python Core 通过常驻 JSONL Bridge 连接 Node/Pi，避免每次调用都重启 Python。
-- Memory 写操作仍经过 Harness；疑似明文凭据不会写入自动历史或注入模型上下文。
-
-Memory 数据默认位于 `.equaxis/memory/`，已加入 `.gitignore`。配置文件是 [`.pi/memory.json`](.pi/memory.json)，详细设计见 [Memory 集成说明](docs/MEMORY.md)。
-
-## Web Crawl 能做什么
-
-- 提供 `web_crawl` 模型工具，用于抓取公开 HTTP/HTTPS 网页并提取标题、正文和链接。
-- 支持限制 `maxPages`、`maxDepth`、`sameOrigin`、`maxCharsPerPage` 和 `timeoutMs`。
-- 默认阻止 localhost、内网、保留地址、`.local` 等目标，也拒绝带用户名/密码的 URL。
-- 默认不跟随跨源链接；重定向会在每一跳前重新做地址安全检查。
-
-人工调试可在 TUI 中使用 `/web-fetch <url>` 抓取单页。
-
-## Harness 能做什么
-
-- 在 `tool_call` 执行前进行确定性风险分类，而不是让 LLM 自己决定是否安全。
-- 在 SDK Schema 之后执行统一参数语义校验，拦截空路径、空命令、非法 URL 等无效调用，并记录可修复的结构化错误信息。
-- 对同一 `tool + errorCode + field` 最多允许两次修复反馈，第三次返回 `REPAIR_EXHAUSTED`，避免模型无限循环。
-- 对递归删除、破坏性 Git、提权、磁盘操作等高风险动作弹出单次人工审批。
-- 在 JSON/print 等无审批 UI 模式下拒绝高风险动作。
-- 阻止写入 `.env`、`.git/`、密钥文件等受保护路径。
-- 检测工具参数中疑似明文凭据，避免凭据进入工具和审计日志。
-- 解析已有 symlink 的真实路径边界；未注册扩展工具默认按 medium risk 处理，不再隐式信任。
-- 提供 `tool_search` 工具目录：按 namespace 和关键词返回 Top-K 候选，支持工具渐进式披露，避免大工具集盲选。
-- 提供 `tool_schedule` DAG 计划器：并行安全只读任务，隔离写入和高风险任务，并检测依赖环与未知依赖。
-- 提供可复用异步执行内核：有界 Worker Pool、AbortSignal 取消传播、稳定幂等键、逆序补偿和 wave 后动态重排。
-- 提供 Result Middleware：区分 transport success 与业务可用结果，校验必需字段、证据、空结果和自定义语义 predicate。
-- 提供 MCP Result Adapter：将 text、structuredContent、resource 和 protocol error 归一到 Canonical Envelope，同时保留脱敏前需审计的 raw payload 边界。
-- 提供可运行的 stdio MCP Server 核心：实现 initialize、tools/list、tools/call、JSON-RPC 错误隔离和测评工具示例。
-- 提供 Context Budget Manager：工具/Skill 目录常驻、候选 Top-K 激活、硬 Token 预算裁剪和 Skill manifest 压缩。
-- 限制单轮工具调用总数和高风险调用数，抑制失控循环。
-- 将决策、审批、耗时和结果写入 `.pi/runtime/traces.jsonl`。
-- 用 Pi 自定义 Session Entry 保存状态，在 fork/tree 切换后按当前分支恢复。
-- 在每轮结束生成 failure rate、guardrail rate 等轻量 Eval 快照。
-
-## TUI 命令
-
-| 命令 | 用途 |
+| Command | Purpose |
 |---|---|
-| `/equaxis` | 查看当前模式、阶段和累计计数 |
-| `/equaxis-mode enforce\|audit\|off` | 动态切换治理模式 |
-| `/equaxis-policy` | 查看当前保护路径和调用上限 |
-| `/equaxis-trace` | 查看审计日志文件位置 |
-| `/equaxis-eval` | 查看当前 Eval 指标 |
-| `/memory` | 查看短期、长期和知识图谱状态 |
-| `/memory-search <query>` | 手动搜索长期记忆 |
-| `/memory-restart` | 重启 Memory Python Bridge |
-| `/memory-path` | 查看 Memory 数据目录 |
-| `/web-fetch <url>` | 抓取一个公开网页并显示提取文本 |
+| `/equaxis` | Show current Equaxis mode, phase and counters |
+| `/equaxis-mode enforce\|audit\|off` | Switch runtime governance mode |
+| `/equaxis-policy` | Show protected paths and call limits |
+| `/equaxis-trace` | Show trace file location |
+| `/equaxis-eval` | Show lightweight evaluation counters |
+| `/memory` | Show memory status |
+| `/memory-search <query>` | Search long-term memory |
+| `/memory-restart` | Restart the Python memory bridge |
+| `/web-fetch <url>` | Fetch and extract one public web page |
 
-修改 `.pi/extensions/*` 或 Bridge 代码后，可在 TUI 中先执行 `/reload` 重新加载扩展，再执行 `/memory-restart` 重启常驻 Python Memory Bridge。
+## Runtime Modes
 
-状态栏会显示类似：
+| Mode | Behavior |
+|---|---|
+| `enforce` | Default. Blocks unsafe calls and asks for human approval when Pi has an approval UI. |
+| `audit` | Logs policy hits while allowing most calls. Raw secret exposure is still blocked. |
+| `off` | Disables Equaxis governance and tracing. Pi continues to run normally. |
+
+Switch modes from the TUI:
 
 ```text
-Equaxis enforce · planning · high · blocked 1
+/equaxis-mode audit
+/equaxis-mode enforce
+/equaxis-mode off
 ```
 
-## 三种模式
+## Architecture
 
-- `enforce`：执行策略拦截，并对可审批的高风险操作请求 HITL。
-- `audit`：记录普通命中项但允许继续，适合上线前调策略；疑似明文凭据仍会硬阻断。注意这不是完整安全执行模式。
-- `off`：Extension 不注入约束、不分类也不记录工具事件，Pi 本体照常工作。
+Equaxis keeps Pi as the real agent. The project adds deterministic layers around it.
 
-默认配置位于 [`.pi/reliability.json`](.pi/reliability.json)，策略实现位于 [`src/policy.mjs`](src/policy.mjs)，Pi 适配层位于 [`.pi/extensions/reliability-harness.ts`](.pi/extensions/reliability-harness.ts)。
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ Official Pi Coding Agent                                    │
+│ Models · TUI · Sessions · Branches · Native Tools           │
+└─────────────────────────────┬───────────────────────────────┘
+                              │ Extension events
+┌─────────────────────────────▼───────────────────────────────┐
+│ Reliability Harness                                          │
+│ Policy · Guardrails · HITL · Validation · Repair · Trace     │
+└───────────────┬───────────────────────────────┬─────────────┘
+                │ governed memory tools          │ eval traces
+┌───────────────▼────────────────┐  ┌───────────▼─────────────┐
+│ Agent Memory Core              │  │ Evaluation Core          │
+│ History · Vector · Graph       │  │ Diagnose · Hypothesize   │
+└────────────────────────────────┘  │ Experiment · Decide      │
+                                    └─────────────────────────┘
+```
 
-## 验证
+Important files:
+
+| Path | Purpose |
+|---|---|
+| `.pi/extensions/reliability-harness.ts` | Pi extension boundary for tool governance and trace |
+| `.pi/extensions/memory.ts` | Pi extension boundary for memory recall and memory tools |
+| `.pi/extensions/provider.ts` | Default model/provider registration |
+| `src/policy.mjs` | Deterministic risk classification and protected-path logic |
+| `src/tool-repair.mjs` | Structured argument repair feedback and retry exhaustion |
+| `src/tool-scheduler.mjs` | DAG scheduling for parallel-safe tool execution |
+| `src/result-middleware.mjs` | Result usability checks |
+| `src/evaluation/` | Reusable evaluation core |
+| `harbor_eval/` | Harbor adapter, benchmark tasks and CLI |
+
+## Evaluation Loop
+
+Equaxis includes a deterministic improvement cycle for agent quality work.
+
+```text
+Harbor results / runtime traces
+  -> EvaluationRecord
+  -> task table + capability matrix
+  -> surface / middle / deep hypotheses
+  -> baseline vs candidate experiments
+  -> deploy / scoped / reject / insufficient_data
+  -> Markdown + JSON reports
+```
+
+Run a baseline diagnosis from existing Harbor jobs:
 
 ```powershell
-npm run verify
-npm run test:memory
-npm run verify:full
-npm run equaxis -- --version
-npm run equaxis -- --help
+npm run eval:cycle -- diagnose `
+  --job harbor_eval/jobs/equaxis `
+  --taxonomy harbor_eval/capabilities.json `
+  --output-dir harbor_eval/reports/cycle-001 `
+  --cycle-id cycle-001
 ```
 
-当前锁定 Pi `0.80.10`，避免演示时因上游版本漂移导致事件 API 行为变化。
+Run a manifest-based baseline/candidate cycle:
 
-## 项目文档
+```powershell
+npm run eval:cycle -- cycle `
+  --manifest harbor_eval/cycle-002.json `
+  --output-dir harbor_eval/reports/cycle-002
+```
 
-- [架构设计](docs/ARCHITECTURE.md)
-- [策略说明](docs/POLICY.md)
-- [Memory 集成说明](docs/MEMORY.md)
-- [模型 Provider 配置](docs/PROVIDER.md)
+Add `--llm` only when you explicitly want a model-written analysis. Deployment decisions remain deterministic; the LLM can explain evidence and suggest next experiments, but it cannot override the rule-based decision.
 
-官方项目入口：https://pi.dev/
+See [Evaluation Architecture](docs/EVALUATION_ARCHITECTURE.md) for the full design.
+
+## Default Provider
+
+Equaxis registers a Pi provider named `openai-inprior` and defaults to:
+
+| Setting | Value |
+|---|---|
+| Model | `gpt-5.5` |
+| API | OpenAI Responses-compatible endpoint |
+| Base URL | `https://api.inprior.com` |
+| Thinking | `xhigh` |
+| Context | `1,000,000` tokens |
+| Max output | `100,000` tokens |
+| Storage | `store: false` |
+
+Provider configuration lives in [`.pi/extensions/provider.ts`](.pi/extensions/provider.ts) and [`.pi/settings.json`](.pi/settings.json). Credentials are read from `OPENAI_API_KEY` first, then `.equaxis/credentials/openai.key`.
+
+## Safety Model
+
+Equaxis is designed around explicit boundaries:
+
+- The model may propose tool calls; deterministic policy decides whether they are allowed.
+- Transport success does not mean the result is usable; result middleware checks structure and evidence.
+- Memory writes are governed; suspected raw secrets are not written into memory.
+- Local credentials, traces, `.git`, `.equaxis/`, `.pi/runtime/` and Harbor job outputs are not uploaded as benchmark task input.
+- High-risk calls are blocked in non-interactive modes where no approval UI exists.
+
+This is still a research and engineering sample, not a sandbox escape proof security boundary. Treat it as a practical reliability harness around Pi, not as an OS-level isolation layer.
+
+## Repository Layout
+
+```text
+.pi/extensions/       Pi extension entry points
+bridge/               Python memory bridge integration
+docs/                 Architecture, policy, provider, memory and evaluation docs
+harbor_eval/          Harbor agent adapter, benchmark tasks, reports and eval CLI
+scripts/              CLI wrappers and local utilities
+src/                  Runtime governance, scheduling, result and evaluation modules
+tests/                Node.js runtime tests
+vendor/agent-memory/  Vendored Python memory core
+```
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Policy](docs/POLICY.md)
+- [Memory](docs/MEMORY.md)
+- [Provider](docs/PROVIDER.md)
+- [Evaluation Architecture](docs/EVALUATION_ARCHITECTURE.md)
+- [Harbor Evaluation](harbor_eval/README.md)
+
+## Development
+
+```powershell
+npm run check
+npm test
+npm run test:memory
+npm run test:eval
+npm run verify:full
+```
+
+The project currently pins Pi `0.80.10` to avoid upstream event API drift during reliability and evaluation work.
+
+Official Pi entry point: https://pi.dev/
