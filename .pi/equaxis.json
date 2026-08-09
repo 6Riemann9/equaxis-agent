@@ -7,6 +7,14 @@
       "diagnostics": true,
       "trace": true,
       "status": true
+    },
+    "gates": {
+      "enabled": true,
+      "minBenchmarkPassRate": 0.8,
+      "maxReliabilityRegression": 0.02,
+      "maxUnitCostUsd": 0.05,
+      "maxLatencyMs": 30000,
+      "minImprovementDelta": 0.01
     }
   },
   "extensions": {

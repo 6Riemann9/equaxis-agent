@@ -13,6 +13,7 @@ import { VersionStore } from "../src/version-store.mjs";
 import { buildRuntimeDashboard, formatRuntimeDashboard } from "../src/runtime-dashboard.mjs";
 import { formatConfigMigrationReport, runConfigMigration } from "../src/config-migration.mjs";
 import { applyMemoryGovernance, formatMemoryGovernanceReport } from "../src/memory-governance.mjs";
+import { evaluateRuntimeGates, formatRuntimeGateReport } from "../src/runtime-gates.mjs";
 import { checkExtensionContracts, extensionPaths, formatExtensionContractReport } from "../src/extension-compat.mjs";
 import { formatEquaxisBanner, shouldShowBanner } from "../src/cli-banner.mjs";
 
@@ -78,6 +79,12 @@ function handleLocalCommand(args) {
       confidenceZ: unifiedConfig.evaluation?.confidenceZ
     }));
     if (command === "export-harbor") return printJson(exportEvalLoopForHarbor({ projectRoot, ...parseJsonArg(payload) }));
+  }
+  if (group === "gates" && command === "check") {
+    const report = evaluateRuntimeGates(parseJsonArg(payload), unifiedConfig.runtime?.gates);
+    if (args.includes("--json")) return printJson(report);
+    console.log(formatRuntimeGateReport(report));
+    process.exit(report.ok ? 0 : 1);
   }
   if (group === "memory" && (command === "audit" || command === "apply")) {
     const governance = unifiedConfig.memory?.governance ?? {};

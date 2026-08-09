@@ -24,7 +24,8 @@
       "additionalProperties": false,
       "required": [
         "profile",
-        "services"
+        "services",
+        "gates"
       ],
       "properties": {
         "profile": {
@@ -56,6 +57,48 @@
             },
             "status": {
               "type": "boolean"
+            }
+          }
+        },
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "minBenchmarkPassRate",
+            "maxReliabilityRegression",
+            "maxUnitCostUsd",
+            "maxLatencyMs",
+            "minImprovementDelta"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minBenchmarkPassRate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "maxReliabilityRegression": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "maxUnitCostUsd": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000
+            },
+            "maxLatencyMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 600000
+            },
+            "minImprovementDelta": {
+              "type": "number",
+              "minimum": -10,
+              "maximum": 10
             }
           }
         }

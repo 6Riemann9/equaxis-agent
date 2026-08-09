@@ -16,7 +16,9 @@ function workspace(t) {
 test("builds a runtime dashboard from eval events versions and runtime files", (t) => {
   const root = workspace(t);
   const config = {
+    runtime: { gates: { enabled: true, minBenchmarkPassRate: 0.8, maxReliabilityRegression: 0.02, maxUnitCostUsd: 0.05, maxLatencyMs: 30000, minImprovementDelta: 0.01 } },
     evaluation: { enabled: true, rootDir: ".pi/runtime/eval-loop" },
+    memory: { governance: { enabled: true, auditPath: ".pi/runtime/memory-governance/memories.jsonl", retentionDays: { hot: 3650, warm: 365, cold: 180 } } },
     protocols: { lsp: { command: "" }, dap: { command: "" } }
   };
   const loop = new EvalLoop({ persist: true, projectRoot: root });
@@ -25,13 +27,23 @@ test("builds a runtime dashboard from eval events versions and runtime files", (
   fs.mkdirSync(path.join(root, ".pi", "runtime", "protocols"), { recursive: true });
   fs.writeFileSync(path.join(root, ".pi", "runtime", "protocols", "traces.jsonl"), "{}\n", "utf8");
 
-  const dashboard = buildRuntimeDashboard({ projectRoot: root, config, env: {}, spawnSyncImpl: () => ({ status: 0, stdout: "", stderr: "" }) });
+  const dashboard = buildRuntimeDashboard({
+    projectRoot: root,
+    config,
+    env: {},
+    spawnSyncImpl: () => ({ status: 0, stdout: "", stderr: "" }),
+    gateMetrics: { benchmarkPassRate: 0.9, reliabilityRegression: 0, unitCostUsd: 0.01, latencyMs: 1000, improvementDelta: 0.02 }
+  });
   assert.equal(dashboard.evaluation.attempts, 1);
   assert.equal(dashboard.evaluation.successRate, 1);
   assert.equal(dashboard.versions.total, 1);
   assert.deepEqual(dashboard.versions.byKind, { prompt: 1 });
+  assert.equal(dashboard.gates.ok, true);
+  assert.equal(dashboard.memoryGovernance.enabled, true);
   assert.equal(dashboard.runtimeFiles.protocolTrace.exists, true);
   assert.equal(dashboard.protocols.lsp.status, "skipped");
   assert.match(formatRuntimeDashboard(dashboard), /Equaxis runtime dashboard/);
+  assert.match(formatRuntimeDashboard(dashboard), /Gates: READY/);
   assert.match(formatRuntimeDashboard(dashboard), /Evaluation: attempts=1/);
+  assert.match(formatRuntimeDashboard(dashboard), /Memory governance: enabled/);
 });

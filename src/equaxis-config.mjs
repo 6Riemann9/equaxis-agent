@@ -11,7 +11,15 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
   schemaVersion: EQUAXIS_CONFIG_SCHEMA_VERSION,
   runtime: {
     profile: "standard",
-    services: { config: true, diagnostics: true, trace: true, status: true }
+    services: { config: true, diagnostics: true, trace: true, status: true },
+    gates: {
+      enabled: true,
+      minBenchmarkPassRate: 0.8,
+      maxReliabilityRegression: 0.02,
+      maxUnitCostUsd: 0.05,
+      maxLatencyMs: 30000,
+      minImprovementDelta: 0.01
+    }
   },
   extensions: {
     manifest: ".pi/extensions/contracts.json",
@@ -230,7 +238,12 @@ function mergeConfig(base, custom) {
   return {
     ...structuredClone(base),
     ...custom,
-    runtime: { ...base.runtime, ...(custom.runtime ?? {}), services: { ...base.runtime.services, ...(custom.runtime?.services ?? {}) } },
+    runtime: {
+      ...base.runtime,
+      ...(custom.runtime ?? {}),
+      services: { ...base.runtime.services, ...(custom.runtime?.services ?? {}) },
+      gates: { ...base.runtime.gates, ...(custom.runtime?.gates ?? {}) }
+    },
     extensions: { ...base.extensions, ...(custom.extensions ?? {}) },
     reliability: {
       ...base.reliability,
@@ -280,6 +293,13 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   for (const field of ["config", "diagnostics", "trace", "status"]) {
     assertBoolean(config.runtime.services[field], configPath, `runtime.services.${field}`);
   }
+  assertRecord(config.runtime.gates, configPath, "runtime.gates");
+  assertBoolean(config.runtime.gates.enabled, configPath, "runtime.gates.enabled");
+  assertNumber(config.runtime.gates.minBenchmarkPassRate, configPath, "runtime.gates.minBenchmarkPassRate", 0, 1);
+  assertNumber(config.runtime.gates.maxReliabilityRegression, configPath, "runtime.gates.maxReliabilityRegression", 0, 10);
+  assertNumber(config.runtime.gates.maxUnitCostUsd, configPath, "runtime.gates.maxUnitCostUsd", 0, 1000000);
+  assertInteger(config.runtime.gates.maxLatencyMs, configPath, "runtime.gates.maxLatencyMs", 1, 600000);
+  assertNumber(config.runtime.gates.minImprovementDelta, configPath, "runtime.gates.minImprovementDelta", -10, 10);
 
   assertRecord(config.extensions, configPath, "extensions");
   assertLocalPath(config.extensions.manifest, configPath, "extensions.manifest");

@@ -63,6 +63,25 @@ test("merges and validates memory governance configuration", (t) => {
   assert.throws(() => loadEquaxisConfig(root), /memory\.governance\.retentionDays\.cold/);
 });
 
+test("merges and validates runtime gate configuration", (t) => {
+  const root = workspace(t);
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    runtime: { gates: { minBenchmarkPassRate: 0.9, maxLatencyMs: 45000 } }
+  }));
+  const config = loadEquaxisConfig(root);
+  assert.equal(config.runtime.gates.enabled, true);
+  assert.equal(config.runtime.gates.minBenchmarkPassRate, 0.9);
+  assert.equal(config.runtime.gates.maxLatencyMs, 45000);
+  assert.equal(config.runtime.gates.maxUnitCostUsd, 0.05);
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    runtime: { gates: { minBenchmarkPassRate: 2 } }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /runtime\.gates\.minBenchmarkPassRate/);
+});
+
 test("validates optional advisor configuration", (t) => {
   const root = workspace(t);
   fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({

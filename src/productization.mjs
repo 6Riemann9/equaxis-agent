@@ -59,7 +59,9 @@ function writeReleaseManifest(projectRoot, pkg, options = {}) {
       evaluation: "test:eval"
     },
     runtime: {
+      gates: config?.runtime?.gates ?? null,
       evaluation: config?.evaluation ?? null,
+      memory: config?.memory ? { governance: config.memory.governance } : null,
       subagents: config?.subagents ? {
         budgets: config.subagents.budgets,
         persistence: config.subagents.persistence,
