@@ -44,10 +44,19 @@ test("dashboard slash command renders runtime status without model mediation", a
   const messages = [];
   const ctx = makeContext(tempRoot);
   ctx.ui.notify = (message, level) => messages.push({ message, level });
-  await extension.commands.get("dashboard").handler("", ctx);
+  await extension.commands.get("dashboard").handler(undefined, ctx);
   assert.equal(messages[0].level, "info");
   assert.match(messages[0].message, /Equaxis runtime dashboard/);
   assert.match(messages[0].message, /Health:/);
+
+  const serviceWrappedMessages = [];
+  const serviceWrappedCtx = makeContext(tempRoot);
+  delete serviceWrappedCtx.cwd;
+  serviceWrappedCtx.services = { config: { get: () => ({ protocols: { lsp: { command: "" }, dap: { command: "" } } }) } };
+  serviceWrappedCtx.ui.notify = (message, level) => serviceWrappedMessages.push({ message, level });
+  await extension.commands.get("dashboard").handler("--json", serviceWrappedCtx);
+  assert.equal(serviceWrappedMessages[0].level, "info");
+  assert.equal(JSON.parse(serviceWrappedMessages[0].message).health.checks >= 0, true);
 });
 
 test("loads as a real Pi extension and blocks high-risk calls without approval UI", async (t) => {

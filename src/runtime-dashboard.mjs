@@ -34,20 +34,24 @@ export function buildRuntimeDashboard(options = {}) {
   const snapshot = evalLoop.snapshot();
   const versions = new VersionStore({ projectRoot }).list();
   const protocols = config ? discoverProtocolAdapters(config, { cwd: projectRoot, env: options.env, spawnSyncImpl: options.spawnSyncImpl }) : null;
+  const checks = Array.isArray(doctor.checks) ? doctor.checks : [];
+  const matrix = Array.isArray(snapshot.matrix) ? snapshot.matrix : [];
+  const candidates = Array.isArray(snapshot.candidates) ? snapshot.candidates : [];
+  const versionItems = Array.isArray(versions) ? versions : [];
   return {
     generatedAt: new Date().toISOString(),
     projectRoot,
-    health: { ok: doctor.ok, failing: doctor.checks.filter((item) => !item.status).map((item) => item.name), checks: doctor.checks.length },
+    health: { ok: Boolean(doctor.ok), failing: checks.filter((item) => !item.status).map((item) => item.name), checks: checks.length },
     protocols,
     evaluation: {
       enabled: evaluationConfig?.enabled !== false,
       attempts: snapshot.attempts,
       successRate: snapshot.successRate,
-      matrixRows: snapshot.matrix.length,
-      candidates: snapshot.candidates.length,
+      matrixRows: matrix.length,
+      candidates: candidates.length,
       eventLog: fileInfo(projectRoot, path.join(evaluationConfig?.rootDir ?? ".pi/runtime/eval-loop", "events.jsonl"))
     },
-    versions: { total: versions.length, byKind: groupCounts(versions, "kind"), byStatus: groupCounts(versions, "status") },
+    versions: { total: versionItems.length, byKind: groupCounts(versionItems, "kind"), byStatus: groupCounts(versionItems, "status") },
     runtimeFiles: {
       protocolTrace: fileInfo(projectRoot, ".pi/runtime/protocols/traces.jsonl"),
       subagentEvents: fileInfo(projectRoot, ".pi/runtime/subagents/events.jsonl")
@@ -57,7 +61,8 @@ export function buildRuntimeDashboard(options = {}) {
 
 export function formatRuntimeDashboard(dashboard) {
   const lines = ["Equaxis runtime dashboard", `Runtime: ${dashboard.projectRoot}`, `Health: ${dashboard.health.ok ? "READY" : "NOT READY"}`];
-  if (dashboard.health.failing.length) lines.push(`Failing: ${dashboard.health.failing.join(", ")}`);
+  const failing = Array.isArray(dashboard.health.failing) ? dashboard.health.failing : [];
+  if (failing.length) lines.push(`Failing: ${failing.join(", ")}`);
   if (dashboard.protocols) lines.push(`Protocols: lsp=${dashboard.protocols.lsp.status}; dap=${dashboard.protocols.dap.status}`);
   lines.push(`Evaluation: attempts=${dashboard.evaluation.attempts}; successRate=${dashboard.evaluation.successRate ?? "n/a"}; candidates=${dashboard.evaluation.candidates}`);
   lines.push(`Versions: total=${dashboard.versions.total}`);
