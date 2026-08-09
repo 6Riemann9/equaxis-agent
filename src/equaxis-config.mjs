@@ -51,7 +51,12 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     recallLimit: 5,
     maxContextChars: 8000,
     maxStoredMessageChars: 24000,
-    requestTimeoutMs: 60000
+    requestTimeoutMs: 60000,
+    governance: {
+      enabled: true,
+      auditPath: ".pi/runtime/memory-governance/memories.jsonl",
+      retentionDays: { hot: 3650, warm: 365, cold: 180 }
+    }
   },
   skills: {
     enabled: true,
@@ -240,7 +245,15 @@ function mergeConfig(base, custom) {
       lsp: { ...base.protocols.lsp, ...(custom.protocols?.lsp ?? {}) },
       dap: { ...base.protocols.dap, ...(custom.protocols?.dap ?? {}) }
     },
-    memory: { ...base.memory, ...(custom.memory ?? {}) },
+    memory: {
+      ...base.memory,
+      ...(custom.memory ?? {}),
+      governance: {
+        ...base.memory.governance,
+        ...(custom.memory?.governance ?? {}),
+        retentionDays: { ...base.memory.governance.retentionDays, ...(custom.memory?.governance?.retentionDays ?? {}) }
+      }
+    },
     skills: { ...base.skills, ...(custom.skills ?? {}) },
     evaluation: { ...base.evaluation, ...(custom.evaluation ?? {}) },
     subagents: {
@@ -352,6 +365,13 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertInteger(config.memory.maxContextChars, configPath, "memory.maxContextChars", 256, 1_000_000);
   assertInteger(config.memory.maxStoredMessageChars, configPath, "memory.maxStoredMessageChars", 256, 1_000_000);
   assertInteger(config.memory.requestTimeoutMs, configPath, "memory.requestTimeoutMs", 100, 600_000);
+  assertRecord(config.memory.governance, configPath, "memory.governance");
+  assertBoolean(config.memory.governance.enabled, configPath, "memory.governance.enabled");
+  assertLocalPath(config.memory.governance.auditPath, configPath, "memory.governance.auditPath");
+  assertRecord(config.memory.governance.retentionDays, configPath, "memory.governance.retentionDays");
+  for (const tier of ["hot", "warm", "cold"]) {
+    assertInteger(config.memory.governance.retentionDays[tier], configPath, `memory.governance.retentionDays.${tier}`, 1, 36500);
+  }
 
   assertRecord(config.skills, configPath, "skills");
   assertBoolean(config.skills.enabled, configPath, "skills.enabled");

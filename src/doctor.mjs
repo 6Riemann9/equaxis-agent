@@ -138,6 +138,8 @@ export function runDoctor(options = {}) {
   try {
     memoryConfig = loadMemoryConfig(projectRoot);
     checks.push(check("Memory config", true, memoryConfig.enabled ? "enabled" : "disabled"));
+    const governance = memoryConfig.governance;
+    checks.push(check("Memory governance", Boolean(governance?.enabled), governance?.enabled ? `auditPath=${governance.auditPath}; cold=${governance.retentionDays.cold}d` : "disabled"));
   } catch (error) {
     checks.push(check("Memory config", false, String(error.message ?? error)));
   }

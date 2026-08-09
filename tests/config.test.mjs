@@ -39,6 +39,30 @@ test("rejects invalid memory bounds and external roots", (t) => {
   assert.throws(() => loadMemoryConfig(root), /must stay inside the workspace/);
 });
 
+test("merges and validates memory governance configuration", (t) => {
+  const root = workspace(t);
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    memory: { governance: { auditPath: ".pi/memory-audit.jsonl", retentionDays: { cold: 30 } } }
+  }));
+  const config = loadEquaxisConfig(root);
+  assert.equal(config.memory.governance.enabled, true);
+  assert.equal(config.memory.governance.auditPath, ".pi/memory-audit.jsonl");
+  assert.deepEqual(config.memory.governance.retentionDays, { hot: 3650, warm: 365, cold: 30 });
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    memory: { governance: { auditPath: "../outside" } }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /memory\.governance\.auditPath.*workspace/);
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    memory: { governance: { retentionDays: { cold: 0 } } }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /memory\.governance\.retentionDays\.cold/);
+});
+
 test("validates optional advisor configuration", (t) => {
   const root = workspace(t);
   fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({

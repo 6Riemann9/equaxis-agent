@@ -57,7 +57,16 @@
     "recallLimit": 5,
     "maxContextChars": 8000,
     "maxStoredMessageChars": 24000,
-    "requestTimeoutMs": 60000
+    "requestTimeoutMs": 60000,
+    "governance": {
+      "enabled": true,
+      "auditPath": ".pi/runtime/memory-governance/memories.jsonl",
+      "retentionDays": {
+        "hot": 3650,
+        "warm": 365,
+        "cold": 180
+      }
+    }
   },
   "skills": {
     "enabled": true,

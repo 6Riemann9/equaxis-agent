@@ -117,6 +117,10 @@ test("doctor checks protocol tool declarations", (t) => {
     "advisor/lsp/dap tools declared; lsp=unconfigured,locked; dap=unconfigured,locked"
   );
   assert.equal(
+    report.checks.find((item) => item.name === "Memory governance").detail,
+    "auditPath=.pi/runtime/memory-governance/memories.jsonl; cold=180d"
+  );
+  assert.equal(
     report.checks.find((item) => item.name === "Runtime isolation").detail,
     "scrubbed-env; outputRoot=.pi/runtime/isolated"
   );

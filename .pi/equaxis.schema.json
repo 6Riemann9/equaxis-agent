@@ -236,7 +236,8 @@
         "recallLimit",
         "maxContextChars",
         "maxStoredMessageChars",
-        "requestTimeoutMs"
+        "requestTimeoutMs",
+        "governance"
       ],
       "properties": {
         "enabled": {
@@ -280,6 +281,50 @@
           "type": "integer",
           "minimum": 100,
           "maximum": 600000
+        },
+        "governance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "auditPath",
+            "retentionDays"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "auditPath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "retentionDays": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "hot",
+                "warm",
+                "cold"
+              ],
+              "properties": {
+                "hot": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 36500
+                },
+                "warm": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 36500
+                },
+                "cold": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 36500
+                }
+              }
+            }
+          }
         }
       }
     },

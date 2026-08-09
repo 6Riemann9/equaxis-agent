@@ -12,6 +12,7 @@ import { formatProtocolRegressionReport, runProtocolRegression } from "../src/pr
 import { VersionStore } from "../src/version-store.mjs";
 import { buildRuntimeDashboard, formatRuntimeDashboard } from "../src/runtime-dashboard.mjs";
 import { formatConfigMigrationReport, runConfigMigration } from "../src/config-migration.mjs";
+import { applyMemoryGovernance, formatMemoryGovernanceReport } from "../src/memory-governance.mjs";
 import { checkExtensionContracts, extensionPaths, formatExtensionContractReport } from "../src/extension-compat.mjs";
 import { formatEquaxisBanner, shouldShowBanner } from "../src/cli-banner.mjs";
 
@@ -77,6 +78,19 @@ function handleLocalCommand(args) {
       confidenceZ: unifiedConfig.evaluation?.confidenceZ
     }));
     if (command === "export-harbor") return printJson(exportEvalLoopForHarbor({ projectRoot, ...parseJsonArg(payload) }));
+  }
+  if (group === "memory" && (command === "audit" || command === "apply")) {
+    const governance = unifiedConfig.memory?.governance ?? {};
+    const inputArg = args.slice(2).find((arg) => !arg.startsWith("--"));
+    const inputPath = path.resolve(projectRoot, inputArg ?? governance.auditPath ?? ".pi/runtime/memory-governance/memories.jsonl");
+    const report = applyMemoryGovernance({
+      inputPath,
+      apply: command === "apply",
+      retentionDays: governance.retentionDays
+    });
+    if (args.includes("--json")) return printJson(report);
+    console.log(formatMemoryGovernanceReport(report));
+    return true;
   }
   if (group === "config" && command === "migrate") {
     const report = runConfigMigration({ projectRoot, dryRun: !args.includes("--write") });
