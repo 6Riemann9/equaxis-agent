@@ -37,7 +37,7 @@ function workspace(t) {
       toolRouting: { enabled: true, maxCandidates: 5 }
     },
     memory: { enabled: false, pythonCommand: "python", rootDir: ".equaxis/memory", autoRecall: true, defaultWing: "equaxis", defaultRoom: "general", recallLimit: 5, maxContextChars: 8000, maxStoredMessageChars: 24000, requestTimeoutMs: 60000 },
-    evaluation: { enabled: true, rootDir: ".pi/runtime/eval-loop", minSamples: 5, minSuccessRateDelta: 0.02, maxLatencyRegression: 0.1 }
+    evaluation: { enabled: true, rootDir: ".pi/runtime/eval-loop", minSamples: 5, minSuccessRateDelta: 0.02, maxLatencyRegression: 0.1, maxCostRegression: 0.15, confidenceZ: 1.96 }
   }));
   fs.writeFileSync(path.join(root, ".pi", "extensions", "contracts.json"), JSON.stringify({
     schemaVersion: 1,

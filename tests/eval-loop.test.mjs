@@ -73,11 +73,18 @@ test("persists and restores eval events and candidate provenance", (t) => {
 });
 
 test("deterministically decides A/B outcomes", () => {
-  const baseline = { attempts: 10, successRate: 0.7, averageLatencyMs: 100 };
-  assert.equal(compareCandidate({ baseline, candidate: { attempts: 10, successRate: 0.82, averageLatencyMs: 105 } }).decision, "deploy");
-  assert.equal(compareCandidate({ baseline, candidate: { attempts: 10, successRate: 0.6, averageLatencyMs: 90 } }).decision, "reject");
-  assert.equal(compareCandidate({ baseline, candidate: { attempts: 3, successRate: 1, averageLatencyMs: 90 } }).decision, "insufficient_data");
-  assert.equal(compareCandidate({ baseline, candidate: { attempts: 10, successRate: 0.71, averageLatencyMs: 100 } }).decision, "scoped");
+  const baseline = { attempts: 200, successes: 140, successRate: 0.7, averageLatencyMs: 100, averageCostUsd: 0.01 };
+  const deploy = compareCandidate({ baseline, candidate: { attempts: 200, successes: 180, successRate: 0.9, averageLatencyMs: 105, averageCostUsd: 0.011 } });
+  assert.equal(deploy.decision, "deploy");
+  assert.equal(deploy.confidence.z, 1.96);
+  assert.equal(compareCandidate({ baseline, candidate: { attempts: 200, successes: 120, successRate: 0.6, averageLatencyMs: 90, averageCostUsd: 0.01 } }).decision, "reject");
+  assert.equal(compareCandidate({ baseline, candidate: { attempts: 3, successes: 3, successRate: 1, averageLatencyMs: 90, averageCostUsd: 0.01 } }).decision, "insufficient_data");
+  const scoped = compareCandidate({ baseline, candidate: { attempts: 20, successes: 16, successRate: 0.8, averageLatencyMs: 100, averageCostUsd: 0.01 }, minSamples: 10 });
+  assert.equal(scoped.decision, "scoped");
+  assert.match(scoped.reason, /confidence intervals/);
+  const costReject = compareCandidate({ baseline, candidate: { attempts: 200, successes: 142, successRate: 0.71, averageLatencyMs: 100, averageCostUsd: 0.02 } });
+  assert.equal(costReject.decision, "reject");
+  assert.match(costReject.reason, /cost regressed/);
 });
 
 test("normalizes candidate changes with version provenance", () => {

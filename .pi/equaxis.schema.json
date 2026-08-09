@@ -326,7 +326,9 @@
         "rootDir",
         "minSamples",
         "minSuccessRateDelta",
-        "maxLatencyRegression"
+        "maxLatencyRegression",
+        "maxCostRegression",
+        "confidenceZ"
       ],
       "properties": {
         "enabled": {
@@ -347,6 +349,16 @@
           "maximum": 1
         },
         "maxLatencyRegression": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "maxCostRegression": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "confidenceZ": {
           "type": "number",
           "minimum": 0,
           "maximum": 10

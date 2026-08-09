@@ -67,7 +67,9 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     rootDir: ".pi/runtime/eval-loop",
     minSamples: 5,
     minSuccessRateDelta: 0.02,
-    maxLatencyRegression: 0.1
+    maxLatencyRegression: 0.1,
+    maxCostRegression: 0.15,
+    confidenceZ: 1.96
   },
   subagents: {
     enabled: true,
@@ -300,6 +302,8 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertInteger(config.evaluation.minSamples, configPath, "evaluation.minSamples", 1, 100000);
   assertNumber(config.evaluation.minSuccessRateDelta, configPath, "evaluation.minSuccessRateDelta", 0, 1);
   assertNumber(config.evaluation.maxLatencyRegression, configPath, "evaluation.maxLatencyRegression", 0, 10);
+  assertNumber(config.evaluation.maxCostRegression, configPath, "evaluation.maxCostRegression", 0, 10);
+  assertNumber(config.evaluation.confidenceZ, configPath, "evaluation.confidenceZ", 0, 10);
 
   assertRecord(config.subagents, configPath, "subagents");
   assertBoolean(config.subagents.enabled, configPath, "subagents.enabled");

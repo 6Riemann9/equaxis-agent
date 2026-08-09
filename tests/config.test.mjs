@@ -86,7 +86,7 @@ test("merges and validates evaluation configuration", (t) => {
   const root = workspace(t);
   fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
     schemaVersion: 1,
-    evaluation: { rootDir: ".pi/eval-state", minSamples: 12, minSuccessRateDelta: 0.05, maxLatencyRegression: 0.2 }
+    evaluation: { rootDir: ".pi/eval-state", minSamples: 12, minSuccessRateDelta: 0.05, maxLatencyRegression: 0.2, maxCostRegression: 0.25, confidenceZ: 2.58 }
   }));
   const config = loadEquaxisConfig(root);
   assert.equal(config.evaluation.enabled, true);
@@ -94,6 +94,8 @@ test("merges and validates evaluation configuration", (t) => {
   assert.equal(config.evaluation.minSamples, 12);
   assert.equal(config.evaluation.minSuccessRateDelta, 0.05);
   assert.equal(config.evaluation.maxLatencyRegression, 0.2);
+  assert.equal(config.evaluation.maxCostRegression, 0.25);
+  assert.equal(config.evaluation.confidenceZ, 2.58);
 
   fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
     schemaVersion: 1,
@@ -106,6 +108,18 @@ test("merges and validates evaluation configuration", (t) => {
     evaluation: { minSuccessRateDelta: 2 }
   }));
   assert.throws(() => loadEquaxisConfig(root), /evaluation\.minSuccessRateDelta/);
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    evaluation: { maxCostRegression: -1 }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /evaluation\.maxCostRegression/);
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    evaluation: { confidenceZ: 11 }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /evaluation\.confidenceZ/);
 });
 
 test("merges and validates subagent runtime configuration", (t) => {

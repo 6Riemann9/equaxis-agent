@@ -10,6 +10,7 @@ import { compareCandidate, EvalLoop } from "../src/eval-loop.mjs";
 import { exportEvalLoopForHarbor } from "../src/eval-harbor-bridge.mjs";
 import { formatProtocolRegressionReport, runProtocolRegression } from "../src/protocol-regression.mjs";
 import { VersionStore } from "../src/version-store.mjs";
+import { buildRuntimeDashboard, formatRuntimeDashboard } from "../src/runtime-dashboard.mjs";
 import { checkExtensionContracts, extensionPaths, formatExtensionContractReport } from "../src/extension-compat.mjs";
 import { formatEquaxisBanner, shouldShowBanner } from "../src/cli-banner.mjs";
 
@@ -70,9 +71,17 @@ function handleLocalCommand(args) {
       ...parseJsonArg(payload),
       minSamples: unifiedConfig.evaluation?.minSamples,
       minSuccessRateDelta: unifiedConfig.evaluation?.minSuccessRateDelta,
-      maxLatencyRegression: unifiedConfig.evaluation?.maxLatencyRegression
+      maxLatencyRegression: unifiedConfig.evaluation?.maxLatencyRegression,
+      maxCostRegression: unifiedConfig.evaluation?.maxCostRegression,
+      confidenceZ: unifiedConfig.evaluation?.confidenceZ
     }));
     if (command === "export-harbor") return printJson(exportEvalLoopForHarbor({ projectRoot, ...parseJsonArg(payload) }));
+  }
+  if (group === "runtime" && (command === "dashboard" || command === "status")) {
+    const dashboard = buildRuntimeDashboard({ projectRoot, cwd: process.cwd(), env: process.env, config: unifiedConfig });
+    if (args.includes("--json")) return printJson(dashboard);
+    console.log(formatRuntimeDashboard(dashboard));
+    return true;
   }
   if (group === "versions") {
     const store = new VersionStore({ projectRoot });

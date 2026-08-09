@@ -12,6 +12,17 @@ function mean(values, digits = 4) {
   return rounded(usable.reduce((sum, value) => sum + value, 0) / usable.length, digits);
 }
 
+function wilsonInterval(successes, attempts, z = 1.96) {
+  const n = Number(attempts ?? 0);
+  if (!n) return { low: null, high: null };
+  const p = Number(successes ?? 0) / n;
+  const z2 = z ** 2;
+  const denominator = 1 + z2 / n;
+  const center = (p + z2 / (2 * n)) / denominator;
+  const margin = (z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)) / denominator;
+  return { low: rounded(Math.max(0, center - margin), 4), high: rounded(Math.min(1, center + margin), 4) };
+}
+
 function array(value) {
   if (Array.isArray(value)) return value.map(String).filter(Boolean);
   if (typeof value === "string" && value.trim()) return [value.trim()];
@@ -103,7 +114,7 @@ export function createCandidateChange(input = {}) {
   };
 }
 
-export function compareCandidate({ baseline, candidate, minSamples = 5, minSuccessRateDelta = 0.02, maxLatencyRegression = 0.1 } = {}) {
+export function compareCandidate({ baseline, candidate, minSamples = 5, minSuccessRateDelta = 0.02, maxLatencyRegression = 0.1, maxCostRegression = 0.15, confidenceZ = 1.96 } = {}) {
   const baseAttempts = Number(baseline?.attempts ?? 0);
   const candidateAttempts = Number(candidate?.attempts ?? 0);
   if (baseAttempts < minSamples || candidateAttempts < minSamples) return { decision: "insufficient_data", reason: `minimum samples not met: baseline=${baseAttempts}, candidate=${candidateAttempts}` };
@@ -113,10 +124,19 @@ export function compareCandidate({ baseline, candidate, minSamples = 5, minSucce
   const baseLatency = Number(baseline.averageLatencyMs ?? 0);
   const candidateLatency = Number(candidate.averageLatencyMs ?? 0);
   const latencyDeltaRatio = baseLatency > 0 && candidateLatency > 0 ? rounded((candidateLatency - baseLatency) / baseLatency, 4) : 0;
-  if (successDelta < 0) return { decision: "reject", reason: `candidate success rate regressed by ${Math.abs(successDelta)}`, successDelta, latencyDeltaRatio };
-  if (latencyDeltaRatio > maxLatencyRegression && successDelta < minSuccessRateDelta) return { decision: "reject", reason: `candidate latency regressed by ${latencyDeltaRatio}`, successDelta, latencyDeltaRatio };
-  if (successDelta >= minSuccessRateDelta) return { decision: "deploy", reason: `candidate success rate improved by ${successDelta}`, successDelta, latencyDeltaRatio };
-  return { decision: "scoped", reason: "candidate is comparable but improvement is below deploy threshold", successDelta, latencyDeltaRatio };
+  const baseCost = Number(baseline.averageCostUsd ?? 0);
+  const candidateCost = Number(candidate.averageCostUsd ?? 0);
+  const costDeltaRatio = baseCost > 0 && candidateCost > 0 ? rounded((candidateCost - baseCost) / baseCost, 4) : 0;
+  const baselineConfidence = wilsonInterval(baseline.successes ?? Math.round(baseRate * baseAttempts), baseAttempts, confidenceZ);
+  const candidateConfidence = wilsonInterval(candidate.successes ?? Math.round(candidateRate * candidateAttempts), candidateAttempts, confidenceZ);
+  const confidence = { z: confidenceZ, baseline: baselineConfidence, candidate: candidateConfidence };
+  const confidenceOverlap = baselineConfidence.high !== null && candidateConfidence.low !== null ? candidateConfidence.low <= baselineConfidence.high : true;
+  if (successDelta < 0) return { decision: "reject", reason: `candidate success rate regressed by ${Math.abs(successDelta)}`, successDelta, latencyDeltaRatio, costDeltaRatio, confidence };
+  if (latencyDeltaRatio > maxLatencyRegression && successDelta < minSuccessRateDelta) return { decision: "reject", reason: `candidate latency regressed by ${latencyDeltaRatio}`, successDelta, latencyDeltaRatio, costDeltaRatio, confidence };
+  if (costDeltaRatio > maxCostRegression && successDelta < minSuccessRateDelta) return { decision: "reject", reason: `candidate cost regressed by ${costDeltaRatio}`, successDelta, latencyDeltaRatio, costDeltaRatio, confidence };
+  if (successDelta >= minSuccessRateDelta && !confidenceOverlap) return { decision: "deploy", reason: `candidate success rate improved by ${successDelta}`, successDelta, latencyDeltaRatio, costDeltaRatio, confidence };
+  if (successDelta >= minSuccessRateDelta) return { decision: "scoped", reason: "candidate improved but confidence intervals still overlap", successDelta, latencyDeltaRatio, costDeltaRatio, confidence };
+  return { decision: "scoped", reason: "candidate is comparable but improvement is below deploy threshold", successDelta, latencyDeltaRatio, costDeltaRatio, confidence };
 }
 
 export class EvalLoop {
