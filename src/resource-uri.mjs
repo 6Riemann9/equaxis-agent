@@ -13,7 +13,9 @@ export const RESOURCE_URI_SCHEMES = Object.freeze([
   "pr",
   "issue",
   "trace",
-  "eval"
+  "eval",
+  "history",
+  "artifact"
 ]);
 
 const SUPPORTED = new Set(RESOURCE_URI_SCHEMES);

@@ -14,6 +14,7 @@ import { buildRuntimeDashboard, formatRuntimeDashboard } from "../src/runtime-da
 import { formatConfigMigrationReport, runConfigMigration } from "../src/config-migration.mjs";
 import { applyMemoryGovernance, formatMemoryGovernanceReport } from "../src/memory-governance.mjs";
 import { evaluateRuntimeGates, formatRuntimeGateReport } from "../src/runtime-gates.mjs";
+import { createDefaultResourceProviderRegistry } from "../src/resource-provider-registry.mjs";
 import { checkExtensionContracts, extensionPaths, formatExtensionContractReport } from "../src/extension-compat.mjs";
 import { formatEquaxisBanner, shouldShowBanner } from "../src/cli-banner.mjs";
 
@@ -59,7 +60,7 @@ function localEvalLoop() {
   });
 }
 
-function handleLocalCommand(args) {
+async function handleLocalCommand(args) {
   const [group, command, payload] = args;
   if (group === "protocols" && command === "verify") {
     const report = runProtocolRegression({ projectRoot, config: unifiedConfig });
@@ -105,6 +106,13 @@ function handleLocalCommand(args) {
     console.log(formatConfigMigrationReport(report));
     return true;
   }
+  if (group === "resources" && command === "read") {
+    const registry = createDefaultResourceProviderRegistry({ projectRoot });
+    const result = await registry.read(payload);
+    if (args.includes("--json")) return printJson(result);
+    console.log(result.text);
+    return true;
+  }
   if (group === "runtime" && (command === "dashboard" || command === "status")) {
     const dashboard = buildRuntimeDashboard({ projectRoot, cwd: process.cwd(), env: process.env, config: unifiedConfig });
     if (args.includes("--json")) return printJson(dashboard);
@@ -120,7 +128,7 @@ function handleLocalCommand(args) {
 }
 
 try {
-  const handled = handleLocalCommand(cliArgs);
+  const handled = await handleLocalCommand(cliArgs);
   if (handled !== false) process.exit(0);
 } catch (error) {
   console.error(error.message);
