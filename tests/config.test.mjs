@@ -82,14 +82,20 @@ test("requires explicit roots for automatic external approval", (t) => {
   assert.throws(() => loadEquaxisConfig(root), /must not be empty/);
 });
 
-test("merges and validates subagent isolation configuration", (t) => {
+test("merges and validates subagent runtime configuration", (t) => {
   const root = workspace(t);
   fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
     schemaVersion: 1,
-    subagents: { maxConcurrent: 4, isolation: { outputRoot: ".pi/agents" } }
+    subagents: {
+      maxConcurrent: 4,
+      budgets: { timeoutMs: 30000, maxRetries: 2 },
+      isolation: { outputRoot: ".pi/agents" }
+    }
   }));
   const config = loadEquaxisConfig(root);
   assert.equal(config.subagents.maxConcurrent, 4);
+  assert.equal(config.subagents.budgets.timeoutMs, 30000);
+  assert.equal(config.subagents.budgets.maxRetries, 2);
   assert.equal(config.subagents.isolation.enabled, true);
   assert.equal(config.subagents.isolation.scrubEnv, true);
   assert.equal(config.subagents.isolation.outputRoot, ".pi/agents");
@@ -99,6 +105,18 @@ test("merges and validates subagent isolation configuration", (t) => {
     subagents: { isolation: { outputRoot: "../outside" } }
   }));
   assert.throws(() => loadEquaxisConfig(root), /subagents\.isolation\.outputRoot.*workspace/);
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    subagents: { budgets: { timeoutMs: 50 } }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /subagents\.budgets\.timeoutMs/);
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    subagents: { budgets: { maxRetries: 9 } }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /subagents\.budgets\.maxRetries/);
 });
 
 test("merges and validates protocol adapter configuration", (t) => {

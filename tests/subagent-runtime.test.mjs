@@ -67,6 +67,70 @@ test("fails subagents whose result violates schema", async () => {
   assert.match(result.error, /missing required result field: score/);
 });
 
+test("retries failed subagents within their retry budget", async () => {
+  const events = [];
+  let attempts = 0;
+  const runtime = new SubagentRuntime({
+    trace: (event, data) => events.push([event, data]),
+    executor: async (task) => {
+      attempts += 1;
+      assert.equal(task.attempt, attempts);
+      assert.equal(task.traceId, "trace-retry");
+      if (attempts === 1) throw new Error("transient failure");
+      return { ok: true, attempts };
+    }
+  });
+  runtime.spawn({ id: "retry", prompt: "retry", maxRetries: 1, traceId: "trace-retry" });
+  const result = await runtime.wait("retry");
+  assert.equal(result.status, "completed");
+  assert.equal(result.attempts, 2);
+  assert.deepEqual(result.result, { ok: true, attempts: 2 });
+  assert.ok(events.some(([event, data]) => event === "subagent_retry" && data.traceId === "trace-retry"));
+});
+
+test("fails subagents when retry budget is exhausted", async () => {
+  const runtime = new SubagentRuntime({
+    defaultMaxRetries: 1,
+    executor: async () => {
+      throw new Error("always fails");
+    }
+  });
+  runtime.spawn({ id: "exhausted", prompt: "fail" });
+  const result = await runtime.wait("exhausted");
+  assert.equal(result.status, "failed");
+  assert.equal(result.attempts, 2);
+  assert.match(result.error, /always fails/);
+});
+
+test("times out subagents that exceed their timeout budget", async () => {
+  const runtime = new SubagentRuntime({
+    executor: async (_task, { signal }) => {
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted by timeout")), { once: true });
+      });
+    }
+  });
+  runtime.spawn({ id: "timeout", prompt: "slow", timeoutMs: 100 });
+  const result = await runtime.wait("timeout");
+  assert.equal(result.status, "failed");
+  assert.equal(result.attempts, 1);
+  assert.match(result.error, /timed out after 100ms/);
+});
+
+test("fails blocked dependents when a dependency fails", async () => {
+  const runtime = new SubagentRuntime({ executor: async () => ({ ok: true }) });
+  runtime.spawn({
+    id: "base",
+    prompt: "base",
+    schema: { type: "object", required: ["score"], properties: { score: { type: "number" } } }
+  });
+  runtime.spawn({ id: "dep", prompt: "dep", dependencies: ["base"] });
+  assert.equal((await runtime.wait("base")).status, "failed");
+  const dep = await runtime.wait("dep");
+  assert.equal(dep.status, "failed");
+  assert.match(dep.error, /dependency did not complete: base/);
+});
+
 test("holds a dependent subagent blocked until its dependency completes", async () => {
   const events = [];
   const runtime = new SubagentRuntime({

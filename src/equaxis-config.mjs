@@ -67,6 +67,10 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     maxConcurrent: 2,
     piEntry: "",
     jsonArgs: [],
+    budgets: {
+      timeoutMs: null,
+      maxRetries: 0
+    },
     isolation: {
       enabled: true,
       scrubEnv: true,
@@ -158,6 +162,7 @@ function mergeConfig(base, custom) {
     subagents: {
       ...base.subagents,
       ...(custom.subagents ?? {}),
+      budgets: { ...base.subagents.budgets, ...(custom.subagents?.budgets ?? {}) },
       isolation: { ...base.subagents.isolation, ...(custom.subagents?.isolation ?? {}) }
     }
   };
@@ -279,6 +284,11 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   if (!Array.isArray(config.subagents.jsonArgs) || config.subagents.jsonArgs.some((item) => typeof item !== "string")) {
     throw configError(configPath, "subagents.jsonArgs", "must be an array of strings");
   }
+  assertRecord(config.subagents.budgets, configPath, "subagents.budgets");
+  if (config.subagents.budgets.timeoutMs !== null) {
+    assertInteger(config.subagents.budgets.timeoutMs, configPath, "subagents.budgets.timeoutMs", 100, 600_000);
+  }
+  assertInteger(config.subagents.budgets.maxRetries, configPath, "subagents.budgets.maxRetries", 0, 5);
   assertRecord(config.subagents.isolation, configPath, "subagents.isolation");
   assertBoolean(config.subagents.isolation.enabled, configPath, "subagents.isolation.enabled");
   assertBoolean(config.subagents.isolation.scrubEnv, configPath, "subagents.isolation.scrubEnv");

@@ -325,6 +325,7 @@
         "maxConcurrent",
         "piEntry",
         "jsonArgs",
+        "budgets",
         "isolation"
       ],
       "properties": {
@@ -343,6 +344,29 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "budgets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "timeoutMs",
+            "maxRetries"
+          ],
+          "properties": {
+            "timeoutMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 100,
+              "maximum": 600000
+            },
+            "maxRetries": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5
+            }
           }
         },
         "isolation": {

@@ -11,7 +11,16 @@ interface SubagentEngineConfig {
   maxConcurrent: number;
   piEntry: string;
   jsonArgs: string[];
+  budgets?: {
+    timeoutMs?: number | null;
+    maxRetries?: number;
+  };
 }
+
+const resultSchemaParameter = Type.Optional(Type.Object({}, {
+  additionalProperties: true,
+  description: "Optional JSON result schema checked after the subagent finishes"
+}));
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const defaultPiEntry = path.join(
@@ -32,11 +41,13 @@ export default function subagentEngine(pi: ExtensionAPI): void {
   const config = services.config.subagents as SubagentEngineConfig | undefined;
   const runtime = new SubagentRuntime({
     maxConcurrent: config?.maxConcurrent ?? 2,
+    defaultTimeoutMs: config?.budgets?.timeoutMs ?? null,
+    defaultMaxRetries: config?.budgets?.maxRetries ?? 0,
     executor: createPiJsonExecutor({
       piEntry: config?.piEntry || defaultPiEntry,
       args: config?.jsonArgs ?? []
     }),
-    trace: (event: string, data: { id?: string }) => services.trace.record({} as ExtensionContext, `subagent_${event}`, { id: data.id })
+    trace: (event: string, data: Record<string, unknown>) => services.trace.record({} as ExtensionContext, `subagent_${event}`, data)
   });
 
   function trace(ctx: ExtensionContext, event: string, data: Record<string, unknown> = {}): void {
@@ -57,7 +68,11 @@ export default function subagentEngine(pi: ExtensionAPI): void {
       nodes: Type.Array(Type.Object({
         name: Type.String({ description: "Stable node name referenced by dependsOn" }),
         prompt: Type.String({ minLength: 1, description: "Self-contained subagent prompt" }),
-        dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Node names this node waits for" }))
+        dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Node names this node waits for" })),
+        timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 600000, description: "Per-node timeout in milliseconds" })),
+        maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 5, description: "Per-node retry count after failures" })),
+        traceId: Type.Optional(Type.String({ description: "Optional trace correlation id" })),
+        schema: resultSchemaParameter
       }))
     }),
     async execute(_toolCallId, params) {
@@ -79,14 +94,22 @@ export default function subagentEngine(pi: ExtensionAPI): void {
       id: Type.Optional(Type.String({ description: "Optional explicit subagent id" })),
       label: Type.Optional(Type.String({ description: "Human-readable label" })),
       prompt: Type.String({ minLength: 1, description: "Self-contained prompt" }),
-      dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Subagent ids this waits for" }))
+      dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Subagent ids this waits for" })),
+      timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 600000, description: "Per-subagent timeout in milliseconds" })),
+      maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 5, description: "Retry count after failures" })),
+      traceId: Type.Optional(Type.String({ description: "Optional trace correlation id" })),
+      schema: resultSchemaParameter
     }),
     async execute(_toolCallId, params) {
       const spawned = runtime.spawn({
         id: params.id,
         label: params.label,
         prompt: params.prompt,
-        dependencies: params.dependsOn
+        dependencies: params.dependsOn,
+        timeoutMs: params.timeoutMs,
+        maxRetries: params.maxRetries,
+        traceId: params.traceId,
+        schema: params.schema
       })!;
       trace({} as ExtensionContext, "subagent_spawn", { id: spawned.id, label: spawned.label });
       return {

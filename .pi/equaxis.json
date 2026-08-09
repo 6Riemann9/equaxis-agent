@@ -71,6 +71,10 @@
     "maxConcurrent": 2,
     "piEntry": "",
     "jsonArgs": [],
+    "budgets": {
+      "timeoutMs": null,
+      "maxRetries": 0
+    },
     "isolation": {
       "enabled": true,
       "scrubEnv": true,

@@ -120,4 +120,8 @@ test("doctor checks protocol tool declarations", (t) => {
     report.checks.find((item) => item.name === "Runtime isolation").detail,
     "scrubbed-env; outputRoot=.pi/runtime/isolated"
   );
+  assert.equal(
+    report.checks.find((item) => item.name === "Subagent budgets").detail,
+    "timeout=none; maxRetries=0"
+  );
 });

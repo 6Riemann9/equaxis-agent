@@ -142,6 +142,9 @@ export function runDoctor(options = {}) {
   checkProtocolTools(checks, startup.extensionContracts, startup.unifiedConfig);
   const isolation = describeRuntimeIsolation(startup.unifiedConfig);
   checks.push(check("Runtime isolation", isolation.enabled, isolation.detail));
+  const budgets = startup.unifiedConfig?.subagents?.budgets;
+  const timeoutDetail = budgets?.timeoutMs ? `${budgets.timeoutMs}ms` : "none";
+  checks.push(check("Subagent budgets", true, `timeout=${timeoutDetail}; maxRetries=${budgets?.maxRetries ?? 0}`));
 
   if (memoryConfig?.enabled) {
     const vendorRoot = path.join(projectRoot, "vendor", "agent-memory");

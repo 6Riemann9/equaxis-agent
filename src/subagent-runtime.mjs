@@ -14,6 +14,18 @@ function abortError(reason = "cancelled") {
   return error;
 }
 
+function timeoutError(timeoutMs) {
+  const error = new Error(`subagent timed out after ${timeoutMs}ms`);
+  error.code = "TIMEOUT";
+  return error;
+}
+
+function boundedInteger(value, fallback, { min, max, field }) {
+  if (value === undefined || value === null) return fallback;
+  if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${field} must be an integer between ${min} and ${max}`);
+  return value;
+}
+
 function validateResultSchema(value, schema) {
   if (!schema) return null;
   if (schema.type === "object" && (!value || typeof value !== "object" || Array.isArray(value))) {
@@ -36,6 +48,8 @@ export class SubagentRuntime {
     this.executor = options.executor ?? (async () => ({ ok: true }));
     this.maxConcurrent = options.maxConcurrent ?? 2;
     this.trace = options.trace ?? (() => {});
+    this.defaultTimeoutMs = options.defaultTimeoutMs ?? null;
+    this.defaultMaxRetries = options.defaultMaxRetries ?? 0;
     this.tasks = new Map();
     this.inboxes = new Map();
     this.active = 0;
@@ -79,12 +93,19 @@ export class SubagentRuntime {
       if (!this.tasks.has(dep)) throw new Error(`unknown dependency: ${dep}`);
     }
     const controller = new AbortController();
+    const timeoutMs = boundedInteger(request.timeoutMs, this.defaultTimeoutMs, { min: 100, max: 600_000, field: "subagent timeoutMs" });
+    const maxRetries = boundedInteger(request.maxRetries, this.defaultMaxRetries, { min: 0, max: 5, field: "subagent maxRetries" });
+    const traceId = request.traceId ?? createId("trace");
     const task = {
       id,
       label: request.label ?? id,
       prompt: request.prompt,
       schema: request.schema ?? null,
       dependencies,
+      traceId,
+      timeoutMs,
+      maxRetries,
+      attempts: 0,
       status: dependencies.length ? "blocked" : "queued",
       createdAt: now(),
       startedAt: null,
@@ -99,10 +120,10 @@ export class SubagentRuntime {
     });
     this.tasks.set(id, task);
     if (task.status === "blocked") {
-      this.trace("subagent_blocked", { id, dependencies: task.dependencies });
+      this.trace("subagent_blocked", { id, traceId, dependencies: task.dependencies });
     } else {
       this.queue.push(task);
-      this.trace("subagent_queued", { id, label: task.label });
+      this.trace("subagent_queued", { id, traceId, label: task.label });
     }
     this.#releaseBlocked();
     this.#drain();
@@ -117,6 +138,10 @@ export class SubagentRuntime {
       label: task.label,
       status: task.status,
       dependencies: [...(task.dependencies ?? [])],
+      traceId: task.traceId,
+      timeoutMs: task.timeoutMs,
+      maxRetries: task.maxRetries,
+      attempts: task.attempts,
       createdAt: task.createdAt,
       startedAt: task.startedAt,
       completedAt: task.completedAt,
@@ -137,12 +162,14 @@ export class SubagentRuntime {
     if (!task) return null;
     if (["completed", "failed", "cancelled"].includes(task.status)) return this.status(id);
     if (task.status === "queued" || task.status === "blocked") {
+      const wasQueued = task.status === "queued";
       this.queue = this.queue.filter((item) => item.id !== id);
       task.status = "cancelled";
       task.completedAt = now();
       task.error = String(reason);
       task.resolve();
-      this.trace("subagent_cancelled", { id, reason: String(reason), queued: task.status === "queued" });
+      this.trace("subagent_cancelled", { id, traceId: task.traceId, reason: String(reason), queued: wasQueued });
+      this.#drain();
       return this.status(id);
     }
     task.controller.abort(reason);
@@ -178,6 +205,9 @@ export class SubagentRuntime {
         label: node.name,
         prompt: node.prompt,
         schema: node.schema,
+        timeoutMs: node.timeoutMs,
+        maxRetries: node.maxRetries,
+        traceId: node.traceId,
         dependencies
       }));
     }
@@ -195,10 +225,22 @@ export class SubagentRuntime {
   #releaseBlocked() {
     for (const task of this.tasks.values()) {
       if (task.status !== "blocked") continue;
+      const failedDependency = (task.dependencies ?? []).find((dep) => {
+        const depTask = this.tasks.get(dep);
+        return depTask && ["failed", "cancelled"].includes(depTask.status);
+      });
+      if (failedDependency) {
+        task.status = "failed";
+        task.completedAt = now();
+        task.error = `dependency did not complete: ${failedDependency}`;
+        task.resolve();
+        this.trace("subagent_failed", { id: task.id, traceId: task.traceId, error: task.error });
+        continue;
+      }
       if (this.#dependenciesSatisfied(task)) {
         task.status = "queued";
         this.queue.push(task);
-        this.trace("subagent_unblocked", { id: task.id, dependencies: task.dependencies });
+        this.trace("subagent_unblocked", { id: task.id, traceId: task.traceId, dependencies: task.dependencies });
       }
     }
   }
@@ -215,25 +257,70 @@ export class SubagentRuntime {
     this.active += 1;
     task.status = "running";
     task.startedAt = now();
-    this.trace("subagent_started", { id: task.id, label: task.label });
+    this.trace("subagent_started", { id: task.id, traceId: task.traceId, label: task.label });
     try {
-      const result = await this.executor({ id: task.id, label: task.label, prompt: task.prompt, schema: task.schema }, { signal: task.controller.signal });
-      if (task.controller.signal.aborted) throw abortError(task.controller.signal.reason);
-      const schemaError = validateResultSchema(result, task.schema);
-      if (schemaError) throw new Error(schemaError);
-      task.status = "completed";
-      task.result = result;
-      this.trace("subagent_completed", { id: task.id });
+      while (true) {
+        task.attempts += 1;
+        try {
+          const result = await this.#executeAttempt(task);
+          if (task.controller.signal.aborted) throw abortError(task.controller.signal.reason);
+          const schemaError = validateResultSchema(result, task.schema);
+          if (schemaError) throw new Error(schemaError);
+          task.status = "completed";
+          task.result = result;
+          this.trace("subagent_completed", { id: task.id, traceId: task.traceId, attempts: task.attempts });
+          break;
+        } catch (error) {
+          const cancelled = task.controller.signal.aborted || error?.code === "ABORT_ERR";
+          if (cancelled || task.attempts > task.maxRetries) throw error;
+          task.error = String(error?.message ?? error);
+          this.trace("subagent_retry", { id: task.id, traceId: task.traceId, attempt: task.attempts, error: task.error });
+        }
+      }
     } catch (error) {
       const cancelled = task.controller.signal.aborted || error?.code === "ABORT_ERR";
       task.status = cancelled ? "cancelled" : "failed";
       task.error = String(error?.message ?? error);
-      this.trace(cancelled ? "subagent_cancelled" : "subagent_failed", { id: task.id, error: task.error });
+      this.trace(cancelled ? "subagent_cancelled" : "subagent_failed", { id: task.id, traceId: task.traceId, attempts: task.attempts, error: task.error });
     } finally {
       task.completedAt = now();
       this.active -= 1;
       task.resolve();
       this.#drain();
     }
+  }
+
+  #executeAttempt(task) {
+    const attemptController = new AbortController();
+    const relayAbort = () => attemptController.abort(task.controller.signal.reason);
+    task.controller.signal.addEventListener("abort", relayAbort, { once: true });
+    let timedOut = false;
+    const timer = task.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          attemptController.abort(`timeout after ${task.timeoutMs}ms`);
+        }, task.timeoutMs)
+      : null;
+    return Promise.resolve()
+      .then(() => {
+        if (attemptController.signal.aborted) throw abortError(attemptController.signal.reason);
+        return this.executor({
+        id: task.id,
+        label: task.label,
+        prompt: task.prompt,
+        schema: task.schema,
+        traceId: task.traceId,
+        attempt: task.attempts,
+        timeoutMs: task.timeoutMs
+      }, { signal: attemptController.signal });
+      })
+      .catch((error) => {
+        if (timedOut) throw timeoutError(task.timeoutMs);
+        throw error;
+      })
+      .finally(() => {
+        if (timer) clearTimeout(timer);
+        task.controller.signal.removeEventListener("abort", relayAbort);
+      });
   }
 }
