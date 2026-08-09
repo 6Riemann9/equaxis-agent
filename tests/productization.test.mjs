@@ -100,6 +100,9 @@ test("release command verifies before writing a manifest", (t) => {
   assert.equal(manifest.version, "0.2.0");
   assert.equal(manifest.pi, "0.83.0");
   assert.equal(manifest.gates.verify, "verify:full");
+  assert.equal(manifest.gateResults.verifyFull.ok, true);
+  assert.equal(manifest.gateResults.verifyFull.status, 0);
+  assert.equal(manifest.gateResults.verifyFull.detail, "ok");
   assert.equal(manifest.runtime.evaluation.rootDir, ".pi/runtime/eval-loop");
   assert.equal(manifest.runtime.gates.minBenchmarkPassRate, 0.8);
   assert.equal(manifest.runtime.memory.governance.retentionDays.cold, 180);

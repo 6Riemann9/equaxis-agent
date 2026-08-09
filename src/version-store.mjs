@@ -34,6 +34,33 @@ export class VersionStore {
     return path.join(this.rootDir, safeName(kind), `${safeName(id)}.json`);
   }
 
+  read(kind, id) {
+    const filePath = this.pathFor(kind, id);
+    if (!fs.existsSync(filePath)) throw new Error(`version artifact not found: ${kind}/${id}`);
+    return { ...JSON.parse(fs.readFileSync(filePath, "utf8")), path: filePath };
+  }
+
+  writeArtifact(artifact) {
+    const filePath = this.pathFor(artifact.kind, artifact.id);
+    const stored = { ...artifact };
+    stored.sha = hash({ ...stored, sha: undefined });
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, `${JSON.stringify(stored, null, 2)}\n`, "utf8");
+    return { ...stored, path: filePath };
+  }
+
+  updateStatus(kind, id, status, updates = {}) {
+    const current = this.read(kind, id);
+    return this.writeArtifact({
+      ...current,
+      path: undefined,
+      status,
+      updatedAt: updates.updatedAt ?? new Date().toISOString(),
+      decision: updates.decision ?? current.decision,
+      metadata: { ...(current.metadata ?? {}), ...(updates.metadata ?? {}) }
+    });
+  }
+
   writeCandidate(input = {}) {
     const kind = input.kind ?? "candidate";
     const id = input.id ?? `${kind}-${new Date().toISOString().replaceAll(":", "-")}`;
@@ -48,11 +75,7 @@ export class VersionStore {
       decision: input.decision ?? null,
       metadata: input.metadata ?? {}
     };
-    artifact.sha = hash(artifact);
-    const filePath = this.pathFor(kind, id);
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
-    return { ...artifact, path: filePath };
+    return this.writeArtifact(artifact);
   }
 
   list(kind = null) {

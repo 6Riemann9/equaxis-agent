@@ -42,6 +42,18 @@ function parsePackage(projectRoot) {
   return JSON.parse(fs.readFileSync(packagePath, "utf8"));
 }
 
+function gateResult(name, result) {
+  if (!result) return null;
+  return {
+    name,
+    ok: result.status === 0,
+    status: result.status,
+    detail: commandDetail(result),
+    stdout: result.stdout,
+    stderr: result.stderr
+  };
+}
+
 function writeReleaseManifest(projectRoot, pkg, options = {}) {
   const outputPath = options.outputPath ?? path.join(projectRoot, ".pi", "runtime", "release-manifest.json");
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -58,6 +70,7 @@ function writeReleaseManifest(projectRoot, pkg, options = {}) {
       memory: "test:memory",
       evaluation: "test:eval"
     },
+    gateResults: options.gateResults ?? {},
     runtime: {
       gates: config?.runtime?.gates ?? null,
       evaluation: config?.evaluation ?? null,
@@ -155,7 +168,7 @@ export function runProductizationCommand(command, options = {}) {
   const verify = runCommand(npm.command, npmArgs(npm, ["run", "verify:full"]), execOptions);
   steps.push(step("verify:full", verify.status === 0, commandDetail(verify)));
   if (verify.status === 0) {
-    const manifestPath = writeReleaseManifest(projectRoot, pkg, { ...options, config: startup.unifiedConfig });
+    const manifestPath = writeReleaseManifest(projectRoot, pkg, { ...options, config: startup.unifiedConfig, gateResults: { verifyFull: gateResult("verify:full", verify) } });
     steps.push(step("release manifest", true, manifestPath));
   } else {
     steps.push(step("release manifest", false, "skipped because verify failed"));

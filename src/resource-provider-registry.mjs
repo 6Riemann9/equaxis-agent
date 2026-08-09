@@ -23,6 +23,15 @@ function mapLookup(resources, normalized) {
   return null;
 }
 
+const RUNTIME_ARTIFACTS = new Map([
+  ["release/manifest", ".pi/runtime/release-manifest.json"],
+  ["protocols/traces", ".pi/runtime/protocols/traces.jsonl"],
+  ["eval/events", ".pi/runtime/eval-loop/events.jsonl"],
+  ["eval/harbor-manifest", ".pi/runtime/eval-loop/harbor/harbor-manifest.json"],
+  ["subagents/events", ".pi/runtime/subagents/events.jsonl"],
+  ["memory/governance", ".pi/runtime/memory-governance/memories.jsonl"]
+]);
+
 function workspacePath(root, target, label) {
   const base = path.resolve(root);
   const absolute = path.resolve(base, target);
@@ -104,8 +113,11 @@ export function createDefaultResourceProviderRegistry(options = {}) {
 
   registry.register("artifact", {
     read: async (resource) => {
-      const relative = [resource.authority, ...resource.segments].filter(Boolean).join(path.sep);
-      const absolute = workspacePath(artifactRoot, relative, "artifact resource");
+      const key = [resource.authority, ...resource.segments].filter(Boolean).join("/");
+      const mapped = RUNTIME_ARTIFACTS.get(key);
+      const absolute = mapped
+        ? workspacePath(projectRoot, mapped, "runtime artifact")
+        : workspacePath(artifactRoot, key.split("/").join(path.sep), "artifact resource");
       const text = fs.readFileSync(absolute, "utf8");
       const stat = fs.statSync(absolute);
       return { text, metadata: { path: path.relative(projectRoot, absolute).replaceAll("\\", "/"), bytes: stat.size, modifiedAt: stat.mtime.toISOString() } };

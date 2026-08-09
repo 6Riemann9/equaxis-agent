@@ -47,6 +47,18 @@ test("reads artifact resources without allowing workspace escape", async (t) => 
   await assert.rejects(() => registry.read("artifact://../outside.txt"), /must stay inside artifact root/);
 });
 
+test("resolves named runtime artifacts", async (t) => {
+  const root = workspace(t);
+  fs.mkdirSync(path.join(root, ".pi", "runtime", "protocols"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".pi", "runtime", "protocols", "traces.jsonl"), "protocol trace\n", "utf8");
+  fs.mkdirSync(path.join(root, ".pi", "runtime"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".pi", "runtime", "release-manifest.json"), "{\"ok\":true}\n", "utf8");
+
+  const registry = createDefaultResourceProviderRegistry({ projectRoot: root });
+  assert.equal((await registry.read("artifact://protocols/traces")).text, "protocol trace\n");
+  assert.equal((await registry.read("artifact://release/manifest")).metadata.path, ".pi/runtime/release-manifest.json");
+});
+
 test("default registry resolves in-memory agent and history providers", async () => {
   const registry = createDefaultResourceProviderRegistry({
     agentResources: { "agent://equaxis/status": { text: "ready" } },

@@ -10,6 +10,7 @@ import {
   selectRelevantSkills,
   writeSkillFile
 } from "../../src/skill-store.mjs";
+import { createSkillCandidate } from "../../src/skill-lifecycle.mjs";
 import { reflectRun } from "../../src/reflection.mjs";
 
 interface SkillsConfig {
@@ -196,16 +197,23 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal) {
       const secret = containsSecretLikeInput({ name: params.name, body: params.body, description: params.description });
       if (secret) throw new Error("skill body may contain raw credentials; not writing");
-      const filePath = writeSkillFile(skillsDir, {
+      const skill = {
         name: params.name,
         description: params.description,
         triggers: params.triggers ?? [],
         body: params.body
+      };
+      const candidate = createSkillCandidate({
+        projectRoot: services.paths.workspace,
+        skillsDir: config.rootDir,
+        skill,
+        provenance: { source: "skill_learn" }
       });
-      services.trace.record({} as ExtensionContext, "skill_learned", { name: params.name, filePath });
+      const filePath = writeSkillFile(skillsDir, skill);
+      services.trace.record({} as ExtensionContext, "skill_learned", { name: params.name, filePath, versionArtifact: candidate.path });
       return {
         content: [{ type: "text", text: `Skill written: ${filePath}` }],
-        details: { name: params.name, filePath }
+        details: { name: params.name, filePath, versionArtifact: candidate.path, versionSha: candidate.sha }
       };
     }
   });
