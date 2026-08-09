@@ -124,4 +124,8 @@ test("doctor checks protocol tool declarations", (t) => {
     report.checks.find((item) => item.name === "Subagent budgets").detail,
     "timeout=none; maxRetries=0"
   );
+  assert.equal(
+    report.checks.find((item) => item.name === "Subagent persistence").detail,
+    "snapshotDir=.pi/runtime/subagents/snapshots"
+  );
 });

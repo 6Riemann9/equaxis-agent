@@ -6,6 +6,7 @@ import { checkExtensionContracts } from "./extension-compat.mjs";
 import { loadEquaxisConfig } from "./equaxis-config.mjs";
 import { loadMemoryConfig } from "./memory-config.mjs";
 import { describeRuntimeIsolation } from "./runtime-isolation.mjs";
+import { describeSubagentPersistence } from "./subagent-state-store.mjs";
 
 const REQUIRED_EXTENSIONS = [
   "provider.ts",
@@ -145,6 +146,8 @@ export function runDoctor(options = {}) {
   const budgets = startup.unifiedConfig?.subagents?.budgets;
   const timeoutDetail = budgets?.timeoutMs ? `${budgets.timeoutMs}ms` : "none";
   checks.push(check("Subagent budgets", true, `timeout=${timeoutDetail}; maxRetries=${budgets?.maxRetries ?? 0}`));
+  const persistence = describeSubagentPersistence(startup.unifiedConfig);
+  checks.push(check("Subagent persistence", persistence.enabled, persistence.detail));
 
   if (memoryConfig?.enabled) {
     const vendorRoot = path.join(projectRoot, "vendor", "agent-memory");

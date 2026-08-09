@@ -50,10 +50,51 @@ export class SubagentRuntime {
     this.trace = options.trace ?? (() => {});
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? null;
     this.defaultMaxRetries = options.defaultMaxRetries ?? 0;
+    this.stateStore = options.stateStore ?? null;
     this.tasks = new Map();
     this.inboxes = new Map();
     this.active = 0;
     this.queue = [];
+    this.#restoreSnapshots();
+  }
+
+  #restoreSnapshots() {
+    const snapshots = this.stateStore?.loadSnapshots?.() ?? [];
+    for (const snapshot of snapshots) {
+      if (!snapshot?.id || this.tasks.has(snapshot.id)) continue;
+      if (!["completed", "failed", "cancelled"].includes(snapshot.status)) continue;
+      const task = {
+        id: snapshot.id,
+        label: snapshot.label ?? snapshot.id,
+        prompt: "",
+        schema: null,
+        dependencies: [...(snapshot.dependencies ?? [])],
+        traceId: snapshot.traceId,
+        timeoutMs: snapshot.timeoutMs ?? null,
+        maxRetries: snapshot.maxRetries ?? 0,
+        attempts: snapshot.attempts ?? 0,
+        status: snapshot.status,
+        createdAt: snapshot.createdAt ?? now(),
+        startedAt: snapshot.startedAt ?? null,
+        completedAt: snapshot.completedAt ?? null,
+        result: snapshot.result ?? null,
+        error: snapshot.error ?? null,
+        controller: new AbortController(),
+        promise: null,
+        restored: true
+      };
+      task.promise = Promise.resolve();
+      task.resolve = () => {};
+      this.tasks.set(task.id, task);
+    }
+  }
+
+  #record(event, task) {
+    try {
+      this.stateStore?.record?.(event, task);
+    } catch (error) {
+      this.trace("subagent_persistence_failed", { id: task.id, traceId: task.traceId, error: String(error?.message ?? error) });
+    }
   }
 
   /** Deliver a message to another subagent's inbox (peer messaging). */
@@ -121,9 +162,11 @@ export class SubagentRuntime {
     this.tasks.set(id, task);
     if (task.status === "blocked") {
       this.trace("subagent_blocked", { id, traceId, dependencies: task.dependencies });
+      this.#record("blocked", task);
     } else {
       this.queue.push(task);
       this.trace("subagent_queued", { id, traceId, label: task.label });
+      this.#record("queued", task);
     }
     this.#releaseBlocked();
     this.#drain();
@@ -169,6 +212,7 @@ export class SubagentRuntime {
       task.error = String(reason);
       task.resolve();
       this.trace("subagent_cancelled", { id, traceId: task.traceId, reason: String(reason), queued: wasQueued });
+      this.#record("cancelled", task);
       this.#drain();
       return this.status(id);
     }
@@ -235,12 +279,14 @@ export class SubagentRuntime {
         task.error = `dependency did not complete: ${failedDependency}`;
         task.resolve();
         this.trace("subagent_failed", { id: task.id, traceId: task.traceId, error: task.error });
+        this.#record("failed", task);
         continue;
       }
       if (this.#dependenciesSatisfied(task)) {
         task.status = "queued";
         this.queue.push(task);
         this.trace("subagent_unblocked", { id: task.id, traceId: task.traceId, dependencies: task.dependencies });
+        this.#record("queued", task);
       }
     }
   }
@@ -258,6 +304,7 @@ export class SubagentRuntime {
     task.status = "running";
     task.startedAt = now();
     this.trace("subagent_started", { id: task.id, traceId: task.traceId, label: task.label });
+    this.#record("started", task);
     try {
       while (true) {
         task.attempts += 1;
@@ -275,6 +322,7 @@ export class SubagentRuntime {
           if (cancelled || task.attempts > task.maxRetries) throw error;
           task.error = String(error?.message ?? error);
           this.trace("subagent_retry", { id: task.id, traceId: task.traceId, attempt: task.attempts, error: task.error });
+          this.#record("retry", task);
         }
       }
     } catch (error) {
@@ -284,6 +332,7 @@ export class SubagentRuntime {
       this.trace(cancelled ? "subagent_cancelled" : "subagent_failed", { id: task.id, traceId: task.traceId, attempts: task.attempts, error: task.error });
     } finally {
       task.completedAt = now();
+      this.#record(task.status, task);
       this.active -= 1;
       task.resolve();
       this.#drain();

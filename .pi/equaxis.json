@@ -75,6 +75,10 @@
       "timeoutMs": null,
       "maxRetries": 0
     },
+    "persistence": {
+      "enabled": true,
+      "rootDir": ".pi/runtime/subagents"
+    },
     "isolation": {
       "enabled": true,
       "scrubEnv": true,

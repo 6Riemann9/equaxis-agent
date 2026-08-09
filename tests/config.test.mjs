@@ -89,6 +89,7 @@ test("merges and validates subagent runtime configuration", (t) => {
     subagents: {
       maxConcurrent: 4,
       budgets: { timeoutMs: 30000, maxRetries: 2 },
+      persistence: { rootDir: ".pi/subagent-state" },
       isolation: { outputRoot: ".pi/agents" }
     }
   }));
@@ -96,6 +97,8 @@ test("merges and validates subagent runtime configuration", (t) => {
   assert.equal(config.subagents.maxConcurrent, 4);
   assert.equal(config.subagents.budgets.timeoutMs, 30000);
   assert.equal(config.subagents.budgets.maxRetries, 2);
+  assert.equal(config.subagents.persistence.enabled, true);
+  assert.equal(config.subagents.persistence.rootDir, ".pi/subagent-state");
   assert.equal(config.subagents.isolation.enabled, true);
   assert.equal(config.subagents.isolation.scrubEnv, true);
   assert.equal(config.subagents.isolation.outputRoot, ".pi/agents");
@@ -117,6 +120,12 @@ test("merges and validates subagent runtime configuration", (t) => {
     subagents: { budgets: { maxRetries: 9 } }
   }));
   assert.throws(() => loadEquaxisConfig(root), /subagents\.budgets\.maxRetries/);
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    subagents: { persistence: { rootDir: "../outside" } }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /subagents\.persistence\.rootDir.*workspace/);
 });
 
 test("merges and validates protocol adapter configuration", (t) => {

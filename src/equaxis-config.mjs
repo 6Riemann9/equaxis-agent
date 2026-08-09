@@ -71,6 +71,10 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
       timeoutMs: null,
       maxRetries: 0
     },
+    persistence: {
+      enabled: true,
+      rootDir: ".pi/runtime/subagents"
+    },
     isolation: {
       enabled: true,
       scrubEnv: true,
@@ -163,6 +167,7 @@ function mergeConfig(base, custom) {
       ...base.subagents,
       ...(custom.subagents ?? {}),
       budgets: { ...base.subagents.budgets, ...(custom.subagents?.budgets ?? {}) },
+      persistence: { ...base.subagents.persistence, ...(custom.subagents?.persistence ?? {}) },
       isolation: { ...base.subagents.isolation, ...(custom.subagents?.isolation ?? {}) }
     }
   };
@@ -289,6 +294,9 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
     assertInteger(config.subagents.budgets.timeoutMs, configPath, "subagents.budgets.timeoutMs", 100, 600_000);
   }
   assertInteger(config.subagents.budgets.maxRetries, configPath, "subagents.budgets.maxRetries", 0, 5);
+  assertRecord(config.subagents.persistence, configPath, "subagents.persistence");
+  assertBoolean(config.subagents.persistence.enabled, configPath, "subagents.persistence.enabled");
+  assertLocalPath(config.subagents.persistence.rootDir, configPath, "subagents.persistence.rootDir");
   assertRecord(config.subagents.isolation, configPath, "subagents.isolation");
   assertBoolean(config.subagents.isolation.enabled, configPath, "subagents.isolation.enabled");
   assertBoolean(config.subagents.isolation.scrubEnv, configPath, "subagents.isolation.scrubEnv");

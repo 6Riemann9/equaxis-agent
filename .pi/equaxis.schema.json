@@ -326,6 +326,7 @@
         "piEntry",
         "jsonArgs",
         "budgets",
+        "persistence",
         "isolation"
       ],
       "properties": {
@@ -366,6 +367,23 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 5
+            }
+          }
+        },
+        "persistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "rootDir"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "rootDir": {
+              "type": "string",
+              "minLength": 1
             }
           }
         },

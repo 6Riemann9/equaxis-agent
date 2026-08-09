@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { SubagentRuntime } from "../../src/subagent-runtime.mjs";
 import { createPiJsonExecutor } from "../../src/subagent-executor.mjs";
+import { SubagentStateStore } from "../../src/subagent-state-store.mjs";
 
 interface SubagentEngineConfig {
   enabled: boolean;
@@ -14,6 +15,10 @@ interface SubagentEngineConfig {
   budgets?: {
     timeoutMs?: number | null;
     maxRetries?: number;
+  };
+  persistence?: {
+    enabled?: boolean;
+    rootDir?: string;
   };
 }
 
@@ -39,10 +44,14 @@ export default function subagentEngine(pi: ExtensionAPI): void {
     pi
   });
   const config = services.config.subagents as SubagentEngineConfig | undefined;
+  const stateStore = config?.persistence?.enabled === false
+    ? null
+    : new SubagentStateStore({ projectRoot, rootDir: config?.persistence?.rootDir ?? ".pi/runtime/subagents" });
   const runtime = new SubagentRuntime({
     maxConcurrent: config?.maxConcurrent ?? 2,
     defaultTimeoutMs: config?.budgets?.timeoutMs ?? null,
     defaultMaxRetries: config?.budgets?.maxRetries ?? 0,
+    stateStore,
     executor: createPiJsonExecutor({
       piEntry: config?.piEntry || defaultPiEntry,
       args: config?.jsonArgs ?? []
