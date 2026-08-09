@@ -11,6 +11,7 @@
     "reliability",
     "memory",
     "skills",
+    "evaluation",
     "subagents",
     "protocols"
   ],
@@ -314,6 +315,41 @@
             "type": "string",
             "minLength": 1
           }
+        }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "rootDir",
+        "minSamples",
+        "minSuccessRateDelta",
+        "maxLatencyRegression"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rootDir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minSamples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "minSuccessRateDelta": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maxLatencyRegression": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
         }
       }
     },

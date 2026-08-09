@@ -62,6 +62,13 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     lsp: { command: "", args: [], cwd: "", requestTimeoutMs: 15_000, allowCommandOverride: false },
     dap: { command: "", args: [], cwd: "", requestTimeoutMs: 15_000, allowCommandOverride: false }
   },
+  evaluation: {
+    enabled: true,
+    rootDir: ".pi/runtime/eval-loop",
+    minSamples: 5,
+    minSuccessRateDelta: 0.02,
+    maxLatencyRegression: 0.1
+  },
   subagents: {
     enabled: true,
     maxConcurrent: 2,
@@ -101,6 +108,12 @@ function assertBoolean(value, configPath, field) {
 function assertInteger(value, configPath, field, min, max) {
   if (!Number.isInteger(value) || value < min || value > max) {
     throw configError(configPath, field, `must be an integer between ${min} and ${max}`);
+  }
+}
+
+function assertNumber(value, configPath, field, min, max) {
+  if (!Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max) {
+    throw configError(configPath, field, `must be a number between ${min} and ${max}`);
   }
 }
 
@@ -163,6 +176,7 @@ function mergeConfig(base, custom) {
     },
     memory: { ...base.memory, ...(custom.memory ?? {}) },
     skills: { ...base.skills, ...(custom.skills ?? {}) },
+    evaluation: { ...base.evaluation, ...(custom.evaluation ?? {}) },
     subagents: {
       ...base.subagents,
       ...(custom.subagents ?? {}),
@@ -279,6 +293,13 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   if (!Array.isArray(config.skills.requiredNames) || config.skills.requiredNames.some((item) => typeof item !== "string" || !item.trim())) {
     throw configError(configPath, "skills.requiredNames", "must be an array of non-empty strings");
   }
+
+  assertRecord(config.evaluation, configPath, "evaluation");
+  assertBoolean(config.evaluation.enabled, configPath, "evaluation.enabled");
+  assertLocalPath(config.evaluation.rootDir, configPath, "evaluation.rootDir");
+  assertInteger(config.evaluation.minSamples, configPath, "evaluation.minSamples", 1, 100000);
+  assertNumber(config.evaluation.minSuccessRateDelta, configPath, "evaluation.minSuccessRateDelta", 0, 1);
+  assertNumber(config.evaluation.maxLatencyRegression, configPath, "evaluation.maxLatencyRegression", 0, 10);
 
   assertRecord(config.subagents, configPath, "subagents");
   assertBoolean(config.subagents.enabled, configPath, "subagents.enabled");

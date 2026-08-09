@@ -86,6 +86,13 @@
       "extraEnvAllowlist": []
     }
   },
+  "evaluation": {
+    "enabled": true,
+    "rootDir": ".pi/runtime/eval-loop",
+    "minSamples": 5,
+    "minSuccessRateDelta": 0.02,
+    "maxLatencyRegression": 0.1
+  },
   "protocols": {
     "lsp": {
       "command": "node",

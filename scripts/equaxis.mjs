@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatDoctorReport, runDoctor, runStartupPreflight } from "../src/doctor.mjs";
 import { loadEquaxisConfig } from "../src/equaxis-config.mjs";
+import { compareCandidate, EvalLoop } from "../src/eval-loop.mjs";
+import { exportEvalLoopForHarbor } from "../src/eval-harbor-bridge.mjs";
+import { formatProtocolRegressionReport, runProtocolRegression } from "../src/protocol-regression.mjs";
+import { VersionStore } from "../src/version-store.mjs";
 import { checkExtensionContracts, extensionPaths, formatExtensionContractReport } from "../src/extension-compat.mjs";
 import { formatEquaxisBanner, shouldShowBanner } from "../src/cli-banner.mjs";
 
@@ -25,6 +30,66 @@ try {
   process.exit(1);
 }
 const cliArgs = process.argv.slice(2);
+
+function parseJsonArg(value, fallback = {}) {
+  if (!value) return fallback;
+  const source = value.startsWith("@")
+    ? fs.readFileSync(path.resolve(process.cwd(), value.slice(1)), "utf8")
+    : value;
+  try {
+    return JSON.parse(source);
+  } catch (error) {
+    throw new Error(`Expected JSON argument: ${error.message}`);
+  }
+}
+
+function printJson(value) {
+  console.log(JSON.stringify(value, null, 2));
+}
+
+function localEvalLoop() {
+  return new EvalLoop({
+    persist: unifiedConfig.evaluation?.enabled !== false,
+    projectRoot,
+    rootDir: unifiedConfig.evaluation?.rootDir ?? ".pi/runtime/eval-loop"
+  });
+}
+
+function handleLocalCommand(args) {
+  const [group, command, payload] = args;
+  if (group === "protocols" && command === "verify") {
+    const report = runProtocolRegression({ projectRoot, config: unifiedConfig });
+    console.log(formatProtocolRegressionReport(report));
+    process.exit(report.ok ? 0 : report.status || 1);
+  }
+  if (group === "eval") {
+    const loop = localEvalLoop();
+    if (command === "record") return printJson(loop.record(parseJsonArg(payload)));
+    if (command === "snapshot") return printJson(loop.snapshot(parseJsonArg(payload)));
+    if (command === "decide") return printJson(compareCandidate({
+      ...parseJsonArg(payload),
+      minSamples: unifiedConfig.evaluation?.minSamples,
+      minSuccessRateDelta: unifiedConfig.evaluation?.minSuccessRateDelta,
+      maxLatencyRegression: unifiedConfig.evaluation?.maxLatencyRegression
+    }));
+    if (command === "export-harbor") return printJson(exportEvalLoopForHarbor({ projectRoot, ...parseJsonArg(payload) }));
+  }
+  if (group === "versions") {
+    const store = new VersionStore({ projectRoot });
+    if (command === "add") return printJson(store.writeCandidate(parseJsonArg(payload)));
+    if (command === "list") return printJson(store.list(payload));
+  }
+  return false;
+}
+
+try {
+  const handled = handleLocalCommand(cliArgs);
+  if (handled !== false) process.exit(0);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+
 const startup = runStartupPreflight({ projectRoot, cwd: process.cwd(), env: process.env });
 if (!startup.ok) {
   const report = runDoctor({ projectRoot, cwd: process.cwd(), env: process.env });

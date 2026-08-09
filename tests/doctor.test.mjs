@@ -128,4 +128,8 @@ test("doctor checks protocol tool declarations", (t) => {
     report.checks.find((item) => item.name === "Subagent persistence").detail,
     "snapshotDir=.pi/runtime/subagents/snapshots"
   );
+  assert.equal(
+    report.checks.find((item) => item.name === "Evaluation loop").detail,
+    "rootDir=.pi/runtime/eval-loop; minSamples=5"
+  );
 });

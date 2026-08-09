@@ -24,7 +24,7 @@
     "test:eval": "python -B -m unittest discover -s harbor_eval -p \"test_*.py\"",
     "check": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
-    "test:protocols": "node --test tests/lsp-client.test.mjs tests/dap-client.test.mjs tests/ast-tools.test.mjs tests/extension.integration.test.mjs",
+    "test:protocols": "node scripts/test-protocols.mjs",
     "verify": "npm run check && npm test",
     "verify:full": "npm run verify && npm run test:protocols && npm run test:memory && npm run test:eval"
   },

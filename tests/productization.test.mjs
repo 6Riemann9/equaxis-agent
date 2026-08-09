@@ -36,7 +36,8 @@ function workspace(t) {
       limits: { maxToolCallsPerTurn: 30, maxHighRiskCallsPerTurn: 3, maxRepairAttemptsPerError: 2 },
       toolRouting: { enabled: true, maxCandidates: 5 }
     },
-    memory: { enabled: false, pythonCommand: "python", rootDir: ".equaxis/memory", autoRecall: true, defaultWing: "equaxis", defaultRoom: "general", recallLimit: 5, maxContextChars: 8000, maxStoredMessageChars: 24000, requestTimeoutMs: 60000 }
+    memory: { enabled: false, pythonCommand: "python", rootDir: ".equaxis/memory", autoRecall: true, defaultWing: "equaxis", defaultRoom: "general", recallLimit: 5, maxContextChars: 8000, maxStoredMessageChars: 24000, requestTimeoutMs: 60000 },
+    evaluation: { enabled: true, rootDir: ".pi/runtime/eval-loop", minSamples: 5, minSuccessRateDelta: 0.02, maxLatencyRegression: 0.1 }
   }));
   fs.writeFileSync(path.join(root, ".pi", "extensions", "contracts.json"), JSON.stringify({
     schemaVersion: 1,
@@ -89,11 +90,13 @@ test("release command verifies before writing a manifest", (t) => {
     outputPath
   });
   assert.equal(report.ok, true);
-  assert.deepEqual(calls.map((item) => item[1]), [["run", "verify"]]);
+  assert.deepEqual(calls.map((item) => item[1]), [["run", "verify:full"]]);
   const manifest = JSON.parse(fs.readFileSync(outputPath, "utf8"));
   assert.equal(manifest.name, "equaxis-agent");
   assert.equal(manifest.version, "0.2.0");
   assert.equal(manifest.pi, "0.83.0");
+  assert.equal(manifest.gates.verify, "verify:full");
+  assert.equal(manifest.runtime.evaluation.rootDir, ".pi/runtime/eval-loop");
 });
 
 test("dry-run update reports planned work without spawning npm", (t) => {

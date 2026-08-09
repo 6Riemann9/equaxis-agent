@@ -45,12 +45,28 @@ function parsePackage(projectRoot) {
 function writeReleaseManifest(projectRoot, pkg, options = {}) {
   const outputPath = options.outputPath ?? path.join(projectRoot, ".pi", "runtime", "release-manifest.json");
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const config = options.config ?? null;
   const manifest = {
     name: pkg.name,
     version: pkg.version,
     private: Boolean(pkg.private),
     node: pkg.engines?.node ?? null,
     pi: pkg.dependencies?.["@earendil-works/pi-coding-agent"] ?? null,
+    gates: {
+      verify: "verify:full",
+      protocols: "test:protocols",
+      memory: "test:memory",
+      evaluation: "test:eval"
+    },
+    runtime: {
+      evaluation: config?.evaluation ?? null,
+      subagents: config?.subagents ? {
+        budgets: config.subagents.budgets,
+        persistence: config.subagents.persistence,
+        isolation: config.subagents.isolation
+      } : null,
+      protocols: config?.protocols ?? null
+    },
     generatedAt: new Date().toISOString()
   };
   fs.writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
@@ -114,10 +130,10 @@ export function runProductizationCommand(command, options = {}) {
     return { ok: steps.every((item) => item.status), command, projectRoot, cwd, steps };
   }
 
-  const verify = runCommand(npm.command, npmArgs(npm, ["run", "verify"]), execOptions);
-  steps.push(step("verify", verify.status === 0, commandDetail(verify)));
+  const verify = runCommand(npm.command, npmArgs(npm, ["run", "verify:full"]), execOptions);
+  steps.push(step("verify:full", verify.status === 0, commandDetail(verify)));
   if (verify.status === 0) {
-    const manifestPath = writeReleaseManifest(projectRoot, pkg, options);
+    const manifestPath = writeReleaseManifest(projectRoot, pkg, { ...options, config: startup.unifiedConfig });
     steps.push(step("release manifest", true, manifestPath));
   } else {
     steps.push(step("release manifest", false, "skipped because verify failed"));

@@ -9,6 +9,11 @@ const PositionFields = {
   character: Type.Integer({ minimum: 0, description: "Zero-based character" })
 };
 
+const ScopeField = Type.Optional(Type.Union([
+  Type.Literal("file"),
+  Type.Literal("workspace")
+], { description: "Rename search scope; workspace allows cross-file references and requires expectedHashes when applying" }));
+
 export default function astToolsExtension(pi: ExtensionAPI): void {
   const services = createExtensionRuntimeServices({ cwd: process.cwd(), extensionId: "ast-tools", pi });
   let context: ExtensionContext | undefined;
@@ -21,7 +26,7 @@ export default function astToolsExtension(pi: ExtensionAPI): void {
     label: "AST Inspect",
     description: "Inspect a TypeScript or JavaScript symbol, definition, and rename capability at a source position.",
     promptSnippet: "Inspect a JavaScript or TypeScript symbol at a file position",
-    parameters: Type.Object(PositionFields),
+    parameters: Type.Object({ ...PositionFields, scope: ScopeField }),
     async execute(_toolCallId, params) {
       const result = inspectAst(params, { cwd: context?.cwd ?? process.cwd() });
       trace("ast_inspect", { path: result.path, canRename: result.canRename });
@@ -32,21 +37,23 @@ export default function astToolsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "ast_rename",
     label: "AST Rename",
-    description: "Preview or safely apply a TypeScript or JavaScript symbol rename. Applying requires an expectedHash from a fresh preview.",
+    description: "Preview or safely apply a TypeScript or JavaScript symbol rename. Applying requires fresh hash evidence from preview.",
     promptSnippet: "Preview or apply a hash-checked AST symbol rename",
     promptGuidelines: [
-      "Call ast_rename with apply=false first and use its expectedHash for a later apply=true call.",
-      "The target must be a JavaScript or TypeScript file in the workspace and the rename stays within that file."
+      "Call ast_rename with apply=false first and use its expectedHash or expectedHashes for a later apply=true call.",
+      "The target must be a JavaScript or TypeScript file in the workspace. The default scope is file; pass scope=workspace only when cross-file references should be renamed."
     ],
     parameters: Type.Object({
       ...PositionFields,
       newName: Type.String({ minLength: 1, description: "New JavaScript identifier" }),
       apply: Type.Optional(Type.Boolean({ default: false, description: "Write the rename; requires expectedHash" })),
-      expectedHash: Type.Optional(Type.String({ minLength: 64, maxLength: 64, description: "SHA-256 returned by a fresh preview" }))
+      scope: ScopeField,
+      expectedHash: Type.Optional(Type.String({ minLength: 64, maxLength: 64, description: "SHA-256 returned by a fresh single-file preview" })),
+      expectedHashes: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Per-file SHA-256 hashes returned by a fresh workspace preview" }))
     }),
     async execute(_toolCallId, params) {
       const result = renameAst(params, { cwd: context?.cwd ?? process.cwd() });
-      trace("ast_rename", { path: result.path, applied: result.applied, editCount: result.editCount });
+      trace("ast_rename", { path: result.path, scope: result.scope, applied: result.applied, editCount: result.editCount, fileCount: result.files?.length ?? 1 });
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     }
   });

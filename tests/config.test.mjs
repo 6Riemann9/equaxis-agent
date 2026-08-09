@@ -82,6 +82,32 @@ test("requires explicit roots for automatic external approval", (t) => {
   assert.throws(() => loadEquaxisConfig(root), /must not be empty/);
 });
 
+test("merges and validates evaluation configuration", (t) => {
+  const root = workspace(t);
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    evaluation: { rootDir: ".pi/eval-state", minSamples: 12, minSuccessRateDelta: 0.05, maxLatencyRegression: 0.2 }
+  }));
+  const config = loadEquaxisConfig(root);
+  assert.equal(config.evaluation.enabled, true);
+  assert.equal(config.evaluation.rootDir, ".pi/eval-state");
+  assert.equal(config.evaluation.minSamples, 12);
+  assert.equal(config.evaluation.minSuccessRateDelta, 0.05);
+  assert.equal(config.evaluation.maxLatencyRegression, 0.2);
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    evaluation: { rootDir: "../outside" }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /evaluation\.rootDir.*workspace/);
+
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    evaluation: { minSuccessRateDelta: 2 }
+  }));
+  assert.throws(() => loadEquaxisConfig(root), /evaluation\.minSuccessRateDelta/);
+});
+
 test("merges and validates subagent runtime configuration", (t) => {
   const root = workspace(t);
   fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({

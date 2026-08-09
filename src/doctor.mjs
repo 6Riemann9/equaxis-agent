@@ -7,6 +7,7 @@ import { loadEquaxisConfig } from "./equaxis-config.mjs";
 import { loadMemoryConfig } from "./memory-config.mjs";
 import { describeRuntimeIsolation } from "./runtime-isolation.mjs";
 import { describeSubagentPersistence } from "./subagent-state-store.mjs";
+import { discoverProtocolAdapters, summarizeProtocolAdapters } from "./protocol-adapters.mjs";
 
 const REQUIRED_EXTENSIONS = [
   "provider.ts",
@@ -141,6 +142,10 @@ export function runDoctor(options = {}) {
     checks.push(check("Memory config", false, String(error.message ?? error)));
   }
   checkProtocolTools(checks, startup.extensionContracts, startup.unifiedConfig);
+  if (startup.unifiedConfig) {
+    const adapters = discoverProtocolAdapters(startup.unifiedConfig, { cwd: projectRoot, env, spawnSyncImpl: run });
+    checks.push(check("Protocol adapters", true, summarizeProtocolAdapters(adapters)));
+  }
   const isolation = describeRuntimeIsolation(startup.unifiedConfig);
   checks.push(check("Runtime isolation", isolation.enabled, isolation.detail));
   const budgets = startup.unifiedConfig?.subagents?.budgets;
@@ -148,6 +153,8 @@ export function runDoctor(options = {}) {
   checks.push(check("Subagent budgets", true, `timeout=${timeoutDetail}; maxRetries=${budgets?.maxRetries ?? 0}`));
   const persistence = describeSubagentPersistence(startup.unifiedConfig);
   checks.push(check("Subagent persistence", persistence.enabled, persistence.detail));
+  const evaluation = startup.unifiedConfig?.evaluation;
+  checks.push(check("Evaluation loop", Boolean(evaluation?.enabled), evaluation?.enabled ? `rootDir=${evaluation.rootDir}; minSamples=${evaluation.minSamples}` : "disabled"));
 
   if (memoryConfig?.enabled) {
     const vendorRoot = path.join(projectRoot, "vendor", "agent-memory");
