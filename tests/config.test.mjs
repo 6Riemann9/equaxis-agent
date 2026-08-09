@@ -52,6 +52,40 @@ test("validates optional advisor configuration", (t) => {
   assert.throws(() => loadEquaxisConfig(root), /advisor.mode/);
 });
 
+test("migrates legacy unified config aliases before validation", (t) => {
+  const root = workspace(t);
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 0,
+    runtimeProfile: "full",
+    reliabilityTraceDir: ".pi/legacy-runtime",
+    protocols: {
+      typescript: { command: "typescript-language-server", args: ["--stdio"] },
+      pythonDebug: { command: "python", args: ["-m", "debugpy.adapter"] }
+    },
+    evaluation: { eventDir: ".pi/legacy-eval", costRegressionLimit: 0.3, confidenceLevel: 2.58 },
+    subagents: { timeoutMs: 45000, maxRetries: 2, stateDir: ".pi/legacy-subagents", isolationOutputRoot: ".pi/legacy-isolated" }
+  }));
+  const config = loadEquaxisConfig(root);
+  assert.equal(config.schemaVersion, 1);
+  assert.equal(config.runtime.profile, "full");
+  assert.equal(config.reliability.traceDir, ".pi/legacy-runtime");
+  assert.equal(config.protocols.lsp.command, "typescript-language-server");
+  assert.deepEqual(config.protocols.dap.args, ["-m", "debugpy.adapter"]);
+  assert.equal(config.evaluation.rootDir, ".pi/legacy-eval");
+  assert.equal(config.evaluation.maxCostRegression, 0.3);
+  assert.equal(config.evaluation.confidenceZ, 2.58);
+  assert.equal(config.subagents.budgets.timeoutMs, 45000);
+  assert.equal(config.subagents.budgets.maxRetries, 2);
+  assert.equal(config.subagents.persistence.rootDir, ".pi/legacy-subagents");
+  assert.equal(config.subagents.isolation.outputRoot, ".pi/legacy-isolated");
+});
+
+test("rejects unsupported future unified config versions", (t) => {
+  const root = workspace(t);
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({ schemaVersion: 99 }));
+  assert.throws(() => loadEquaxisConfig(root), /schemaVersion.*unsupported/);
+});
+
 test("uses the unified config as the source of truth", (t) => {
   const root = workspace(t);
   const externalRoot = path.resolve(root, "..", "approved-external");

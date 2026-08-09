@@ -5,8 +5,10 @@ const UNIFIED_CONFIG_FILE = ".pi/equaxis.json";
 const LEGACY_RELIABILITY_FILE = ".pi/reliability.json";
 const LEGACY_MEMORY_FILE = ".pi/memory.json";
 
+export const EQUAXIS_CONFIG_SCHEMA_VERSION = 1;
+
 export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
-  schemaVersion: 1,
+  schemaVersion: EQUAXIS_CONFIG_SCHEMA_VERSION,
   runtime: {
     profile: "standard",
     services: { config: true, diagnostics: true, trace: true, status: true }
@@ -157,6 +159,68 @@ function readOptionalJson(cwd, relativePath) {
   return fs.existsSync(filePath) ? parseJson(filePath) : undefined;
 }
 
+function migrateSchemaV0(raw) {
+  const migrated = structuredClone(raw);
+  migrated.schemaVersion = EQUAXIS_CONFIG_SCHEMA_VERSION;
+  if (typeof raw.runtimeProfile === "string") {
+    migrated.runtime = { ...(migrated.runtime ?? {}), profile: raw.runtimeProfile };
+    delete migrated.runtimeProfile;
+  }
+  if (typeof raw.reliabilityTraceDir === "string") {
+    migrated.reliability = { ...(migrated.reliability ?? {}), traceDir: raw.reliabilityTraceDir };
+    delete migrated.reliabilityTraceDir;
+  }
+  if (raw.protocols?.typescript) {
+    migrated.protocols = { ...(migrated.protocols ?? {}), lsp: { ...(migrated.protocols.lsp ?? {}), ...raw.protocols.typescript } };
+    delete migrated.protocols.typescript;
+  }
+  if (raw.protocols?.pythonDebug) {
+    migrated.protocols = { ...(migrated.protocols ?? {}), dap: { ...(migrated.protocols.dap ?? {}), ...raw.protocols.pythonDebug } };
+    delete migrated.protocols.pythonDebug;
+  }
+  if (raw.evaluation?.eventDir) {
+    migrated.evaluation = { ...(migrated.evaluation ?? {}), rootDir: raw.evaluation.eventDir };
+    delete migrated.evaluation.eventDir;
+  }
+  if (raw.evaluation?.costRegressionLimit !== undefined) {
+    migrated.evaluation = { ...(migrated.evaluation ?? {}), maxCostRegression: raw.evaluation.costRegressionLimit };
+    delete migrated.evaluation.costRegressionLimit;
+  }
+  if (raw.evaluation?.confidenceLevel !== undefined) {
+    migrated.evaluation = { ...(migrated.evaluation ?? {}), confidenceZ: raw.evaluation.confidenceLevel };
+    delete migrated.evaluation.confidenceLevel;
+  }
+  if (raw.subagents?.timeoutMs !== undefined || raw.subagents?.maxRetries !== undefined) {
+    migrated.subagents = {
+      ...(migrated.subagents ?? {}),
+      budgets: {
+        ...(migrated.subagents?.budgets ?? {}),
+        ...(raw.subagents.timeoutMs !== undefined ? { timeoutMs: raw.subagents.timeoutMs } : {}),
+        ...(raw.subagents.maxRetries !== undefined ? { maxRetries: raw.subagents.maxRetries } : {})
+      }
+    };
+    delete migrated.subagents.timeoutMs;
+    delete migrated.subagents.maxRetries;
+  }
+  if (raw.subagents?.stateDir) {
+    migrated.subagents = { ...(migrated.subagents ?? {}), persistence: { ...(migrated.subagents?.persistence ?? {}), rootDir: raw.subagents.stateDir } };
+    delete migrated.subagents.stateDir;
+  }
+  if (raw.subagents?.isolationOutputRoot) {
+    migrated.subagents = { ...(migrated.subagents ?? {}), isolation: { ...(migrated.subagents?.isolation ?? {}), outputRoot: raw.subagents.isolationOutputRoot } };
+    delete migrated.subagents.isolationOutputRoot;
+  }
+  return migrated;
+}
+
+export function migrateEquaxisConfig(raw, configPath = UNIFIED_CONFIG_FILE) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const version = raw.schemaVersion ?? EQUAXIS_CONFIG_SCHEMA_VERSION;
+  if (version === EQUAXIS_CONFIG_SCHEMA_VERSION) return raw;
+  if (version === 0) return migrateSchemaV0(raw);
+  throw configError(configPath, "schemaVersion", `unsupported version ${version}; expected ${EQUAXIS_CONFIG_SCHEMA_VERSION}`);
+}
+
 function mergeConfig(base, custom) {
   return {
     ...structuredClone(base),
@@ -191,7 +255,9 @@ function mergeConfig(base, custom) {
 
 export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) {
   assertRecord(config, configPath, "root");
-  if (config.schemaVersion !== 1) throw configError(configPath, "schemaVersion", "must be 1");
+  if (config.schemaVersion !== EQUAXIS_CONFIG_SCHEMA_VERSION) {
+    throw configError(configPath, "schemaVersion", `unsupported version ${config.schemaVersion}; expected ${EQUAXIS_CONFIG_SCHEMA_VERSION}`);
+  }
 
   assertRecord(config.runtime, configPath, "runtime");
   if (!["raw", "minimal", "standard", "full"].includes(config.runtime.profile)) {
@@ -340,8 +406,9 @@ export function loadEquaxisConfig(cwd) {
         reliability: readOptionalJson(cwd, LEGACY_RELIABILITY_FILE),
         memory: readOptionalJson(cwd, LEGACY_MEMORY_FILE)
       };
-  const merged = mergeConfig(DEFAULT_EQUAXIS_CONFIG, custom ?? {});
   const configPath = fs.existsSync(unifiedPath) ? unifiedPath : path.join(cwd, UNIFIED_CONFIG_FILE);
+  const migrated = migrateEquaxisConfig(custom ?? {}, configPath);
+  const merged = mergeConfig(DEFAULT_EQUAXIS_CONFIG, migrated ?? {});
   return validateEquaxisConfig(merged, configPath);
 }
 

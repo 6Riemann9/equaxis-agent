@@ -11,6 +11,7 @@ import { exportEvalLoopForHarbor } from "../src/eval-harbor-bridge.mjs";
 import { formatProtocolRegressionReport, runProtocolRegression } from "../src/protocol-regression.mjs";
 import { VersionStore } from "../src/version-store.mjs";
 import { buildRuntimeDashboard, formatRuntimeDashboard } from "../src/runtime-dashboard.mjs";
+import { formatConfigMigrationReport, runConfigMigration } from "../src/config-migration.mjs";
 import { checkExtensionContracts, extensionPaths, formatExtensionContractReport } from "../src/extension-compat.mjs";
 import { formatEquaxisBanner, shouldShowBanner } from "../src/cli-banner.mjs";
 
@@ -76,6 +77,12 @@ function handleLocalCommand(args) {
       confidenceZ: unifiedConfig.evaluation?.confidenceZ
     }));
     if (command === "export-harbor") return printJson(exportEvalLoopForHarbor({ projectRoot, ...parseJsonArg(payload) }));
+  }
+  if (group === "config" && command === "migrate") {
+    const report = runConfigMigration({ projectRoot, dryRun: !args.includes("--write") });
+    if (args.includes("--json")) return printJson(report);
+    console.log(formatConfigMigrationReport(report));
+    return true;
   }
   if (group === "runtime" && (command === "dashboard" || command === "status")) {
     const dashboard = buildRuntimeDashboard({ projectRoot, cwd: process.cwd(), env: process.env, config: unifiedConfig });
