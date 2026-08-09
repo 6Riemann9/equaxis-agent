@@ -1,0 +1,364 @@
+{
+  "schemaVersion": 1,
+  "manifestVersion": 1,
+  "piRange": ">=0.83.0 <0.84.0",
+  "config": {
+    "path": ".pi/equaxis.json",
+    "schemaVersion": 1
+  },
+  "runtimeServices": {
+    "version": 1,
+    "provides": [
+      "config",
+      "diagnostics",
+      "trace",
+      "status"
+    ]
+  },
+  "extensions": [
+    {
+      "id": "provider",
+      "entry": "provider.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "fatal",
+      "services": [
+        "config"
+      ],
+      "requires": [],
+      "provides": [
+        "provider:openai-inprior"
+      ]
+    },
+    {
+      "id": "reliability",
+      "entry": "reliability-harness.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "fatal",
+      "services": [
+        "config",
+        "diagnostics",
+        "trace",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "event:session_start",
+        "event:tool_call",
+        "event:tool_result",
+        "event:turn_start",
+        "flag:equaxis-mode",
+        "command:equaxis",
+        "command:equaxis-mode",
+        "command:equaxis-eval",
+        "command:equaxis-policy",
+        "command:equaxis-trace",
+        "core:approval",
+        "core:policy",
+        "core:trace"
+      ]
+    },
+    {
+      "id": "harness-panel",
+      "entry": "harness-panel.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "diagnostics",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "command:harness-flow",
+        "command:harness-panel",
+        "command:harness-clear",
+        "event:session_start",
+        "event:tool_call",
+        "event:tool_result"
+      ]
+    },
+    {
+      "id": "memory",
+      "entry": "memory.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "diagnostics",
+        "trace",
+        "status"
+      ],
+      "requires": [
+        "core:policy"
+      ],
+      "provides": [
+        "tool:memory_search",
+        "tool:recall",
+        "tool:memory_remember",
+        "tool:retain",
+        "tool:memory_add_fact",
+        "tool:learn",
+        "tool:reflect",
+        "tool:memory_query_entity",
+        "tool:memory_edit",
+        "command:memory",
+        "command:memory-search",
+        "event:session_start",
+        "event:before_agent_start"
+      ]
+    },
+    {
+      "id": "web-crawler",
+      "entry": "web-crawler.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config"
+      ],
+      "requires": [
+        "core:policy"
+      ],
+      "provides": [
+        "tool:web_crawl",
+        "command:web-fetch"
+      ]
+    },
+    {
+      "id": "tool-catalog",
+      "entry": "tool-catalog.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config"
+      ],
+      "requires": [
+        "core:policy"
+      ],
+      "provides": [
+        "tool:tool_search"
+      ]
+    },
+    {
+      "id": "tool-scheduler",
+      "entry": "tool-scheduler.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config"
+      ],
+      "requires": [
+        "core:policy"
+      ],
+      "provides": [
+        "tool:tool_schedule"
+      ]
+    },
+    {
+      "id": "protocol-tools",
+      "entry": "protocol-tools.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "trace",
+        "status"
+      ],
+      "requires": [
+        "core:policy"
+      ],
+      "provides": [
+        "tool:advisor_consult",
+        "tool:lsp_probe",
+        "tool:dap_probe",
+        "event:session_start"
+      ]
+    },
+    {
+      "id": "ask-user",
+      "entry": "vendor/my-pi-setup/extensions/ask-user",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config"
+      ],
+      "requires": [],
+      "provides": [
+        "tool:ask_user"
+      ]
+    },
+    {
+      "id": "copy-all",
+      "entry": "vendor/my-pi-setup/extensions/copy-all",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config"
+      ],
+      "requires": [],
+      "provides": [
+        "command:copy-all"
+      ]
+    },
+    {
+      "id": "firecrawl-search",
+      "entry": "vendor/my-pi-setup/extensions/firecrawl-search",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config"
+      ],
+      "requires": [],
+      "provides": [
+        "tool:search",
+        "tool:crawl",
+        "tool:scrape"
+      ]
+    },
+    {
+      "id": "model-info",
+      "entry": "vendor/my-pi-setup/extensions/model-info",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "event:session_start",
+        "event:model_select",
+        "event:thinking_level_select"
+      ]
+    },
+    {
+      "id": "summaries",
+      "entry": "vendor/my-pi-setup/extensions/summaries",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "command:summary-model",
+        "event:session_start",
+        "event:agent_settled"
+      ]
+    },
+    {
+      "id": "ui-customization",
+      "entry": "vendor/my-pi-setup/extensions/ui-customization",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "event:session_start",
+        "event:resources_discover"
+      ]
+    },
+    {
+      "id": "workflows",
+      "entry": "vendor/my-pi-setup/extensions/workflows",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "tool:workflow",
+        "command:workflows",
+        "event:session_start",
+        "event:session_shutdown"
+      ]
+    },
+    {
+      "id": "skills",
+      "entry": "skills.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "diagnostics",
+        "trace",
+        "status"
+      ],
+      "requires": [
+        "core:policy"
+      ],
+      "provides": [
+        "tool:skill_search",
+        "tool:skill_list",
+        "tool:skill_learn",
+        "command:skills",
+        "event:session_start",
+        "event:before_agent_start"
+      ]
+    },
+    {
+      "id": "subagent-engine",
+      "entry": "subagent-engine.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "trace",
+        "status"
+      ],
+      "requires": [
+        "core:policy"
+      ],
+      "provides": [
+        "tool:subagent_schedule",
+        "tool:subagent_spawn",
+        "tool:subagent_wait",
+        "tool:subagent_list",
+        "tool:subagent_cancel",
+        "tool:subagent_message",
+        "tool:subagent_messages"
+      ]
+    },
+    {
+      "id": "ast-tools",
+      "entry": "ast-tools.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "diagnostics",
+        "trace",
+        "status"
+      ],
+      "requires": [
+        "core:policy"
+      ],
+      "provides": [
+        "tool:ast_inspect",
+        "tool:ast_rename"
+      ]
+    }
+  ]
+}

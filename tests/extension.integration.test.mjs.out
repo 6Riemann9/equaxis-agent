@@ -1,0 +1,55 @@
+✔ loads as a real Pi extension and blocks high-risk calls without approval UI (21.0856ms)
+✔ keeps raw-secret blocking and trace redaction active in audit mode (6.2511ms)
+✔ blocks semantically invalid arguments before tool execution (5.9764ms)
+✔ blocks stale edit calls before tool execution (6.4379ms)
+✔ records runtime eval telemetry for completed tool calls (7.25ms)
+✔ exhausts repeated repairs for the same invalid field (5.7925ms)
+✖ loads Equaxis reliability and memory extensions together (31.5961ms)
+✔ memory extension exposes deterministic reflect tool (3.8433ms)
+✖ protocol tools extension exposes working advisor lsp and dap probes (5.1801ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 7
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1212.0383
+
+✖ failing tests:
+
+test at tests\extension.integration.test.mjs:253:1
+✖ loads Equaxis reliability and memory extensions together (31.5961ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     error: 'Failed to load extension: piEntry is required',
+  +     path: 'D:\\test\\mianshi\\equaxis-agent\\.pi\\extensions\\subagent-engine.ts'
+  +   }
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///D:/test/mianshi/equaxis-agent/tests/extension.integration.test.mjs:262:10)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { path: 'D:\\test\\mianshi\\equaxis-agent\\.pi\\extensions\\subagent-engine.ts', error: 'Failed to load extension: piEntry is required' } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests\extension.integration.test.mjs:314:1
+✖ protocol tools extension exposes working advisor lsp and dap probes (5.1801ms)
+  TypeError: this.transport.send is not a function
+      at LspClient.send (file:///D:/test/mianshi/equaxis-agent/src/lsp-client.mjs:27:20)
+      at LspClient.request (file:///D:/test/mianshi/equaxis-agent/src/lsp-client.mjs:34:10)
+      at LspClient.initialize (file:///D:/test/mianshi/equaxis-agent/src/lsp-client.mjs:43:31)
+      at runLspProbe (D:/test/mianshi/equaxis-agent/.pi/extensions/protocol-tools.ts:122:37)
+      at Object.execute (D:/test/mianshi/equaxis-agent/.pi/extensions/protocol-tools.ts:301:28)
+      at TestContext.<anonymous> (file:///D:/test/mianshi/equaxis-agent/tests/extension.integration.test.mjs:333:65)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7)

@@ -1,22 +1,16 @@
-import fs from "node:fs";
-import path from "node:path";
+import { DEFAULT_EQUAXIS_CONFIG, loadEquaxisConfig, validateEquaxisConfig } from "./equaxis-config.mjs";
 
-export const DEFAULT_MEMORY_CONFIG = Object.freeze({
-  enabled: true,
-  pythonCommand: "python",
-  rootDir: ".equaxis/memory",
-  autoRecall: true,
-  defaultWing: "equaxis",
-  defaultRoom: "general",
-  recallLimit: 5,
-  maxContextChars: 8000,
-  maxStoredMessageChars: 24000,
-  requestTimeoutMs: 60000
-});
+export const DEFAULT_MEMORY_CONFIG = structuredClone(DEFAULT_EQUAXIS_CONFIG.memory);
+
+export function validateMemoryConfig(config, configPath = ".pi/memory.json") {
+  const unified = {
+    ...structuredClone(DEFAULT_EQUAXIS_CONFIG),
+    memory: { ...structuredClone(DEFAULT_EQUAXIS_CONFIG.memory), ...config }
+  };
+  validateEquaxisConfig(unified, configPath);
+  return unified.memory;
+}
 
 export function loadMemoryConfig(cwd) {
-  const configPath = path.join(cwd, ".pi", "memory.json");
-  if (!fs.existsSync(configPath)) return structuredClone(DEFAULT_MEMORY_CONFIG);
-  const custom = JSON.parse(fs.readFileSync(configPath, "utf8"));
-  return { ...structuredClone(DEFAULT_MEMORY_CONFIG), ...custom };
+  return loadEquaxisConfig(cwd).memory;
 }

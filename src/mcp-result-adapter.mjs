@@ -1,3 +1,5 @@
+import { parseResourceUri } from "./resource-uri.mjs";
+
 function textFromContent(item) {
   if (item?.type === "text") return String(item.text ?? "");
   if (item?.type === "resource") return String(item.resource?.text ?? item.resource?.uri ?? "");
@@ -16,6 +18,9 @@ export function normalizeMcpResult(input) {
       mimeType: item.resource?.mimeType,
       text: item.resource?.text
     }));
+  const sourceResources = resources
+    .map((resource) => parseResourceUri(resource.uri))
+    .filter((resource) => resource.ok);
   const structured = response.structuredContent ?? response.data ?? null;
   const isError = response.isError === true || response.ok === false;
   const errorText = isError ? texts.join("\n") || String(response.error?.message ?? "MCP tool failed") : null;
@@ -35,7 +40,8 @@ export function normalizeMcpResult(input) {
       tool: input.tool,
       requestId: input.requestId,
       contentTypes: content.map((item) => item?.type).filter(Boolean),
-      sourceUris: resources.map((resource) => resource.uri).filter(Boolean),
+      sourceUris: sourceResources.map((resource) => resource.normalized),
+      sourceResources,
       raw: response
     }
   };

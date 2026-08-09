@@ -1,9 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { fileURLToPath } from "node:url";
+
+const credentialScript = fileURLToPath(
+  new URL("../../scripts/read-provider-key.mjs", import.meta.url)
+);
 
 export default function inpriorOpenAIProvider(pi: ExtensionAPI): void {
   pi.registerProvider("openai-inprior", {
     baseUrl: "https://api.inprior.com",
-    apiKey: "!node scripts/read-provider-key.mjs",
+    apiKey: `!node ${JSON.stringify(credentialScript)}`,
     api: "openai-responses",
     authHeader: true,
     models: [

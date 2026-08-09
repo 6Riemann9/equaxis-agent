@@ -6,6 +6,7 @@ import {
   classifyToolCall,
   containsSecretLikeInput,
   isOutsideWorkspace,
+  isWithinConfiguredRoot,
   matchesProtectedPath,
   shouldBlockForLimits,
   validateToolInput
@@ -20,6 +21,9 @@ const config = {
 test("classifies destructive bash as high risk", () => {
   assert.equal(classifyBash("git reset --hard HEAD~1").risk, RISK.HIGH);
   assert.equal(classifyBash("Remove-Item ./out -Recurse -Force").risk, RISK.HIGH);
+  assert.equal(classifyBash("rm --recursive ./out").risk, RISK.HIGH);
+  assert.equal(classifyBash("powershell -EncodedCommand ZQBjAGgAbwA=").risk, RISK.HIGH);
+  assert.equal(classifyBash("git clean --force -d").risk, RISK.HIGH);
 });
 
 test("classifies package installation as medium risk", () => {
@@ -29,11 +33,43 @@ test("classifies package installation as medium risk", () => {
 test("protects sensitive file paths", () => {
   assert.equal(matchesProtectedPath("./.env", config.protectPaths), ".env");
   assert.equal(matchesProtectedPath("certs/server.pem", config.protectPaths), "*.pem");
+  assert.equal(matchesProtectedPath("src/.environment.ts", config.protectPaths), null);
+  assert.equal(matchesProtectedPath("src/.env.local", config.protectPaths), ".env");
 });
 
 test("detects writes outside workspace", () => {
   assert.equal(isOutsideWorkspace("../outside.txt", "D:/workspace/project"), true);
   assert.equal(isOutsideWorkspace("src/file.ts", "D:/workspace/project"), false);
+});
+
+test("auto-approves only explicitly rooted external edits", () => {
+  const workspace = "D:/workspace/project";
+  const approvedRoot = "D:/workspace/shared";
+  const autoConfig = {
+    ...config,
+    approval: {
+      ...config.approval,
+      externalEditPolicy: "auto",
+      externalEditRoots: [approvedRoot]
+    }
+  };
+  assert.equal(isWithinConfiguredRoot("D:/workspace/shared/file.txt", workspace, [approvedRoot]), true);
+  const approved = classifyToolCall("write", { path: "../shared/file.txt" }, autoConfig, workspace);
+  assert.equal(approved.risk, RISK.MEDIUM);
+  assert.equal(approved.approval, false);
+  const unapproved = classifyToolCall("write", { path: "../other/file.txt" }, autoConfig, workspace);
+  assert.equal(unapproved.risk, RISK.HIGH);
+  assert.equal(unapproved.approval, true);
+});
+
+test("denies external edits when configured to deny", () => {
+  const denyConfig = {
+    ...config,
+    approval: { ...config.approval, externalEditPolicy: "deny", externalEditRoots: [] }
+  };
+  const result = classifyToolCall("edit", { path: "../outside/file.ts" }, denyConfig, "D:/workspace/project");
+  assert.equal(result.risk, RISK.BLOCKED);
+  assert.equal(result.approval, false);
 });
 
 test("resolves symlinked paths before workspace boundary checks", async () => {
@@ -55,6 +91,11 @@ test("rejects malformed semantic tool arguments", () => {
   assert.equal(validateToolInput("write", { path: "" }).code, "MISSING_ARGUMENT");
   assert.equal(validateToolInput("web_crawl", { url: "file:///etc/passwd" }).code, "INVALID_URL_SCHEME");
   assert.equal(validateToolInput("memory_search", { query: "   " }).retryable, true);
+  assert.equal(validateToolInput("advisor_consult", { kind: "other" }).code, "INVALID_ADVISOR_KIND");
+  assert.equal(validateToolInput("dap_probe", { mode: "process", request: "launch" }).field, "program");
+  assert.equal(validateToolInput("dap_probe", { mode: "process", request: "attach", port: 5678 }).field, "host");
+  assert.equal(validateToolInput("dap_probe", { mode: "process", request: "attach", host: "127.0.0.1", port: 70000 }).field, "port");
+  assert.equal(validateToolInput("dap_probe", { mode: "process", request: "attach", host: "127.0.0.1", port: 5678 }), null);
   assert.equal(validateToolInput("bash", { command: "Get-ChildItem" }), null);
 });
 
@@ -65,6 +106,13 @@ test("unregistered tools are not classified as low risk", () => {
 test("blocks raw secrets before approval", () => {
   assert.equal(containsSecretLikeInput({ content: 'api_key="abcdefgh123456"' }), true);
   assert.equal(classifyToolCall("write", { path: "notes.txt", content: 'token="abcdefgh123456"' }, config, process.cwd()).risk, RISK.BLOCKED);
+  assert.equal(containsSecretLikeInput({ value: "sk-abcdefghijklmnopqrstuv" }), true);
+});
+
+test("blocks indirect shell writes to protected paths", () => {
+  const result = classifyToolCall("bash", { command: "Set-Content .env 'DEBUG=true'" }, config, process.cwd());
+  assert.equal(result.risk, RISK.BLOCKED);
+  assert.match(result.reason, /protected path/);
 });
 
 test("enforces per-turn tool limits", () => {
@@ -78,6 +126,19 @@ test("classifies web crawling as external network access", () => {
   );
 });
 
+test("classifies protocol tools as low-risk local probes", () => {
+  assert.equal(classifyToolCall("advisor_consult", { kind: "plan" }, config, process.cwd()).risk, RISK.LOW);
+  assert.equal(classifyToolCall("lsp_probe", {}, config, process.cwd()).risk, RISK.LOW);
+  assert.equal(classifyToolCall("dap_probe", {}, config, process.cwd()).risk, RISK.LOW);
+});
+
+test("governs AST inspection preview and application", () => {
+  assert.equal(classifyToolCall("ast_inspect", { path: "src/app.ts" }, config, process.cwd()).risk, RISK.LOW);
+  assert.equal(classifyToolCall("ast_rename", { path: "src/app.ts", newName: "next" }, config, process.cwd()).risk, RISK.LOW);
+  assert.equal(classifyToolCall("ast_rename", { path: "src/app.ts", newName: "next", apply: true, expectedHash: "a".repeat(64) }, config, process.cwd()).risk, RISK.MEDIUM);
+  assert.equal(classifyToolCall("ast_rename", { path: ".env", newName: "next", apply: true, expectedHash: "a".repeat(64) }, config, process.cwd()).risk, RISK.BLOCKED);
+});
+
 test("governs durable memory mutations", () => {
   assert.equal(
     classifyToolCall("memory_remember", { content: "User prefers concise answers" }, config, process.cwd()).risk,
@@ -86,6 +147,14 @@ test("governs durable memory mutations", () => {
   assert.equal(
     classifyToolCall("memory_search", { query: "user preference" }, config, process.cwd()).risk,
     RISK.LOW
+  );
+  assert.equal(
+    classifyToolCall("reflect", { steps: [] }, config, process.cwd()).risk,
+    RISK.LOW
+  );
+  assert.equal(
+    classifyToolCall("reflect", { steps: [], store: true }, config, process.cwd()).risk,
+    RISK.MEDIUM
   );
   assert.equal(
     classifyToolCall("memory_remember", { content: 'token="abcdefgh123456"' }, config, process.cwd()).risk,

@@ -8,7 +8,7 @@ test("normalizes MCP text, structured content and resources", () => {
     response: {
       content: [
         { type: "text", text: "score=0.91" },
-        { type: "resource", resource: { uri: "kb://case-1", mimeType: "text/plain", text: "evidence" } }
+        { type: "resource", resource: { uri: "memory://equaxis/cases/case-1", mimeType: "text/plain", text: "evidence" } }
       ],
       structuredContent: { score: 0.91 }
     }
@@ -16,7 +16,9 @@ test("normalizes MCP text, structured content and resources", () => {
   assert.equal(result.ok, true);
   assert.equal(result.data.text, "score=0.91\nevidence");
   assert.deepEqual(result.data.structured, { score: 0.91 });
-  assert.deepEqual(result.meta.sourceUris, ["kb://case-1"]);
+  assert.deepEqual(result.meta.sourceUris, ["memory://equaxis/cases/case-1"]);
+  assert.equal(result.meta.sourceResources[0].scheme, "memory");
+  assert.equal(result.meta.sourceResources[0].kind, "memory");
   assert.equal(result.meta.raw.structuredContent.score, 0.91);
 });
 
@@ -32,7 +34,7 @@ test("adapter injects server/tool/request identity", async () => {
   const result = await call({ query: "x" }, { requestId: "req-1" });
   assert.deepEqual(result.meta, {
     protocol: "mcp", server: "s", tool: "t", requestId: "req-1",
-    contentTypes: ["text"], sourceUris: [], raw: { content: [{ type: "text", text: "ok" }] }
+    contentTypes: ["text"], sourceUris: [], sourceResources: [], raw: { content: [{ type: "text", text: "ok" }] }
   });
 });
 

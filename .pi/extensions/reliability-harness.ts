@@ -1,13 +1,13 @@
-import fs from "node:fs";
-import path from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
   ToolCallEvent,
   ToolResultEvent
 } from "@earendil-works/pi-coding-agent";
-import { loadConfig } from "../../src/config.mjs";
+import { EvalLoop } from "../../src/eval-loop.mjs";
+import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { RISK, classifyToolCall, shouldBlockForLimits, validateToolInput } from "../../src/policy.mjs";
+import { validateEditFreshness } from "../../src/stale-edit.mjs";
 import { registerRepairAttempt, validationFeedback } from "../../src/tool-repair.mjs";
 
 type HarnessMode = "enforce" | "audit" | "off";
@@ -16,10 +16,13 @@ type Phase = "idle" | "planning" | "executing" | "awaiting_approval" | "complete
 interface HarnessConfig {
   mode: HarnessMode;
   traceDir: string;
+  trace: { maxFileBytes: number; maxFiles: number };
   protectPaths: string[];
   approval: {
     highRiskBash: boolean;
     writesOutsideWorkspace: boolean;
+    externalEditPolicy: "prompt" | "auto" | "deny";
+    externalEditRoots: string[];
     sessionFork: boolean;
   };
   limits: {
@@ -46,6 +49,12 @@ interface PendingTool {
   startedAt: number;
   risk: string;
   reason: string;
+  capability: string;
+}
+
+interface ActiveModel {
+  provider: string;
+  id: string;
 }
 
 interface PersistedState extends Omit<HarnessState, "toolCallsThisTurn" | "highRiskCallsThisTurn"> {}
@@ -98,6 +107,29 @@ function compactInput(event: ToolCallEvent, redact = false): Record<string, unkn
   return { keys: Object.keys(input) };
 }
 
+function capabilityForTool(toolName: string): string {
+  if (toolName === "read") return "repo-inspect";
+  if (toolName === "write" || toolName === "edit") return "code-edit";
+  if (toolName === "bash") return "command-execution";
+  if (toolName === "web_crawl" || toolName === "search" || toolName === "scrape" || toolName === "crawl") return "web-research";
+  if (toolName === "tool_search" || toolName === "tool_schedule") return "tool-orchestration";
+  if (toolName === "advisor_consult") return "advisor-review";
+  if (toolName === "lsp_probe") return "language-protocol";
+  if (toolName === "dap_probe") return "debug-protocol";
+  if (toolName === "memory_search" || toolName === "recall" || toolName === "memory_query_entity") return "memory-recall";
+  if (toolName === "memory_remember" || toolName === "retain" || toolName === "memory_add_fact" || toolName === "learn" || toolName === "memory_edit") return "memory-write";
+  if (toolName === "acp_delegate" || toolName === "workflow") return "subagent-orchestration";
+  return "unlabeled";
+}
+
+function currentModelFromContext(ctx: ExtensionContext): ActiveModel {
+  const model = ctx.model as { provider?: string; id?: string } | undefined;
+  return {
+    provider: model?.provider ?? "unknown",
+    id: model?.id ?? "unknown"
+  };
+}
+
 function persisted(state: HarnessState): PersistedState {
   return {
     mode: state.mode,
@@ -112,11 +144,18 @@ function persisted(state: HarnessState): PersistedState {
 }
 
 export default function reliabilityHarness(pi: ExtensionAPI): void {
-  let config = loadConfig(process.cwd()) as HarnessConfig;
+  const services = createExtensionRuntimeServices({
+    cwd: process.cwd(),
+    extensionId: "reliability",
+    pi
+  });
+  let config = services.config.reliability as HarnessConfig;
   let state = initialState(isMode(config.mode) ? config.mode : "enforce");
-  let traceFile = path.resolve(process.cwd(), config.traceDir, "traces.jsonl");
+  let traceFile = services.paths.traceFile;
   const pending = new Map<string, PendingTool>();
   const repairAttempts = new Map<string, number>();
+  const evalLoop = new EvalLoop();
+  let activeModel: ActiveModel = { provider: "unknown", id: "unknown" };
 
   pi.registerFlag("equaxis-mode", {
     description: "Equaxis governance mode: enforce, audit, or off",
@@ -124,25 +163,13 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   });
 
   function trace(ctx: ExtensionContext, event: string, data: Record<string, unknown> = {}): void {
-    const record = {
-      timestamp: new Date().toISOString(),
-      sessionId: ctx.sessionManager.getSessionId(),
-      mode: state.mode,
-      phase: state.phase,
-      event,
-      ...data
-    };
-    try {
-      fs.mkdirSync(path.dirname(traceFile), { recursive: true });
-      fs.appendFileSync(traceFile, `${JSON.stringify(record)}\n`, "utf8");
-    } catch (error) {
-      if (ctx.hasUI) ctx.ui.notify(`Harness trace failed: ${String(error)}`, "error");
-    }
+    services.trace.record(ctx, event, { mode: state.mode, phase: state.phase, ...data });
   }
 
   function updateStatus(ctx: ExtensionContext): void {
     const risk = state.lastRisk === RISK.LOW ? "" : ` · ${state.lastRisk}`;
-    ctx.ui.setStatus(
+    services.status.set(
+      ctx,
       STATUS_KEY,
       `Equaxis ${state.mode} · ${state.phase}${risk} · blocked ${state.blockedCalls}`
     );
@@ -187,13 +214,14 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   }
 
   pi.on("session_start", async (event, ctx) => {
-    config = loadConfig(ctx.cwd) as HarnessConfig;
-    traceFile = path.resolve(ctx.cwd, config.traceDir, "traces.jsonl");
+    config = services.configure(ctx.cwd).reliability as HarnessConfig;
+    traceFile = services.paths.traceFile;
     restoreState(ctx);
     const cliMode = pi.getFlag("equaxis-mode");
     if (isMode(cliMode)) state.mode = cliMode;
     pending.clear();
     repairAttempts.clear();
+    activeModel = currentModelFromContext(ctx);
     trace(ctx, "session_start", { reason: event.reason, traceFile });
     updateStatus(ctx);
   });
@@ -208,6 +236,10 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     trace(ctx, "agent_requested", { promptLength: event.prompt.length });
     if (state.mode === "off") return;
     return { systemPrompt: `${event.systemPrompt}${RELIABILITY_PROMPT}` };
+  });
+
+  pi.on("model_select", async (event) => {
+    activeModel = { provider: event.model.provider, id: event.model.id };
   });
 
   pi.on("turn_start", async (event, ctx) => {
@@ -225,7 +257,8 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
 
     let classification: { risk: string; reason: string; approval: boolean };
     try {
-      const validation = validateToolInput(event.toolName, event.input);
+      const validation = validateToolInput(event.toolName, event.input)
+        ?? validateEditFreshness(event.toolName, event.input, { cwd: ctx.cwd });
       if (validation) {
         const repair = registerRepairAttempt(
           repairAttempts,
@@ -330,7 +363,8 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     pending.set(event.toolCallId, {
       startedAt: performance.now(),
       risk: classification.risk,
-      reason: classification.reason
+      reason: classification.reason,
+      capability: capabilityForTool(event.toolName)
     });
     trace(ctx, state.mode === "audit" && (policyBlocked || limitReason) ? "tool_audit_violation" : "tool_allowed", {
       ...decision,
@@ -345,12 +379,25 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     pending.delete(event.toolCallId);
     if (event.isError) state.failedCalls += 1;
     state.phase = "planning";
+    const latencyMs = call ? Number((performance.now() - call.startedAt).toFixed(2)) : undefined;
+    const evalEvent = evalLoop.record({
+      provider: activeModel.provider,
+      modelId: activeModel.id,
+      toolName: event.toolName,
+      capability: call?.capability ?? capabilityForTool(event.toolName),
+      outcome: event.isError ? "failure" : "success",
+      errorCode: event.isError ? "TOOL_ERROR" : null,
+      latencyMs,
+      traceId: event.toolCallId
+    });
+    trace(ctx, "eval_outcome_recorded", evalEvent);
     trace(ctx, "tool_result", {
       toolCallId: event.toolCallId,
       toolName: event.toolName,
       risk: call?.risk ?? "unknown",
+      capability: call?.capability ?? capabilityForTool(event.toolName),
       isError: event.isError,
-      latencyMs: call ? Number((performance.now() - call.startedAt).toFixed(2)) : undefined
+      latencyMs
     });
     updateStatus(ctx);
   });
@@ -427,6 +474,6 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
 
   pi.registerCommand("equaxis-eval", {
     description: "Show the current reliability evaluation snapshot",
-    handler: async (_args, ctx) => ctx.ui.notify(JSON.stringify(evalSnapshot()), "info")
+    handler: async (_args, ctx) => ctx.ui.notify(JSON.stringify({ reliability: evalSnapshot(), runtime: evalLoop.snapshot() }), "info")
   });
 }

@@ -1,6 +1,10 @@
 {
   "mode": "enforce",
   "traceDir": ".pi/runtime",
+  "trace": {
+    "maxFileBytes": 5242880,
+    "maxFiles": 3
+  },
   "protectPaths": [
     ".env",
     ".git/",

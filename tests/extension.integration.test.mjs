@@ -14,6 +14,7 @@ function makeContext(cwd) {
     cwd,
     mode: "json",
     hasUI: false,
+    model: { provider: "test-provider", id: "test-model" },
     ui: {
       notify() {},
       setStatus() {}
@@ -157,6 +158,71 @@ test("blocks semantically invalid arguments before tool execution", async (t) =>
   assert.match(trace, /"retryable":true/);
 });
 
+test("blocks stale edit calls before tool execution", async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-stale-edit-test-"));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
+  fs.writeFileSync(path.join(tempRoot, "file.txt"), "current\n", "utf8");
+  fs.writeFileSync(
+    path.join(tempRoot, ".pi", "reliability.json"),
+    JSON.stringify({ mode: "enforce", traceDir: ".pi/runtime" }),
+    "utf8"
+  );
+
+  const loaded = await discoverAndLoadExtensions([extensionPath], tempRoot, path.join(tempRoot, "agent-home"));
+  assert.deepEqual(loaded.errors, []);
+  const extension = loaded.extensions[0];
+  const ctx = makeContext(tempRoot);
+  for (const handler of extension.handlers.get("session_start") ?? []) {
+    await handler({ type: "session_start", reason: "startup" }, ctx);
+  }
+  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
+  const result = await toolCallHandler(
+    { type: "tool_call", toolCallId: "stale-1", toolName: "edit", input: { path: "file.txt", oldText: "previous", newText: "next" } },
+    ctx
+  );
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /STALE_EDIT_OLD_TEXT_MISSING/);
+  const trace = fs.readFileSync(path.join(tempRoot, ".pi", "runtime", "traces.jsonl"), "utf8");
+  assert.match(trace, /tool_validation_failed/);
+  assert.match(trace, /STALE_EDIT_OLD_TEXT_MISSING/);
+});
+
+test("records runtime eval telemetry for completed tool calls", async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-eval-telemetry-test-"));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tempRoot, ".pi", "reliability.json"),
+    JSON.stringify({ mode: "enforce", traceDir: ".pi/runtime" }),
+    "utf8"
+  );
+
+  const loaded = await discoverAndLoadExtensions([extensionPath], tempRoot, path.join(tempRoot, "agent-home"));
+  assert.deepEqual(loaded.errors, []);
+  const extension = loaded.extensions[0];
+  const ctx = makeContext(tempRoot);
+  for (const handler of extension.handlers.get("session_start") ?? []) {
+    await handler({ type: "session_start", reason: "startup" }, ctx);
+  }
+  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
+  const [toolResultHandler] = extension.handlers.get("tool_result") ?? [];
+  const allowed = await toolCallHandler(
+    { type: "tool_call", toolCallId: "read-1", toolName: "read", input: { path: "README.md" } },
+    ctx
+  );
+  assert.equal(allowed, undefined);
+  await toolResultHandler(
+    { type: "tool_result", toolCallId: "read-1", toolName: "read", isError: false },
+    ctx
+  );
+
+  const trace = fs.readFileSync(path.join(tempRoot, ".pi", "runtime", "traces.jsonl"), "utf8");
+  assert.match(trace, /eval_outcome_recorded/);
+  assert.match(trace, /repo-inspect/);
+  assert.match(trace, /test-model/);
+});
+
 test("exhausts repeated repairs for the same invalid field", async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-repair-limit-test-"));
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
@@ -199,11 +265,19 @@ test("loads Equaxis reliability and memory extensions together", async (t) => {
   const tools = new Set(loaded.extensions.flatMap((extension) => [...extension.tools.keys()]));
   const commands = new Set(loaded.extensions.flatMap((extension) => [...extension.commands.keys()]));
   assert.equal(tools.has("memory_search"), true);
+  assert.equal(tools.has("recall"), true);
   assert.equal(tools.has("memory_remember"), true);
+  assert.equal(tools.has("retain"), true);
   assert.equal(tools.has("memory_add_fact"), true);
+  assert.equal(tools.has("learn"), true);
+  assert.equal(tools.has("reflect"), true);
+  assert.equal(tools.has("memory_edit"), true);
   assert.equal(commands.has("memory-search"), true);
   assert.equal(tools.has("tool_search"), true);
   assert.equal(tools.has("tool_schedule"), true);
+  assert.equal(tools.has("advisor_consult"), true);
+  assert.equal(tools.has("lsp_probe"), true);
+  assert.equal(tools.has("dap_probe"), true);
   assert.equal(commands.has("equaxis-policy"), true);
 
   const provider = loaded.runtime.pendingProviderRegistrations.find(
@@ -215,4 +289,102 @@ test("loads Equaxis reliability and memory extensions together", async (t) => {
   assert.equal(provider.config.models?.[0]?.id, "gpt-5.5");
   assert.equal(provider.config.models?.[0]?.contextWindow, 1_000_000);
   assert.equal(provider.config.models?.[0]?.thinkingLevelMap?.xhigh, "xhigh");
+});
+
+test("memory extension exposes deterministic reflect tool", async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-memory-reflect-test-"));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const loaded = await discoverAndLoadExtensions(
+    [path.join(extensionsDir, "memory.ts")],
+    tempRoot,
+    path.join(tempRoot, "agent-home")
+  );
+  assert.deepEqual(loaded.errors, []);
+  const extension = loaded.extensions.find((item) => item.path.endsWith("memory.ts"));
+  assert.ok(extension);
+  const reflected = await extension.tools.get("reflect").definition.execute("reflect-1", {
+    goal: "repair",
+    status: "failed",
+    steps: [{ id: "s1", toolName: "read", status: "failed", errorCode: "RESULT_INCOMPLETE" }]
+  });
+  assert.equal(reflected.details.lessonCount, 2);
+  assert.equal(reflected.details.promotable, true);
+});
+
+test("protocol tools extension exposes working advisor lsp and dap probes", async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-protocol-tools-test-"));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const loaded = await discoverAndLoadExtensions(
+    [path.join(extensionsDir, "protocol-tools.ts")],
+    tempRoot,
+    path.join(tempRoot, "agent-home")
+  );
+  assert.deepEqual(loaded.errors, []);
+  const extension = loaded.extensions.find((item) => item.path.endsWith("protocol-tools.ts"));
+  assert.ok(extension);
+
+  const advisor = await extension.tools.get("advisor_consult").definition.execute("advisor-1", {
+    kind: "plan",
+    steps: 5,
+    evidence: "touches protocol tooling"
+  });
+  assert.equal(advisor.details.request.enabled, false);
+
+  const lsp = await extension.tools.get("lsp_probe").definition.execute("lsp-1", {
+    documentPath: "probe.js",
+    text: "// TODO\nconst value = 1;\n",
+    position: { line: 0, character: 0 }
+  });
+  assert.equal(lsp.details.initialized, true);
+  assert.equal(lsp.details.diagnostics.length, 1);
+
+  const dap = await extension.tools.get("dap_probe").definition.execute("dap-1", {
+    source: "probe.js",
+    breakpoints: [{ line: 1 }],
+    expression: "1 + 1"
+  });
+  assert.equal(dap.details.initialized, true);
+  assert.equal(dap.details.breakpoints[0].verified, true);
+  assert.equal(dap.details.evaluation.result, "2");
+
+  const attached = await extension.tools.get("dap_probe").definition.execute("dap-attach", {
+    request: "attach",
+    host: "127.0.0.1",
+    port: 5678,
+    source: "probe.py",
+    breakpoints: [{ line: 1 }]
+  });
+  assert.equal(attached.details.request, "attach");
+  assert.equal(attached.details.session.phase, "stopped");
+
+  await assert.rejects(
+    () => extension.tools.get("dap_probe").definition.execute("dap-process-missing", { mode: "process" }),
+    /DAP process program is required/
+  );
+  await assert.rejects(
+    () => extension.tools.get("lsp_probe").definition.execute("lsp-process-override", {
+      mode: "process",
+      command: "typescript-language-server"
+    }),
+    /command override is disabled/
+  );
+});
+
+test("AST extension previews and applies a hash-checked rename", async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-ast-extension-test-"));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(tempRoot, "sample.ts"), "const value = 1;\\nconsole.log(value);\\n", "utf8");
+  const loaded = await discoverAndLoadExtensions([
+    path.join(extensionsDir, "ast-tools.ts")
+  ], tempRoot, path.join(tempRoot, "agent-home"));
+  assert.deepEqual(loaded.errors, []);
+  const extension = loaded.extensions.find((item) => item.path.endsWith("ast-tools.ts"));
+  assert.ok(extension);
+  const ctx = makeContext(tempRoot);
+  for (const handler of extension.handlers.get("session_start") ?? []) await handler({ type: "session_start", reason: "startup" }, ctx);
+  const preview = await extension.tools.get("ast_rename").definition.execute("ast-preview", { path: "sample.ts", line: 0, character: 7, newName: "renamed" });
+  assert.equal(preview.details.applied, false);
+  const applied = await extension.tools.get("ast_rename").definition.execute("ast-apply", { path: "sample.ts", line: 0, character: 7, newName: "renamed", apply: true, expectedHash: preview.details.expectedHash });
+  assert.equal(applied.details.applied, true);
+  assert.match(fs.readFileSync(path.join(tempRoot, "sample.ts"), "utf8"), /renamed/);
 });

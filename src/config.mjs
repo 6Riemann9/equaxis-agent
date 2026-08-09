@@ -1,24 +1,31 @@
-import fs from "node:fs";
-import path from "node:path";
+import { DEFAULT_EQUAXIS_CONFIG, loadEquaxisConfig, validateEquaxisConfig } from "./equaxis-config.mjs";
 
-export const DEFAULT_CONFIG = Object.freeze({
-  mode: "enforce",
-  traceDir: ".pi/runtime",
-  protectPaths: [".env", ".git/", "node_modules/", "*.pem", "*.key"],
-  approval: { highRiskBash: true, writesOutsideWorkspace: true, sessionFork: false },
-  limits: { maxToolCallsPerTurn: 30, maxHighRiskCallsPerTurn: 3, maxRepairAttemptsPerError: 2 },
-  toolRouting: { enabled: true, maxCandidates: 5 }
-});
+export const DEFAULT_CONFIG = structuredClone(DEFAULT_EQUAXIS_CONFIG.reliability);
+
+export function validateConfig(config, configPath = ".pi/reliability.json") {
+  const unified = {
+    ...structuredClone(DEFAULT_EQUAXIS_CONFIG),
+    reliability: {
+      ...structuredClone(DEFAULT_EQUAXIS_CONFIG.reliability),
+      ...config,
+      trace: { ...DEFAULT_EQUAXIS_CONFIG.reliability.trace, ...(config.trace ?? {}) },
+      approval: { ...DEFAULT_EQUAXIS_CONFIG.reliability.approval, ...(config.approval ?? {}) },
+      limits: { ...DEFAULT_EQUAXIS_CONFIG.reliability.limits, ...(config.limits ?? {}) },
+      toolRouting: { ...DEFAULT_EQUAXIS_CONFIG.reliability.toolRouting, ...(config.toolRouting ?? {}) }
+    }
+  };
+  validateEquaxisConfig(unified, configPath);
+  return unified.reliability;
+}
 
 export function loadConfig(cwd) {
-  const configPath = path.join(cwd, ".pi", "reliability.json");
-  if (!fs.existsSync(configPath)) return structuredClone(DEFAULT_CONFIG);
-  const custom = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  const unified = loadEquaxisConfig(cwd);
   return {
-    ...structuredClone(DEFAULT_CONFIG),
-    ...custom,
-    approval: { ...DEFAULT_CONFIG.approval, ...(custom.approval ?? {}) },
-    limits: { ...DEFAULT_CONFIG.limits, ...(custom.limits ?? {}) },
-    toolRouting: { ...DEFAULT_CONFIG.toolRouting, ...(custom.toolRouting ?? {}) }
+    ...unified.reliability,
+    schemaVersion: unified.schemaVersion,
+    runtime: unified.runtime,
+    extensions: unified.extensions,
+    memory: unified.memory,
+    unified
   };
 }

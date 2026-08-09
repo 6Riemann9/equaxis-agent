@@ -10,5 +10,6 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "include": [".pi/extensions/**/*.ts", "src/**/*.mjs"]
+  "include": [".pi/extensions/*.ts", "src/**/*.mjs"],
+  "exclude": [".pi/extensions/vendor/**", ".pi/npm/**"]
 }

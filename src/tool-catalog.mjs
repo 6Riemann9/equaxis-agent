@@ -7,9 +7,17 @@ const DEFAULT_TOOLS = [
   { name: "bash", namespace: "execution", summary: "Run a shell command in the current workspace.", keywords: ["shell", "command", "terminal", "命令", "执行"] },
   { name: "web_crawl", namespace: "web", summary: "Fetch public HTTP(S) pages with SSRF and redirect checks.", keywords: ["web", "http", "url", "网页", "抓取"] },
   { name: "memory_search", namespace: "memory", summary: "Search durable semantic memory.", keywords: ["memory", "search", "recall", "记忆", "搜索"] },
+  { name: "recall", namespace: "memory", summary: "Recall relevant memory with the user-facing Memory UX action.", keywords: ["memory", "search", "recall", "remember", "记忆", "回忆"] },
   { name: "memory_remember", namespace: "memory", summary: "Persist durable information for future sessions.", keywords: ["memory", "remember", "persist", "记住", "保存"] },
+  { name: "retain", namespace: "memory", summary: "Retain durable facts, preferences, decisions or discoveries.", keywords: ["memory", "retain", "remember", "persist", "保留", "记住"] },
   { name: "memory_add_fact", namespace: "memory", summary: "Add a subject-predicate-object graph fact.", keywords: ["memory", "fact", "graph", "事实", "知识图谱"] },
-  { name: "memory_query_entity", namespace: "memory", summary: "Query facts connected to an entity.", keywords: ["memory", "entity", "graph", "实体", "关系"] }
+  { name: "learn", namespace: "memory", summary: "Learn a stable subject-predicate-object memory fact.", keywords: ["memory", "learn", "fact", "graph", "学习", "事实"] },
+  { name: "reflect", namespace: "memory", summary: "Derive evidence-backed lessons from a completed run and optionally retain them.", keywords: ["memory", "reflect", "lesson", "postmortem", "反思", "复盘"] },
+  { name: "memory_query_entity", namespace: "memory", summary: "Query facts connected to an entity.", keywords: ["memory", "entity", "graph", "实体", "关系"] },
+  { name: "memory_edit", namespace: "memory", summary: "Delete a reviewed stale or incorrect memory drawer.", keywords: ["memory", "edit", "delete", "forget", "修改", "删除"] },
+  { name: "advisor_consult", namespace: "advisor", summary: "Prepare a redacted recommendation-only advisor request for risky decisions.", keywords: ["advisor", "review", "recommend", "risk", "建议", "审查"] },
+  { name: "lsp_probe", namespace: "protocol", summary: "Run an LSP initialize/definition/diagnostics probe using memory or a configured stdio server.", keywords: ["lsp", "language", "definition", "diagnostics", "语言服务器"] },
+  { name: "dap_probe", namespace: "protocol", summary: "Launch or attach through DAP and inspect breakpoints, threads, stacks, scopes, variables, and session state.", keywords: ["dap", "debug", "breakpoint", "stack", "调试"] }
 ];
 
 const tokenize = (value) => String(value ?? "").toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter(Boolean);

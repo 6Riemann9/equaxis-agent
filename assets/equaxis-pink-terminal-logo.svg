@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="619" height="255" viewBox="0 0 619 255" role="img" aria-labelledby="title desc">
+  <title id="title">Equaxis pink terminal logo</title>
+  <desc id="desc">A dark terminal style Equaxis wordmark inspired by pixel neon UI, with pink and purple block lettering and a Windows project path underneath.</desc>
+  <defs>
+    <linearGradient id="pinkStripes" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ff4fa3"/>
+      <stop offset="12%" stop-color="#ff78bd"/>
+      <stop offset="24%" stop-color="#ff9bd2"/>
+      <stop offset="36%" stop-color="#d66bff"/>
+      <stop offset="48%" stop-color="#ff4fa3"/>
+      <stop offset="60%" stop-color="#ff78bd"/>
+      <stop offset="72%" stop-color="#b96bff"/>
+      <stop offset="84%" stop-color="#ff5aac"/>
+      <stop offset="100%" stop-color="#ff9bd2"/>
+    </linearGradient>
+
+    <filter id="softGlow" x="-20%" y="-30%" width="140%" height="160%">
+      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="
+        1 0 0 0 0.96
+        0 1 0 0 0.08
+        0 0 1 0 0.55
+        0 0 0 0.78 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <pattern id="scanlines" width="6" height="6" patternUnits="userSpaceOnUse">
+      <rect width="6" height="6" fill="#1d1b2b"/>
+      <rect y="0" width="6" height="1" fill="#2b2540" opacity="0.45"/>
+    </pattern>
+  </defs>
+
+  <rect width="619" height="255" fill="#1d1b2b"/>
+  <rect width="619" height="255" fill="url(#scanlines)" opacity="0.28"/>
+
+  <g font-family="Consolas, 'Cascadia Mono', 'SFMono-Regular', monospace" font-weight="900" font-size="70" letter-spacing="-7">
+    <text x="82" y="128" fill="none" stroke="#2d8cff" stroke-width="2.4" opacity="0.95">EQUAXIS</text>
+    <text x="88" y="134" fill="none" stroke="#7b3cff" stroke-width="1.9" opacity="0.8">EQUAXIS</text>
+    <text x="76" y="122" fill="none" stroke="#ff2d95" stroke-width="1.6" opacity="0.82">EQUAXIS</text>
+  </g>
+
+  <g filter="url(#softGlow)" font-family="Consolas, 'Cascadia Mono', 'SFMono-Regular', monospace" font-weight="900" font-size="70" letter-spacing="-7">
+    <text x="80" y="126" fill="url(#pinkStripes)">EQUAXIS</text>
+  </g>
+
+  <g opacity="0.34">
+    <rect x="108" y="54" width="10" height="82" fill="#ffd0e8"/>
+    <rect x="164" y="54" width="12" height="82" fill="#b96bff"/>
+    <rect x="220" y="54" width="10" height="82" fill="#ffb6da"/>
+    <rect x="276" y="54" width="13" height="82" fill="#a669ff"/>
+    <rect x="332" y="54" width="10" height="82" fill="#ffd0e8"/>
+    <rect x="388" y="54" width="12" height="82" fill="#b96bff"/>
+    <rect x="444" y="54" width="10" height="82" fill="#ffb6da"/>
+  </g>
+
+  <g opacity="0.9">
+    <rect x="72" y="139" width="9" height="9" fill="#ff4fa3"/>
+    <rect x="490" y="65" width="8" height="8" fill="#2d8cff"/>
+    <rect x="504" y="80" width="5" height="5" fill="#ff78bd"/>
+    <rect x="462" y="143" width="7" height="7" fill="#d66bff"/>
+  </g>
+
+  <text x="93" y="228"
+        font-family="Consolas, 'Cascadia Mono', 'SFMono-Regular', monospace"
+        font-size="23"
+        font-weight="800"
+        fill="#ff78bd">
+    D:\test\mianshi\<tspan fill="#2d8cff">equaxis-agent</tspan>
+  </text>
+</svg>

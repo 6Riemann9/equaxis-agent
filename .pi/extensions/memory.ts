@@ -1,10 +1,10 @@
-import fs from "node:fs";
-import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { MemoryBridge } from "../../src/memory-bridge.mjs";
-import { loadMemoryConfig } from "../../src/memory-config.mjs";
+import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { containsSecretLikeInput } from "../../src/policy.mjs";
+import { reflectRun } from "../../src/reflection.mjs";
 
 interface MemoryConfig {
   enabled: boolean;
@@ -34,6 +34,18 @@ const HallSchema = Type.Union([
   Type.Literal("hall_advice"),
   Type.Literal("hall_general")
 ]);
+
+const ReflectionStepSchema = Type.Object({
+  id: Type.Optional(Type.String()),
+  toolName: Type.Optional(Type.String()),
+  status: Type.Optional(Type.String()),
+  isError: Type.Optional(Type.Boolean()),
+  errorCode: Type.Optional(Type.String())
+});
+
+const memoryBridgePath = fileURLToPath(
+  new URL("../../bridge/memory_bridge.py", import.meta.url)
+);
 
 function extractLastAssistantText(messages: unknown[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -66,7 +78,12 @@ function formatMatches(matches: SearchMatch[]): string {
 }
 
 export default function equaxisMemory(pi: ExtensionAPI): void {
-  let config = loadMemoryConfig(process.cwd()) as MemoryConfig;
+  const services = createExtensionRuntimeServices({
+    cwd: process.cwd(),
+    extensionId: "memory",
+    pi
+  });
+  let config = services.config.memory as MemoryConfig;
   let bridge: MemoryBridge | undefined;
   let ready = false;
   let lastDiagnostic = "";
@@ -74,24 +91,12 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
   let lastRecordedAssistant = "";
 
   function trace(ctx: ExtensionContext, event: string, data: Record<string, unknown> = {}): void {
-    try {
-      const traceFile = path.resolve(ctx.cwd, ".pi", "runtime", "traces.jsonl");
-      fs.mkdirSync(path.dirname(traceFile), { recursive: true });
-      fs.appendFileSync(traceFile, `${JSON.stringify({
-        timestamp: new Date().toISOString(),
-        sessionId: ctx.sessionManager.getSessionId(),
-        source: "equaxis-memory",
-        event,
-        ...data
-      })}\n`, "utf8");
-    } catch {
-      // Memory tracing must never break the Pi agent loop.
-    }
+    services.trace.record(ctx, event, data);
   }
 
   function updateStatus(ctx: ExtensionContext): void {
     const state = !config.enabled ? "off" : ready ? "ready" : "unavailable";
-    ctx.ui.setStatus("equaxis-memory", `Memory ${state}`);
+    services.status.set(ctx, "equaxis-memory", `Memory ${state}`);
   }
 
   function createBridge(ctx: ExtensionContext): MemoryBridge {
@@ -99,6 +104,7 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
       cwd: ctx.cwd,
       pythonCommand: config.pythonCommand,
       rootDir: config.rootDir,
+      bridgePath: memoryBridgePath,
       requestTimeoutMs: config.requestTimeoutMs,
       onDiagnostic: (message: string) => {
         lastDiagnostic = message.slice(-1000);
@@ -107,7 +113,7 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
   }
 
   async function ensureBridge(ctx: ExtensionContext): Promise<MemoryBridge> {
-    if (!config.enabled) throw new Error("Equaxis Memory is disabled in .pi/memory.json");
+    if (!config.enabled) throw new Error("Equaxis Memory is disabled in .pi/equaxis.json");
     bridge ??= createBridge(ctx);
     try {
       await bridge.start();
@@ -179,6 +185,131 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
+    name: "recall",
+    label: "Recall Memory",
+    description: "Recall relevant Equaxis memory using the clearer Memory UX action name. Use this before answering when prior project facts or preferences may matter.",
+    parameters: Type.Object({
+      query: Type.String({ description: "Natural-language memory query" }),
+      wing: Type.Optional(Type.String({ description: "Optional memory wing" })),
+      room: Type.Optional(Type.String({ description: "Optional room inside the wing" })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 5 }))
+    }),
+    async execute(_toolCallId, params, signal) {
+      const memory = await ensureBridgeForTool();
+      const result = await memory.request("search", {
+        query: params.query,
+        wing: params.wing,
+        room: params.room,
+        limit: params.limit ?? config.recallLimit
+      }, { signal });
+      const matches = (result.matches ?? []) as SearchMatch[];
+      return {
+        content: [{ type: "text", text: formatMatches(matches) }],
+        details: { action: "recall", query: params.query, matches }
+      };
+    }
+  });
+
+  pi.registerTool({
+    name: "retain",
+    label: "Retain Memory",
+    description: "Retain a durable memory fact, preference, decision, or discovery for future Equaxis sessions. Do not store credentials or transient chatter.",
+    parameters: Type.Object({
+      content: Type.String({ description: "Concise durable memory to retain" }),
+      wing: Type.Optional(Type.String({ description: "Top-level namespace" })),
+      room: Type.Optional(Type.String({ description: "Topic room" })),
+      hall: Type.Optional(HallSchema)
+    }),
+    async execute(_toolCallId, params, signal) {
+      const memory = await ensureBridgeForTool();
+      const result = await memory.request("remember", {
+        content: params.content,
+        wing: params.wing ?? config.defaultWing,
+        room: params.room ?? config.defaultRoom,
+        hall: params.hall ?? "hall_general",
+        source_file: "equaxis-agent",
+        metadata: { source: "pi-tool", action: "retain" }
+      }, { signal });
+      const record = result.record as { drawer_id?: string; wing?: string; room?: string };
+      return {
+        content: [{ type: "text", text: `Memory retained: ${record.drawer_id ?? "created"} [${record.wing ?? params.wing ?? config.defaultWing}/${record.room ?? params.room ?? config.defaultRoom}]` }],
+        details: result
+      };
+    }
+  });
+
+  pi.registerTool({
+    name: "learn",
+    label: "Learn Memory",
+    description: "Learn a stable entity relationship as a subject-predicate-object memory fact.",
+    parameters: Type.Object({
+      subject: Type.String(),
+      predicate: Type.String(),
+      object: Type.String()
+    }),
+    async execute(_toolCallId, params, signal) {
+      const memory = await ensureBridgeForTool();
+      const result = await memory.request("add_fact", params, { signal });
+      return {
+        content: [{ type: "text", text: `Learned fact: ${params.subject} --${params.predicate}--> ${params.object}` }],
+        details: result
+      };
+    }
+  });
+
+  pi.registerTool({
+    name: "memory_edit",
+    label: "Memory Edit",
+    description: "Edit Equaxis memory by deleting a reviewed drawer id. Use recall first and delete only explicit stale or incorrect memory.",
+    parameters: Type.Object({
+      drawer_id: Type.String({ description: "Exact drawer id returned by recall/search" }),
+      reason: Type.Optional(Type.String({ description: "Why this memory is stale or incorrect" }))
+    }),
+    async execute(_toolCallId, params, signal) {
+      const memory = await ensureBridgeForTool();
+      const result = await memory.request("delete_memory", { drawer_id: params.drawer_id, reason: params.reason }, { signal });
+      return {
+        content: [{ type: "text", text: `Memory deleted: ${params.drawer_id}` }],
+        details: result
+      };
+    }
+  });
+
+  pi.registerTool({
+    name: "reflect",
+    label: "Reflect Run",
+    description: "Derive evidence-backed lessons from a completed run. Optionally store promotable lessons in long-term memory when store=true.",
+    parameters: Type.Object({
+      goal: Type.Optional(Type.String({ description: "Run goal or task summary" })),
+      status: Type.Optional(Type.String({ description: "Run status such as completed or failed" })),
+      steps: Type.Array(ReflectionStepSchema, { maxItems: 100, description: "Observed run steps with ids, tools, statuses, and error codes" }),
+      store: Type.Optional(Type.Boolean({ default: false, description: "Store promotable lessons in long-term memory" }))
+    }),
+    async execute(_toolCallId, params, signal) {
+      const result = reflectRun({ goal: params.goal, status: params.status, steps: params.steps });
+      let stored: unknown = null;
+      if (params.store === true && result.promotable && result.lessons.length) {
+        const memory = await ensureBridgeForTool();
+        const content = result.lessons
+          .map((lesson: { type: string; lesson: string; evidence: string[] }) => `${lesson.type}: ${lesson.lesson} Evidence: ${lesson.evidence.join(", ")}`)
+          .join("\n");
+        stored = await memory.request("remember", {
+          content,
+          wing: config.defaultWing,
+          room: "reflection",
+          hall: "hall_discoveries",
+          source_file: "equaxis-agent",
+          metadata: { source: "pi-tool", action: "reflect", goal: params.goal ?? "" }
+        }, { signal });
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify({ ...result, stored }, null, 2) }],
+        details: { ...result, stored }
+      };
+    }
+  });
+
+  pi.registerTool({
     name: "memory_add_fact",
     label: "Memory Fact",
     description: "Add a durable subject-predicate-object fact to the Equaxis temporal knowledge graph.",
@@ -220,7 +351,8 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     lastContext = ctx;
-    config = loadMemoryConfig(ctx.cwd) as MemoryConfig;
+    services.configure(ctx.cwd);
+    config = services.config.memory as MemoryConfig;
     lastRecordedPromptKey = "";
     lastRecordedAssistant = "";
     if (!config.enabled) {
@@ -343,7 +475,7 @@ ${context || "No relevant stored memory was retrieved."}
     handler: async (_args, ctx) => {
       lastContext = ctx;
       if (!config.enabled) {
-        ctx.ui.notify("Equaxis Memory is disabled in .pi/memory.json", "info");
+        ctx.ui.notify("Equaxis Memory is disabled in .pi/equaxis.json", "info");
         return;
       }
       try {
@@ -379,7 +511,8 @@ ${context || "No relevant stored memory was retrieved."}
     description: "Restart the Equaxis Memory Python bridge",
     handler: async (_args, ctx) => {
       lastContext = ctx;
-      config = loadMemoryConfig(ctx.cwd) as MemoryConfig;
+      services.configure(ctx.cwd);
+      config = services.config.memory as MemoryConfig;
       try {
         await bridge?.stop();
         bridge = undefined;
@@ -387,7 +520,7 @@ ${context || "No relevant stored memory was retrieved."}
         updateStatus(ctx);
         if (!config.enabled) {
           trace(ctx, "memory_stopped", { reason: "disabled" });
-          ctx.ui.notify("Equaxis Memory is disabled in .pi/memory.json", "info");
+          ctx.ui.notify("Equaxis Memory is disabled in .pi/equaxis.json", "info");
           return;
         }
         bridge = createBridge(ctx);

@@ -22,3 +22,9 @@ test("empty query returns deterministic top candidates", () => {
   ]);
   assert.deepEqual(catalog.search("", { limit: 2 }).map((item) => item.name), ["a_tool", "z_tool"]);
 });
+
+test("finds protocol advisor and reflection product tools", () => {
+  assert.equal(defaultToolCatalog.search("debug breakpoint stack", { limit: 1 })[0].name, "dap_probe");
+  assert.equal(defaultToolCatalog.search("advisor risk recommendation", { limit: 1 })[0].name, "advisor_consult");
+  assert.equal(defaultToolCatalog.search("reflect lesson postmortem", { limit: 1 })[0].name, "reflect");
+});

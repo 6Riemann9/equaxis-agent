@@ -42,6 +42,17 @@ test("runs the vendored Python memory core through the persistent bridge", async
   });
   assert.match(context.context, /preferred language is TypeScript/);
 
+  const remember = await bridge.request("remember", {
+    wing: "equaxis",
+    room: "integration",
+    hall: "hall_general",
+    content: "Temporary memory for delete test."
+  });
+  const drawerId = remember.record.drawer_id;
+  assert.ok(drawerId);
+  const deleted = await bridge.request("delete_memory", { drawer_id: drawerId });
+  assert.deepEqual(deleted, { deleted: true, drawer_id: drawerId });
+
   const status = await bridge.request("status");
   assert.equal(status.config.history_entries, 2);
   assert.equal(Array.isArray(status.wings), false);

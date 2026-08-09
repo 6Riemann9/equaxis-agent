@@ -4,20 +4,14 @@
   "defaultThinkingLevel": "xhigh",
   "enabledModels": [
     "openai-inprior/gpt-5.5",
-    "openai-inprior/gpt-5.6",
-    "openai-inprior/gpt-5.6-sol",
-    "openai-inprior/gpt-5.1",
-    "openai-inprior/gpt-5",
-    "openai-inprior/gpt-5-mini",
-    "openai-inprior/gpt-5-nano",
-    "openai-inprior/gpt-4.1",
-    "openai-inprior/gpt-4.1-mini",
-    "openai-inprior/gpt-4o",
-    "openai-inprior/gpt-4o-mini"
+    "openai-inprior/gpt-5.6-sol"
   ],
   "compaction": {
     "enabled": true,
     "reserveTokens": 100000,
     "keepRecentTokens": 64000
-  }
+  },
+  "packages": [
+    "npm:billion-context-pi"
+  ]
 }

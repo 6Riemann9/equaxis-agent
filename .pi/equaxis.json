@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "profile": "standard",
+    "services": {
+      "config": true,
+      "diagnostics": true,
+      "trace": true,
+      "status": true
+    }
+  },
+  "extensions": {
+    "manifest": ".pi/extensions/contracts.json",
+    "enabled": [],
+    "disabled": []
+  },
+  "reliability": {
+    "mode": "enforce",
+    "traceDir": ".pi/runtime",
+    "trace": {
+      "maxFileBytes": 5242880,
+      "maxFiles": 3
+    },
+    "protectPaths": [
+      ".env",
+      ".git/",
+      "node_modules/",
+      "*.pem",
+      "*.key"
+    ],
+    "approval": {
+      "highRiskBash": true,
+      "writesOutsideWorkspace": true,
+      "externalEditPolicy": "auto",
+      "externalEditRoots": [
+        "D:/test/mianshi/equaxis-agent"
+      ],
+      "sessionFork": false
+    },
+    "limits": {
+      "maxToolCallsPerTurn": 30,
+      "maxHighRiskCallsPerTurn": 3,
+      "maxRepairAttemptsPerError": 2
+    },
+    "toolRouting": {
+      "enabled": true,
+      "maxCandidates": 5
+    }
+  },
+  "memory": {
+    "enabled": true,
+    "pythonCommand": "python",
+    "rootDir": ".equaxis/memory",
+    "autoRecall": true,
+    "defaultWing": "equaxis",
+    "defaultRoom": "general",
+    "recallLimit": 5,
+    "maxContextChars": 8000,
+    "maxStoredMessageChars": 24000,
+    "requestTimeoutMs": 60000
+  },
+  "skills": {
+    "enabled": true,
+    "rootDir": ".equaxis/skills",
+    "autoInject": true,
+    "maxContextTokens": 3000,
+    "requiredNames": []
+  },
+  "subagents": {
+    "enabled": true,
+    "maxConcurrent": 2,
+    "piEntry": "",
+    "jsonArgs": [],
+    "isolation": {
+      "enabled": true,
+      "scrubEnv": true,
+      "outputRoot": ".pi/runtime/isolated",
+      "extraEnvAllowlist": []
+    }
+  },
+  "protocols": {
+    "lsp": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\32032\\AppData\\Roaming\\npm\\node_modules\\typescript-language-server\\lib\\cli.mjs",
+        "--stdio"
+      ],
+      "cwd": "",
+      "requestTimeoutMs": 30000,
+      "allowCommandOverride": false
+    },
+    "dap": {
+      "command": "python",
+      "args": [
+        "-m",
+        "debugpy.adapter"
+      ],
+      "cwd": "",
+      "requestTimeoutMs": 30000,
+      "allowCommandOverride": false
+    }
+  }
+}

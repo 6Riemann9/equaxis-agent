@@ -153,6 +153,12 @@ def dispatch(memory: AgentMemory, action: str, payload: dict[str, Any]) -> Any:
         return {"triple": triple}
     if action == "query_entity":
         return {"facts": memory.query_entity(str(payload["name"]))}
+    if action == "delete_memory":
+        drawer_id = str(payload["drawer_id"]).strip()
+        if not drawer_id:
+            raise ValueError("drawer_id is required")
+        memory.manager.long_term.delete_drawer(drawer_id)
+        return {"deleted": True, "drawer_id": drawer_id}
     if action == "status":
         return memory.status()
     if action == "close":

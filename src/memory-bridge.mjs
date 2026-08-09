@@ -13,10 +13,11 @@ export function buildPythonBridgeEnv(baseEnv = process.env) {
 }
 
 export class MemoryBridge {
-  constructor({ cwd, pythonCommand, rootDir, requestTimeoutMs = 60000, onDiagnostic = (_message) => {} }) {
+  constructor({ cwd, pythonCommand, rootDir, bridgePath, requestTimeoutMs = 60000, onDiagnostic = (_message) => {} }) {
     this.cwd = cwd;
     this.pythonCommand = pythonCommand;
     this.rootDir = path.resolve(cwd, rootDir);
+    this.bridgePath = bridgePath ? path.resolve(bridgePath) : path.join(this.cwd, "bridge", "memory_bridge.py");
     this.requestTimeoutMs = requestTimeoutMs;
     this.onDiagnostic = onDiagnostic;
     this.process = null;
@@ -31,8 +32,7 @@ export class MemoryBridge {
     if (this.startPromise) return this.startPromise;
 
     this.startPromise = new Promise((resolve, reject) => {
-      const bridgePath = path.join(this.cwd, "bridge", "memory_bridge.py");
-      const child = spawn(this.pythonCommand, ["-u", bridgePath, "--root", this.rootDir], {
+      const child = spawn(this.pythonCommand, ["-u", this.bridgePath, "--root", this.rootDir], {
         cwd: this.cwd,
         env: buildPythonBridgeEnv(),
         stdio: ["pipe", "pipe", "pipe"],

@@ -1,0 +1,456 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://equaxis.local/schema/equaxis-config-v1.json",
+  "title": "Equaxis Unified Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runtime",
+    "extensions",
+    "reliability",
+    "memory",
+    "skills",
+    "subagents",
+    "protocols"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "services"
+      ],
+      "properties": {
+        "profile": {
+          "enum": [
+            "raw",
+            "minimal",
+            "standard",
+            "full"
+          ]
+        },
+        "services": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "config",
+            "diagnostics",
+            "trace",
+            "status"
+          ],
+          "properties": {
+            "config": {
+              "type": "boolean"
+            },
+            "diagnostics": {
+              "type": "boolean"
+            },
+            "trace": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest",
+        "enabled",
+        "disabled"
+      ],
+      "properties": {
+        "manifest": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "disabled": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "reliability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "traceDir",
+        "trace",
+        "protectPaths",
+        "approval",
+        "limits",
+        "toolRouting"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "enforce",
+            "audit",
+            "off"
+          ]
+        },
+        "traceDir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trace": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxFileBytes",
+            "maxFiles"
+          ],
+          "properties": {
+            "maxFileBytes": {
+              "type": "integer",
+              "minimum": 4096,
+              "maximum": 1073741824
+            },
+            "maxFiles": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            }
+          }
+        },
+        "protectPaths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "approval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "highRiskBash",
+            "writesOutsideWorkspace",
+            "externalEditPolicy",
+            "externalEditRoots",
+            "sessionFork"
+          ],
+          "properties": {
+            "highRiskBash": {
+              "type": "boolean"
+            },
+            "writesOutsideWorkspace": {
+              "type": "boolean"
+            },
+            "externalEditPolicy": {
+              "enum": [
+                "prompt",
+                "auto",
+                "deny"
+              ]
+            },
+            "externalEditRoots": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "sessionFork": {
+              "type": "boolean"
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxToolCallsPerTurn",
+            "maxHighRiskCallsPerTurn",
+            "maxRepairAttemptsPerError"
+          ],
+          "properties": {
+            "maxToolCallsPerTurn": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "maxHighRiskCallsPerTurn": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "maxRepairAttemptsPerError": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
+            }
+          }
+        },
+        "toolRouting": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "maxCandidates"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxCandidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "pythonCommand",
+        "rootDir",
+        "autoRecall",
+        "defaultWing",
+        "defaultRoom",
+        "recallLimit",
+        "maxContextChars",
+        "maxStoredMessageChars",
+        "requestTimeoutMs"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "pythonCommand": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rootDir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "autoRecall": {
+          "type": "boolean"
+        },
+        "defaultWing": {
+          "type": "string",
+          "minLength": 1
+        },
+        "defaultRoom": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recallLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "maxContextChars": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 1000000
+        },
+        "maxStoredMessageChars": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 1000000
+        },
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 600000
+        }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "rootDir",
+        "autoInject",
+        "maxContextTokens",
+        "requiredNames"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rootDir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "autoInject": {
+          "type": "boolean"
+        },
+        "maxContextTokens": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 1000000
+        },
+        "requiredNames": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "subagents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "maxConcurrent",
+        "piEntry",
+        "jsonArgs",
+        "isolation"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "piEntry": {
+          "type": "string"
+        },
+        "jsonArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "isolation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "scrubEnv",
+            "outputRoot",
+            "extraEnvAllowlist"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "scrubEnv": {
+              "type": "boolean"
+            },
+            "outputRoot": {
+              "type": "string",
+              "minLength": 1
+            },
+            "extraEnvAllowlist": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "protocols": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lsp",
+        "dap"
+      ],
+      "properties": {
+        "lsp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "cwd",
+            "requestTimeoutMs",
+            "allowCommandOverride"
+          ],
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "requestTimeoutMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 120000
+            },
+            "allowCommandOverride": {
+              "type": "boolean"
+            }
+          }
+        },
+        "dap": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "args",
+            "cwd",
+            "requestTimeoutMs",
+            "allowCommandOverride"
+          ],
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "requestTimeoutMs": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 120000
+            },
+            "allowCommandOverride": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  }
+}
