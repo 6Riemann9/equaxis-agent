@@ -80,6 +80,22 @@
       ]
     },
     {
+      "id": "dashboard-command",
+      "entry": "dashboard-command.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "diagnostics",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "command:dashboard"
+      ]
+    },
+    {
       "id": "memory",
       "entry": "memory.ts",
       "contractVersion": 1,

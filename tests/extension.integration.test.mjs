@@ -7,6 +7,7 @@ import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const extensionPath = path.join(projectRoot, ".pi", "extensions", "reliability-harness.ts");
+const dashboardExtensionPath = path.join(projectRoot, ".pi", "extensions", "dashboard-command.ts");
 const extensionsDir = path.join(projectRoot, ".pi", "extensions");
 
 function makeContext(cwd) {
@@ -25,6 +26,29 @@ function makeContext(cwd) {
     }
   };
 }
+
+test("dashboard slash command renders runtime status without model mediation", async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-dashboard-test-"));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+
+  const loaded = await discoverAndLoadExtensions(
+    [dashboardExtensionPath],
+    tempRoot,
+    path.join(tempRoot, "agent-home")
+  );
+  assert.deepEqual(loaded.errors, []);
+  assert.equal(loaded.extensions.length, 1);
+  const extension = loaded.extensions[0];
+  assert.equal(extension.commands.has("dashboard"), true);
+
+  const messages = [];
+  const ctx = makeContext(tempRoot);
+  ctx.ui.notify = (message, level) => messages.push({ message, level });
+  await extension.commands.get("dashboard").handler("", ctx);
+  assert.equal(messages[0].level, "info");
+  assert.match(messages[0].message, /Equaxis runtime dashboard/);
+  assert.match(messages[0].message, /Health:/);
+});
 
 test("loads as a real Pi extension and blocks high-risk calls without approval UI", async (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-test-"));
