@@ -148,6 +148,8 @@ export function runDoctor(options = {}) {
     const adapters = discoverProtocolAdapters(startup.unifiedConfig, { cwd: projectRoot, env, spawnSyncImpl: run });
     checks.push(check("Protocol adapters", true, summarizeProtocolAdapters(adapters)));
   }
+  const runtimeGates = startup.unifiedConfig?.runtime?.gates;
+  checks.push(check("Runtime gates", Boolean(runtimeGates?.enabled), runtimeGates?.enabled ? `passRate>=${runtimeGates.minBenchmarkPassRate}; cost<=${runtimeGates.maxUnitCostUsd}; latency<=${runtimeGates.maxLatencyMs}ms` : "disabled"));
   const isolation = describeRuntimeIsolation(startup.unifiedConfig);
   checks.push(check("Runtime isolation", isolation.enabled, isolation.detail));
   const budgets = startup.unifiedConfig?.subagents?.budgets;

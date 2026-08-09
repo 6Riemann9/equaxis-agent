@@ -121,6 +121,10 @@ test("doctor checks protocol tool declarations", (t) => {
     "auditPath=.pi/runtime/memory-governance/memories.jsonl; cold=180d"
   );
   assert.equal(
+    report.checks.find((item) => item.name === "Runtime gates").detail,
+    "passRate>=0.8; cost<=0.05; latency<=30000ms"
+  );
+  assert.equal(
     report.checks.find((item) => item.name === "Runtime isolation").detail,
     "scrubbed-env; outputRoot=.pi/runtime/isolated"
   );
