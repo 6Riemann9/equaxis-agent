@@ -75,6 +75,26 @@ function writeReleaseManifest(projectRoot, pkg, options = {}) {
   return outputPath;
 }
 
+export function runProductizationExercise(options = {}) {
+  const platforms = options.platforms ?? [options.platform ?? process.platform];
+  const commands = options.commands ?? ["install", "update", "release"];
+  const runs = [];
+  for (const platform of platforms) {
+    for (const command of commands) {
+      const report = runProductizationCommand(command, { ...options, platform, dryRun: true });
+      runs.push({ platform, command, ok: report.ok, steps: report.steps });
+    }
+  }
+  return { ok: runs.every((item) => item.ok), platforms, commands, runs };
+}
+
+export function formatProductizationExerciseReport(report) {
+  const lines = ["Equaxis productization exercise", ""];
+  for (const run of report.runs) lines.push(`${run.ok ? "PASS" : "FAIL"}  ${run.platform} ${run.command}`);
+  lines.push("", report.ok ? "READY" : "NOT READY");
+  return lines.join("\n");
+}
+
 export function runProductizationCommand(command, options = {}) {
   const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
   const cwd = path.resolve(options.cwd ?? projectRoot);

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatProductizationReport, runProductizationCommand } from "../src/productization.mjs";
+import { formatProductizationExerciseReport, formatProductizationReport, runProductizationCommand, runProductizationExercise } from "../src/productization.mjs";
 
 function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-product-"));
@@ -103,6 +103,26 @@ test("release command verifies before writing a manifest", (t) => {
   assert.equal(manifest.runtime.evaluation.rootDir, ".pi/runtime/eval-loop");
   assert.equal(manifest.runtime.gates.minBenchmarkPassRate, 0.8);
   assert.equal(manifest.runtime.memory.governance.retentionDays.cold, 180);
+});
+
+test("exercise command runs install update release dry-runs across platforms", (t) => {
+  const root = workspace(t);
+  const calls = [];
+  const report = runProductizationExercise({
+    projectRoot: root,
+    cwd: root,
+    env: { OPENAI_API_KEY: "test-key" },
+    nodeVersion: "22.19.0",
+    spawnSyncImpl: fakeSpawn(calls),
+    platforms: ["linux", "win32"]
+  });
+  assert.equal(report.ok, true);
+  assert.equal(report.runs.length, 6);
+  assert.deepEqual([...new Set(report.runs.map((item) => item.platform))], ["linux", "win32"]);
+  assert.deepEqual([...new Set(report.runs.map((item) => item.command))], ["install", "update", "release"]);
+  assert.match(formatProductizationExerciseReport(report), /Equaxis productization exercise/);
+  assert.match(formatProductizationExerciseReport(report), /linux install/);
+  assert.match(formatProductizationExerciseReport(report), /win32 release/);
 });
 
 test("dry-run update reports planned work without spawning npm", (t) => {

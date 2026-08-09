@@ -15,6 +15,13 @@ function normalizeRetention(retentionDays = {}) {
   return { ...DEFAULT_RETENTION_DAYS, ...retentionDays };
 }
 
+function timestamp(value) {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
 function jsonlRecords(filePath) {
   if (!fs.existsSync(filePath)) return [];
   return fs.readFileSync(filePath, "utf8")
@@ -38,7 +45,7 @@ export function redactMemoryRecord(record) {
 }
 
 export function auditMemoryRecords(records, options = {}) {
-  const now = options.now ?? Date.now();
+  const now = timestamp(options.now ?? Date.now());
   const retention = normalizeRetention(options.retentionDays);
   const keep = [];
   const remove = [];
@@ -59,28 +66,53 @@ export function auditMemoryRecords(records, options = {}) {
 }
 
 export function applyMemoryGovernance(options = {}) {
+  const started = Date.now();
   const inputPath = path.resolve(options.inputPath);
-  const records = jsonlRecords(inputPath);
-  const audit = auditMemoryRecords(records, options);
-  const deleteIds = new Set(audit.delete.map((item) => item.id));
-  const kept = records
-    .map((record, index) => ({ id: stableRecordId(record, index), record }))
-    .filter((item) => !deleteIds.has(item.id))
-    .map((item) => redactMemoryRecord(item.record));
+  const lockPath = path.resolve(options.lockPath ?? `${inputPath}.lock`);
+  let lockHandle = null;
+  try {
+    if (options.apply) {
+      fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+      try {
+        lockHandle = fs.openSync(lockPath, "wx");
+        fs.writeFileSync(lockHandle, `${process.pid}\n`, "utf8");
+      } catch (error) {
+        if (error?.code === "EEXIST") throw new Error(`memory governance lock already held: ${lockPath}`);
+        throw error;
+      }
+    }
 
-  if (options.apply) {
-    const content = kept.map((record) => JSON.stringify(record)).join("\n") + (kept.length ? "\n" : "");
-    fs.mkdirSync(path.dirname(inputPath), { recursive: true });
-    fs.writeFileSync(inputPath, content, "utf8");
+    const records = jsonlRecords(inputPath);
+    const audit = auditMemoryRecords(records, options);
+    const deleteIds = new Set(audit.delete.map((item) => item.id));
+    const retained = records
+      .map((record, index) => ({ id: stableRecordId(record, index), record }))
+      .filter((item) => !deleteIds.has(item.id));
+    const kept = retained.map((item) => redactMemoryRecord(item.record));
+    const redactedRecords = kept.filter((record, index) => JSON.stringify(record) !== JSON.stringify(retained[index].record));
+
+    if (options.apply) {
+      const content = kept.map((record) => JSON.stringify(record)).join("\n") + (kept.length ? "\n" : "");
+      fs.mkdirSync(path.dirname(inputPath), { recursive: true });
+      fs.writeFileSync(inputPath, content, "utf8");
+    }
+
+    return {
+      inputPath,
+      lockPath,
+      written: Boolean(options.apply),
+      keptRecords: kept,
+      deletedRecords: audit.delete,
+      redactedRecords: redactedRecords.length,
+      durationMs: Date.now() - started,
+      audit
+    };
+  } finally {
+    if (lockHandle !== null) {
+      fs.closeSync(lockHandle);
+      fs.rmSync(lockPath, { force: true });
+    }
   }
-
-  return {
-    inputPath,
-    written: Boolean(options.apply),
-    keptRecords: kept.length,
-    deletedRecords: audit.delete.length,
-    audit
-  };
 }
 
 export function formatMemoryGovernanceReport(report) {

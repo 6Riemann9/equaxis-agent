@@ -17,6 +17,7 @@
     "install:equaxis": "node scripts/equaxis-product.mjs install",
     "update:equaxis": "node scripts/equaxis-product.mjs update",
     "release:equaxis": "node scripts/equaxis-product.mjs release",
+    "exercise:equaxis": "node scripts/equaxis-product.mjs exercise",
     "mcp:eval": "node scripts/mcp-eval-server.mjs",
     "setup:memory": "python -m pip install -e ./vendor/agent-memory",
     "test:memory": "python bridge/run_memory_tests.py",

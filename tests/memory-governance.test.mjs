@@ -70,6 +70,30 @@ test("redacts governed memory content recursively", () => {
   assert.doesNotMatch(JSON.stringify(redacted), new RegExp(sample));
 });
 
+test("rejects concurrent memory governance writes while a lock is held", (t) => {
+  const root = workspace(t);
+  const input = path.join(root, "memories.jsonl");
+  const lockPath = `${input}.lock`;
+  fs.writeFileSync(input, `${JSON.stringify(record("keep"))}\n`, "utf8");
+  fs.writeFileSync(lockPath, "busy", "utf8");
+
+  assert.throws(() => applyMemoryGovernance({ inputPath: input, apply: true, lockPath }), /memory governance lock already held/);
+  assert.equal(fs.existsSync(lockPath), true);
+});
+
+test("summarizes high-volume memory governance runs", (t) => {
+  const root = workspace(t);
+  const input = path.join(root, "memories.jsonl");
+  const rows = Array.from({ length: 250 }, (_, index) => JSON.stringify(record(`memory-${index}`, { updatedAt: "2024-01-01T00:00:00.000Z" })));
+  fs.writeFileSync(input, `${rows.join("\n")}\n`, "utf8");
+
+  const result = applyMemoryGovernance({ inputPath: input, apply: false, now: "2026-01-01T00:00:00.000Z", retentionDays: { cold: 180 } });
+  assert.equal(result.audit.summary.total, 250);
+  assert.equal(result.deletedRecords.length, 250);
+  assert.equal(result.written, false);
+  assert.ok(result.durationMs >= 0);
+});
+
 test("applies memory governance to JSONL only when explicitly requested", (t) => {
   const root = workspace(t);
   const file = path.join(root, "memories.jsonl");

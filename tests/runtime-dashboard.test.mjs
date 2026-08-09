@@ -16,9 +16,11 @@ function workspace(t) {
 test("builds a runtime dashboard from eval events versions and runtime files", (t) => {
   const root = workspace(t);
   const config = {
-    runtime: { gates: { enabled: true, minBenchmarkPassRate: 0.8, maxReliabilityRegression: 0.02, maxUnitCostUsd: 0.05, maxLatencyMs: 30000, minImprovementDelta: 0.01 } },
+    runtime: { profile: "standard", gates: { enabled: true, minBenchmarkPassRate: 0.8, maxReliabilityRegression: 0.02, maxUnitCostUsd: 0.05, maxLatencyMs: 30000, minImprovementDelta: 0.01 } },
+    reliability: { mode: "enforce", traceDir: ".pi/runtime", approval: { highRiskBash: true, externalEditPolicy: "prompt" }, trace: { maxFiles: 3 } },
+    subagents: { enabled: true, maxConcurrent: 4, persistence: { enabled: true }, isolation: { enabled: true } },
     evaluation: { enabled: true, rootDir: ".pi/runtime/eval-loop" },
-    memory: { governance: { enabled: true, auditPath: ".pi/runtime/memory-governance/memories.jsonl", retentionDays: { hot: 3650, warm: 365, cold: 180 } } },
+    memory: { enabled: true, governance: { enabled: true, auditPath: ".pi/runtime/memory-governance/memories.jsonl", retentionDays: { hot: 3650, warm: 365, cold: 180 } } },
     protocols: { lsp: { command: "" }, dap: { command: "" } }
   };
   const loop = new EvalLoop({ persist: true, projectRoot: root });
@@ -38,11 +40,19 @@ test("builds a runtime dashboard from eval events versions and runtime files", (
   assert.equal(dashboard.evaluation.successRate, 1);
   assert.equal(dashboard.versions.total, 1);
   assert.deepEqual(dashboard.versions.byKind, { prompt: 1 });
+  assert.equal(dashboard.runtime.profile, "standard");
+  assert.equal(dashboard.reliability.mode, "enforce");
+  assert.equal(dashboard.subagents.maxConcurrent, 4);
+  assert.equal(dashboard.memory.enabled, true);
   assert.equal(dashboard.gates.ok, true);
   assert.equal(dashboard.memoryGovernance.enabled, true);
   assert.equal(dashboard.runtimeFiles.protocolTrace.exists, true);
   assert.equal(dashboard.protocols.lsp.status, "skipped");
   assert.match(formatRuntimeDashboard(dashboard), /Equaxis runtime dashboard/);
+  assert.match(formatRuntimeDashboard(dashboard), /Mode: standard/);
+  assert.match(formatRuntimeDashboard(dashboard), /Reliability: enforce/);
+  assert.match(formatRuntimeDashboard(dashboard), /Subagents: enabled/);
+  assert.match(formatRuntimeDashboard(dashboard), /Memory: enabled/);
   assert.match(formatRuntimeDashboard(dashboard), /Gates: READY/);
   assert.match(formatRuntimeDashboard(dashboard), /Evaluation: attempts=1/);
   assert.match(formatRuntimeDashboard(dashboard), /Memory governance: enabled/);
