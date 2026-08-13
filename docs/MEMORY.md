@@ -94,7 +94,7 @@ Chroma 集合在**新建时**显式使用 `long_term.embedding_model`（默认 `
 
 ## Pi Web 记忆图集（可视化与编辑）
 
-在 Pi 中运行 `/pi-web` 会启动项目本地的 pi-web fork（`.pi/runtime/source-cache/agegr-pi-web`），顶栏的 **Equaxis Memory** 按钮打开记忆图集：
+在 Pi 中运行 `/pi-web` 会启动仓库内 vendored 的 pi-web fork（`pi-web/`，随仓库版本控制），顶栏的 **Equaxis Memory** 按钮打开记忆图集：
 
 - **概览指标**：Drawers / Wings / Facts / History 数量。
 - **浏览**：按 wing 过滤，抽屉按 wing/room 分组展示，内容、来源、记录时间、hall 徽标。
@@ -109,9 +109,12 @@ Chroma 集合在**新建时**显式使用 `long_term.embedding_model`（默认 `
 重新构建 fork（Windows 下 next build 的 nft 家目录扫描已由 `scripts/nft-readdir-shim.cjs` + next.config.ts 修复）：
 
 ```powershell
-cd .pi/runtime/source-cache/agegr-pi-web
+cd pi-web
+npm install
 npm run build
 ```
+
+`npm run setup` 会自动完成安装与构建。
 
 ## 数据安全
 
