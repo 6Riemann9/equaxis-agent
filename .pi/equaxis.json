@@ -47,12 +47,15 @@
       "webQueue": {
         "enabled": true,
         "timeoutMs": 60000
-      }
+      },
+      "denyRephrase": true,
+      "batchPerTurn": true
     },
     "limits": {
       "maxToolCallsPerTurn": 30,
       "maxHighRiskCallsPerTurn": 3,
-      "maxRepairAttemptsPerError": 2
+      "maxRepairAttemptsPerError": 2,
+      "maxRepeatedCalls": 3
     },
     "toolRouting": {
       "enabled": true,

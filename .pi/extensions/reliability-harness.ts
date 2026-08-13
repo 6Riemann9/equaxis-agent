@@ -5,6 +5,7 @@ import type {
   ToolResultEvent
 } from "@earendil-works/pi-coding-agent";
 import { createEvalEvent } from "../../src/eval-loop.mjs";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -34,11 +35,14 @@ interface HarnessConfig {
     externalEditRoots: string[];
     sessionFork: boolean;
     webQueue: { enabled: boolean; timeoutMs: number };
+    denyRephrase: boolean;
+    batchPerTurn: boolean;
   };
   limits: {
     maxToolCallsPerTurn: number;
     maxHighRiskCallsPerTurn: number;
     maxRepairAttemptsPerError: number;
+    maxRepeatedCalls: number;
   };
 }
 
@@ -66,6 +70,9 @@ interface HarnessState {
   // persisted with the session so forks and restarts keep the picture.
   mission: MissionState;
   failedCallsAtTurnStart: number;
+  // Set when the user opted into approving the remaining high-risk calls
+  // of this turn (approval.batchPerTurn); transient, never persisted.
+  batchApprovedTurn: boolean;
 }
 
 interface PendingTool {
@@ -81,7 +88,7 @@ interface ActiveModel {
   id: string;
 }
 
-interface PersistedState extends Omit<HarnessState, "toolCallsThisTurn" | "highRiskCallsThisTurn" | "failedCallsAtTurnStart"> {}
+interface PersistedState extends Omit<HarnessState, "toolCallsThisTurn" | "highRiskCallsThisTurn" | "failedCallsAtTurnStart" | "batchApprovedTurn"> {}
 
 const STATE_ENTRY = "equaxis-reliability-state";
 const STATUS_KEY = "equaxis";
@@ -111,7 +118,8 @@ function initialState(mode: HarnessMode): HarnessState {
     highRiskCallsThisTurn: 0,
     lastRisk: RISK.LOW,
     mission: { objective: "", startedAt: "", turns: 0, lastOutcome: "none", status: "idle" },
-    failedCallsAtTurnStart: 0
+    failedCallsAtTurnStart: 0,
+    batchApprovedTurn: false
   };
 }
 
@@ -181,6 +189,9 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   let traceFile = services.paths.traceFile;
   const pending = new Map<string, PendingTool>();
   const repairAttempts = new Map<string, number>();
+  // Loop stop condition: consecutive identical tool calls (same name and
+  // argument hash) within a turn indicate a retry loop. Reset per turn.
+  let consecutiveCalls: { signature: string; count: number } = { signature: "", count: 0 };
   // Eval outcomes are runtime facts and are written to the trace stream only
   // (eval_outcome_recorded). The offline eval ledger, dashboards and the
   // harbor export derive them from the trace; the runtime never imports the
@@ -290,6 +301,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       toolCallsThisTurn: 0,
       highRiskCallsThisTurn: 0,
       failedCallsAtTurnStart: 0,
+      batchApprovedTurn: false,
       // Snapshots from before mission tracking lack the field; keep a safe default.
       mission: latest.data.mission ?? { objective: "", startedAt: "", turns: 0, lastOutcome: "none", status: "idle" }
     };
@@ -358,6 +370,8 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     state.toolCallsThisTurn = 0;
     state.highRiskCallsThisTurn = 0;
     state.failedCallsAtTurnStart = state.failedCalls;
+    state.batchApprovedTurn = false;
+    consecutiveCalls = { signature: "", count: 0 };
     repairAttempts.clear();
     trace(ctx, "turn_start", { turnIndex: event.turnIndex });
     updateStatus(ctx);
@@ -422,6 +436,19 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       reason: classification.reason
     };
 
+    // Loop stop condition: the same call repeated consecutively is a retry
+    // loop. Block further repeats this turn and record the stop condition.
+    const callSignature = `${event.toolName}:${createHash("sha256").update(JSON.stringify(event.input ?? {})).digest("hex").slice(0, 16)}`;
+    if (callSignature === consecutiveCalls.signature) consecutiveCalls.count += 1;
+    else consecutiveCalls = { signature: callSignature, count: 1 };
+    const loopStopped = (config.limits.maxRepeatedCalls ?? 3) > 0 && consecutiveCalls.count >= config.limits.maxRepeatedCalls;
+    if (loopStopped && state.mode === "enforce") {
+      state.blockedCalls += 1;
+      trace(ctx, "loop_stop_triggered", { ...decision, repeats: consecutiveCalls.count, limit: config.limits.maxRepeatedCalls });
+      updateStatus(ctx);
+      return { block: true, reason: `Reliability Harness: repeated identical ${event.toolName} call (${consecutiveCalls.count}x) suggests a loop; stop and reassess` };
+    }
+
     if (limitReason && state.mode === "enforce") {
       state.blockedCalls += 1;
       trace(ctx, "tool_blocked", { ...decision, reason: limitReason });
@@ -455,14 +482,44 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
         trace(ctx, "approval_queue_write_failed", { error: String(error) });
       }
 
-      // TUI sessions confirm interactively; headless sessions poll the web
-      // decision queue for a bounded window instead of blocking outright.
+      // TUI sessions decide interactively (structured options); headless
+      // sessions poll the web decision queue for a bounded window instead of
+      // blocking outright. A prior "approve the rest of this turn" choice
+      // (approval.batchPerTurn) skips the dialog for later high-risk calls.
       let approved: boolean;
-      if (ctx.hasUI) {
-        approved = await ctx.ui.confirm(
-          `High-risk ${event.toolName} action`,
-          `${classification.reason}\n\n${summary.slice(0, 1200)}\n\nAllow this single tool call?`
+      let batchApproved = false;
+      if (state.batchApprovedTurn && config.approval?.batchPerTurn) {
+        approved = true;
+        batchApproved = true;
+        trace(ctx, "approval_batched", decision);
+      } else if (ctx.hasUI) {
+        // Show the detail first, then a structured choice: approve, deny,
+        // deny+rephrase, or batch-approve the rest of the turn.
+        ctx.ui.notify(`${classification.reason}\n\n${summary.slice(0, 1200)}`, "warning");
+        const options = ["Approve this call", "Deny this call"];
+        if (config.approval?.denyRephrase) options.push("Deny and rephrase this call");
+        if (config.approval?.batchPerTurn) options.push("Approve this call and all remaining high-risk calls this turn");
+        const dialogTimeout = Math.max(10000, config.approval?.webQueue?.timeoutMs ?? 60_000);
+        const choice = await ctx.ui.select(
+          `High-risk ${event.toolName} action: ${classification.reason}`,
+          options,
+          { signal: ctx.signal, timeout: dialogTimeout }
         );
+        approved = choice?.startsWith("Approve") ?? false;
+        if (choice?.startsWith("Approve this call and all")) {
+          state.batchApprovedTurn = true;
+          batchApproved = true;
+        }
+        if (!approved && choice?.startsWith("Deny and rephrase")) {
+          // Tell the model what to change instead of blindly retrying the
+          // same call (which the loop stop condition would then block).
+          state.blockedCalls += 1;
+          state.phase = "planning";
+          const denyReason = `High-risk action denied; rephrase to avoid: ${classification.reason}`;
+          trace(ctx, "approval_denied_rephrase", decision);
+          updateStatus(ctx);
+          return { block: true, reason: `Reliability Harness: ${denyReason}` };
+        }
       } else if (!config.approval?.webQueue?.enabled) {
         state.blockedCalls += 1;
         state.phase = "planning";
@@ -497,7 +554,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
         return { block: true, reason: "Reliability Harness: high-risk action denied by user" };
       }
       state.approvedCalls += 1;
-      trace(ctx, "approval_granted", decision);
+      trace(ctx, "approval_granted", { ...decision, batch: batchApproved });
     }
 
     state.toolCalls += 1;

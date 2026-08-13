@@ -11,6 +11,9 @@ All notable changes to Equaxis are documented here. Format follows [Keep a Chang
 - Web approvals are event-driven: the harness watches the decisions directory (fs.watch) and wakes immediately on a decision, with bounded polling only as a fallback.
 - New /equaxis-mission command: tracks the current objective, status, turns and last outcome across turns and forks (persisted with the session; secret-like prompts are never recorded).
 - Harness now reports and drops tool calls that never delivered a tool_result before turn end (tool_pending_dropped), instead of leaking them in the pending map.
+- High-risk approvals are now structured dialogs: approve / deny / deny-and-rephrase (the model is told what to avoid) / approve-all-high-risk-calls-this-turn (approval.batchPerTurn, opt-in per turn). Config: reliability.approval.denyRephrase, reliability.approval.batchPerTurn.
+- Loop stop condition: the same tool call repeated consecutively within a turn is blocked (limits.maxRepeatedCalls, default 3) with a loop_stop_triggered trace event.
+- Failed subagent output is spilled to .pi/runtime/subagents/artifacts/<id>-attempt<N>.out; the failure message carries the stderr tail and the artifact path for diagnosis.
 
 ## [0.3.0] - 2026-08-13
 

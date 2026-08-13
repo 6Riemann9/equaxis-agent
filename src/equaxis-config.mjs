@@ -37,9 +37,11 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
       externalEditPolicy: "prompt",
       externalEditRoots: [],
       sessionFork: false,
-      webQueue: { enabled: true, timeoutMs: 60000 }
+      webQueue: { enabled: true, timeoutMs: 60000 },
+      denyRephrase: true,
+      batchPerTurn: true
     },
-    limits: { maxToolCallsPerTurn: 30, maxHighRiskCallsPerTurn: 3, maxRepairAttemptsPerError: 2 },
+    limits: { maxToolCallsPerTurn: 30, maxHighRiskCallsPerTurn: 3, maxRepairAttemptsPerError: 2, maxRepeatedCalls: 3 },
     toolRouting: { enabled: true, maxCandidates: 5 }
   },
   advisor: {
@@ -331,7 +333,7 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertInteger(config.reliability.trace.maxFileBytes, configPath, "reliability.trace.maxFileBytes", 4096, 1024 * 1024 * 1024);
   assertInteger(config.reliability.trace.maxFiles, configPath, "reliability.trace.maxFiles", 1, 20);
   assertRecord(config.reliability.approval, configPath, "reliability.approval");
-  for (const field of ["highRiskBash", "writesOutsideWorkspace", "sessionFork"]) {
+  for (const field of ["highRiskBash", "writesOutsideWorkspace", "sessionFork", "denyRephrase", "batchPerTurn"]) {
     assertBoolean(config.reliability.approval[field], configPath, `reliability.approval.${field}`);
   }
   if (!["prompt", "auto", "deny"].includes(config.reliability.approval.externalEditPolicy)) {
@@ -345,6 +347,7 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertInteger(config.reliability.limits.maxToolCallsPerTurn, configPath, "reliability.limits.maxToolCallsPerTurn", 1, 1000);
   assertInteger(config.reliability.limits.maxHighRiskCallsPerTurn, configPath, "reliability.limits.maxHighRiskCallsPerTurn", 0, 100);
   assertInteger(config.reliability.limits.maxRepairAttemptsPerError, configPath, "reliability.limits.maxRepairAttemptsPerError", 0, 10);
+  assertInteger(config.reliability.limits.maxRepeatedCalls, configPath, "reliability.limits.maxRepeatedCalls", 1, 50);
   assertRecord(config.reliability.toolRouting, configPath, "reliability.toolRouting");
   assertBoolean(config.reliability.toolRouting.enabled, configPath, "reliability.toolRouting.enabled");
   assertInteger(config.reliability.toolRouting.maxCandidates, configPath, "reliability.toolRouting.maxCandidates", 1, 50);

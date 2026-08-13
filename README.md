@@ -159,6 +159,8 @@ Switch modes from the TUI:
 /equaxis-mode off
 ```
 
+High-risk approvals in the TUI are structured dialogs: approve, deny, deny-and-rephrase (the model is told what to avoid), or approve all remaining high-risk calls this turn (`reliability.approval.batchPerTurn`). A loop stop condition blocks the same tool call repeated consecutively within a turn (`reliability.limits.maxRepeatedCalls`, default 3). Failed subagents spill their full output to `.pi/runtime/subagents/artifacts/` and the failure message carries the stderr tail plus the artifact path.
+
 ## Runtime Profiles
 
 `runtime.profile` in `.pi/equaxis.json` decides which extensions load. Profiles are a selection policy, not feature flags — individual extensions can still be added/removed via `extensions.enabled` / `extensions.disabled`.
