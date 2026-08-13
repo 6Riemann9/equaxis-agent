@@ -250,22 +250,6 @@ Add `--llm` only when you explicitly want a model-written analysis. Deployment d
 
 See [Evaluation Architecture](docs/EVALUATION_ARCHITECTURE.md) for the full design.
 
-## Default Provider
-
-Equaxis registers a Pi provider named `openai-inprior` (models `gpt-5.5` and `gpt-5.6-sol`) and defaults to:
-
-| Setting | Value |
-|---|---|
-| Model | `gpt-5.5` |
-| API | OpenAI Responses-compatible endpoint |
-| Base URL | `https://api.inprior.com` |
-| Thinking | `off` (see `.pi/settings.json` `defaultThinkingLevel`) |
-| Context | `1,000,000` tokens |
-| Max output | `100,000` tokens |
-| Storage | `store: false` |
-
-DeepSeek (`deepseek-v4-flash` / `deepseek-v4-pro`) is enabled as a built-in provider via `.pi/auth.json` — see [docs/PROVIDER.md](docs/PROVIDER.md). Provider configuration lives in [`.pi/extensions/provider.ts`](.pi/extensions/provider.ts) and [`.pi/settings.json`](.pi/settings.json). Credentials are read from `OPENAI_API_KEY` first, then `.equaxis/credentials/openai.key`.
-
 ## Safety Model
 
 Equaxis is designed around explicit boundaries:
