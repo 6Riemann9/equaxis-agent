@@ -8,6 +8,7 @@
  * Usage: node scripts/harness-snapshot.mjs
  */
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -40,6 +41,29 @@ try {
   config = loadEquaxisConfig(projectRoot);
 } catch (error) {
   config = { error: error instanceof Error ? error.message : String(error) };
+}
+
+/** Probe the memory bridge: spawn it, ping, close. ~1s, side-effect free. */
+function probeMemoryBridge() {
+  const pythonCommand = config?.memory?.pythonCommand ?? "python";
+  const rootDir = path.resolve(projectRoot, config?.memory?.rootDir ?? ".equaxis/memory");
+  const bridgePath = path.join(projectRoot, "bridge", "memory_bridge.py");
+  if (!fs.existsSync(bridgePath)) return { ok: false, error: "bridge script missing" };
+  const result = spawnSync(pythonCommand, ["-u", bridgePath, "--root", rootDir], {
+    cwd: projectRoot,
+    input: '{"id":"snapshot","action":"ping","payload":{}}\n{"id":"snapshot","action":"close","payload":{}}\n',
+    encoding: "utf8",
+    timeout: 15000,
+    windowsHide: true
+  });
+  if (result.error) return { ok: false, error: result.error.message };
+  const line = (result.stdout ?? "").split("\n").find((item) => item.startsWith("__EQUAXIS_MEMORY__"));
+  try {
+    const response = JSON.parse(line.slice("__EQUAXIS_MEMORY__".length));
+    return response.ok ? { ok: true, ...response.result } : { ok: false, error: response.error?.message ?? "bridge error" };
+  } catch {
+    return { ok: false, error: (result.stderr ?? "no bridge response").trim().slice(0, 200) };
+  }
 }
 
 let dashboard = null;
@@ -244,6 +268,7 @@ process.stdout.write(
       eval: evalStats,
       harbor,
       costs: collectSessionCosts(),
+      memoryBridge: probeMemoryBridge(),
       reliability: findLatestReliabilityState(),
       traces: {
         total: traces.length,

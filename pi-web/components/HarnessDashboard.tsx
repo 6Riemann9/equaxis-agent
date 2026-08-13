@@ -37,6 +37,7 @@ interface Snapshot {
     byModel: Array<{ provider: string; model: string; tokens: number; costUsd: number; sessions: number }>;
     bySession: Array<{ session: string; modifiedAt: string; tokens: number; costUsd: number }>;
   } | null;
+  memoryBridge: { ok: boolean; version?: string; rootDir?: string; error?: string } | null;
   traces: {
     total: number;
     byEvent: Record<string, number>;
@@ -418,6 +419,11 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
                     <button className="harness-failure-link" onClick={() => { setTab("events"); setFailedOnly(true); setOffset(0); loadEvents(0, { failed: true }); }}>
                       {traces.failureEvents} failure events →
                     </button>
+                  )}
+                  {snapshot?.memoryBridge && (
+                    <span className={snapshot.memoryBridge.ok ? "harness-ok-tag" : "harness-bad-tag"}>
+                      memory bridge {snapshot.memoryBridge.ok ? `OK${snapshot.memoryBridge.version ? ` v${snapshot.memoryBridge.version}` : ""}` : `DOWN: ${snapshot.memoryBridge.error ?? "unknown"}`}
+                    </span>
                   )}
                 </div>
                 <div className="harness-checks">
