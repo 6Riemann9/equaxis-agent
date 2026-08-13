@@ -4,9 +4,13 @@ node_modules/
 .pi/npm/
 .pi/trust.json
 .pi/models-store.json
+.pi/models.json
 .pi/auth.json
 .pi/oauth.json
 .pi-test-home/
+# vendored extension trees: never track deps or nested VCS metadata
+.pi/extensions/vendor/**/node_modules/
+.pi/extensions/vendor/**/.git/
 .equaxis/
 __pycache__/
 vendor/**/.pytest_cache/

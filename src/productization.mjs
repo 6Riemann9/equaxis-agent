@@ -54,6 +54,42 @@ function gateResult(name, result) {
   };
 }
 
+const PACK_REQUIRED_FILES = [
+  ".pi/equaxis.json",
+  ".pi/extensions/contracts.json",
+  ".pi/settings.json",
+  "scripts/equaxis.mjs",
+  "pi-web/bin/pi-web.js"
+];
+const PACK_FORBIDDEN_PREFIXES = ["harbor_eval/jobs/", "harbor_eval/reports/"];
+
+/**
+ * Assert that an npm pack file list ships the runtime files Equaxis needs at
+ * first run and excludes local runtime/benchmark data. Pure and testable
+ * without invoking npm.
+ */
+export function assertPackFiles(files = []) {
+  const missing = PACK_REQUIRED_FILES.filter((required) => !files.includes(required));
+  const leaked = files.filter((file) => PACK_FORBIDDEN_PREFIXES.some((prefix) => file.startsWith(prefix)));
+  const issues = [
+    ...missing.map((file) => "missing required file in package: " + file),
+    ...leaked.map((file) => "runtime or benchmark data leaked into package: " + file)
+  ];
+  return { ok: issues.length === 0, issues, missing, leaked };
+}
+
+/** Extract packed file paths from npm pack --dry-run --json stdout. */
+export function packFilePaths(output) {
+  let parsed;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return null;
+  }
+  const first = Array.isArray(parsed) ? parsed[0] : parsed;
+  return Array.isArray(first?.files) ? first.files.map((file) => String(file?.path ?? "")) : null;
+}
+
 function writeReleaseManifest(projectRoot, pkg, options = {}) {
   const outputPath = options.outputPath ?? path.join(projectRoot, ".pi", "runtime", "release-manifest.json");
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -168,8 +204,23 @@ export function runProductizationCommand(command, options = {}) {
   const verify = runCommand(npm.command, npmArgs(npm, ["run", "verify:full"]), execOptions);
   steps.push(step("verify:full", verify.status === 0, commandDetail(verify)));
   if (verify.status === 0) {
-    const manifestPath = writeReleaseManifest(projectRoot, pkg, { ...options, config: startup.unifiedConfig, gateResults: { verifyFull: gateResult("verify:full", verify) } });
-    steps.push(step("release manifest", true, manifestPath));
+    const pack = runCommand(npm.command, npmArgs(npm, ["pack", "--dry-run", "--json"]), execOptions);
+    const packFiles = pack.status === 0 ? packFilePaths(pack.stdout) : null;
+    if (packFiles === null) {
+      steps.push(step("package contents", false, pack.status === 0 ? "could not parse npm pack output" : commandDetail(pack)));
+    } else {
+      const packCheck = assertPackFiles(packFiles);
+      const packDetail = packCheck.ok
+        ? packFiles.length + " files; required .pi runtime files present; no harbor jobs/reports"
+        : packCheck.issues.join("; ");
+      steps.push(step("package contents", packCheck.ok, packDetail));
+    }
+    if (steps[steps.length - 1].status) {
+      const manifestPath = writeReleaseManifest(projectRoot, pkg, { ...options, config: startup.unifiedConfig, gateResults: { verifyFull: gateResult("verify:full", verify) } });
+      steps.push(step("release manifest", true, manifestPath));
+    } else {
+      steps.push(step("release manifest", false, "skipped because package contents gate failed"));
+    }
   } else {
     steps.push(step("release manifest", false, "skipped because verify failed"));
   }

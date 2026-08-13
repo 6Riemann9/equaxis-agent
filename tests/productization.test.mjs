@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatProductizationExerciseReport, formatProductizationReport, runProductizationCommand, runProductizationExercise } from "../src/productization.mjs";
+import { assertPackFiles, formatProductizationExerciseReport, formatProductizationReport, packFilePaths, runProductizationCommand, runProductizationExercise } from "../src/productization.mjs";
 
 function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-product-"));
@@ -60,6 +60,17 @@ function workspace(t) {
 function fakeSpawn(calls) {
   return (command, args) => {
     calls.push([command, args]);
+    if (args.includes("pack")) {
+      const packJson = JSON.stringify([{ files: [
+        { path: "scripts/equaxis.mjs" },
+        { path: ".pi/equaxis.json" },
+        { path: ".pi/extensions/contracts.json" },
+        { path: ".pi/settings.json" },
+        { path: "pi-web/bin/pi-web.js" },
+        { path: "src/policy.mjs" }
+      ] }]);
+      return { status: 0, stdout: packJson + "\n", stderr: "" };
+    }
     return { status: 0, stdout: "ok\n", stderr: "" };
   };
 }
@@ -94,7 +105,7 @@ test("release command verifies before writing a manifest", (t) => {
     outputPath
   });
   assert.equal(report.ok, true);
-  assert.deepEqual(calls.map((item) => item[1]), [["run", "verify:full"]]);
+  assert.deepEqual(calls.map((item) => item[1]), [["run", "verify:full"], ["pack", "--dry-run", "--json"]]);
   const manifest = JSON.parse(fs.readFileSync(outputPath, "utf8"));
   assert.equal(manifest.name, "equaxis-agent");
   assert.equal(manifest.version, "0.2.0");
@@ -142,4 +153,55 @@ test("dry-run update reports planned work without spawning npm", (t) => {
   assert.equal(report.ok, true);
   assert.deepEqual(calls, []);
   assert.ok(report.steps.some((item) => item.detail === "skipped by --dry-run"));
+});
+
+test("assertPackFiles requires .pi runtime files and rejects harbor jobs", () => {
+  const good = [
+    "scripts/equaxis.mjs",
+    ".pi/equaxis.json",
+    ".pi/extensions/contracts.json",
+    ".pi/settings.json",
+    "pi-web/bin/pi-web.js",
+    "src/policy.mjs"
+  ];
+  assert.equal(assertPackFiles(good).ok, true);
+  assert.deepEqual(assertPackFiles(good).issues, []);
+
+  const missingPi = assertPackFiles(["scripts/equaxis.mjs", "src/policy.mjs"]);
+  assert.equal(missingPi.ok, false);
+  assert.ok(missingPi.issues.some((issue) => issue.includes(".pi/equaxis.json")));
+
+  const leaked = assertPackFiles([...good, "harbor_eval/jobs/budget-x/agent/equaxis.jsonl", "harbor_eval/reports/cycle-001/report.md"]);
+  assert.equal(leaked.ok, false);
+  assert.equal(leaked.leaked.length, 2);
+});
+
+test("packFilePaths parses npm pack --dry-run --json output", () => {
+  const output = JSON.stringify([{ files: [{ path: "README.md", size: 10 }, { path: ".pi/equaxis.json", size: 20 }] }]);
+  assert.deepEqual(packFilePaths(output), ["README.md", ".pi/equaxis.json"]);
+  assert.equal(packFilePaths("not json"), null);
+  assert.equal(packFilePaths(""), null);
+});
+
+test("release command fails the package contents gate when .pi files are missing", (t) => {
+  const root = workspace(t);
+  const calls = [];
+  const report = runProductizationCommand("release", {
+    projectRoot: root,
+    cwd: root,
+    env: { OPENAI_API_KEY: "test-key" },
+    nodeVersion: "22.19.0",
+    spawnSyncImpl: (command, args) => {
+      calls.push([command, args]);
+      if (args.includes("pack")) {
+        return { status: 0, stdout: JSON.stringify([{ files: [{ path: "scripts/equaxis.mjs" }, { path: "src/policy.mjs" }] }]) + "\n", stderr: "" };
+      }
+      return { status: 0, stdout: "ok\n", stderr: "" };
+    },
+    npmCommand: "npm"
+  });
+  assert.equal(report.ok, false);
+  const packStep = report.steps.find((item) => item.name === "package contents");
+  assert.equal(packStep.status, false);
+  assert.ok(packStep.detail.includes(".pi/equaxis.json"));
 });

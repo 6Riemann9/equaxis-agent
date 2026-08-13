@@ -5,3 +5,32 @@ nul
 **/.pytest_cache/**
 vendor/agent-memory/.pytest_cache
 vendor/agent-memory/.pytest_cache/**
+
+# Runtime / generated data that must never ship
+harbor_eval/jobs/
+harbor_eval/jobs/**
+harbor_eval/reports/
+harbor_eval/reports/**
+.pi/runtime/
+.pi/runtime/**
+.pi/sessions/
+.pi/sessions/**
+.pi/npm/
+.pi/npm/**
+.pi/auth.json
+.pi/oauth.json
+.pi/trust.json
+.pi/models.json
+.pi/models-store.json
+
+# VCS / dependency metadata inside vendored trees
+**/.git/
+**/.git/**
+**/node_modules/
+**/node_modules/**
+
+# Local tooling artifacts
+**/*.code
+**/*.out
+**/*.log
+*.tgz

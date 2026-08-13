@@ -1,0 +1,3 @@
+- run check/format/lint commands when your done making a change. if they don't exist, suggest making them for the project you're in
+- avoid explicit return types unless absolutely needed
+- `as any` should be an absolute last resort. always use real type safety. lean on type inference instead of manually writing new types over and over again

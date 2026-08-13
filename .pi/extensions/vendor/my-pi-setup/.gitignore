@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Downloaded/generated executables
+bin/
+
+# Pi runtime and private state
+sessions/
+/workflows/
+auth.json
+settings.json
+trust.json
+models.json
+models-store.json
+extensions/summaries/config.private.json
+extensions/summaries/config.private.json.*.tmp
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+.DS_Store
+
+# Local editor settings
+.vscode/
+.idea/

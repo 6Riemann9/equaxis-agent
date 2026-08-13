@@ -40,6 +40,8 @@ function nodeVersion() {
 
 const pythonProbe = run("python", ["-c", "import sys; print(sys.version.split()[0])"]);
 const hasNodeModules = fs.existsSync(path.join(projectRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"));
+const vendorRoot = path.join(projectRoot, ".pi", "extensions", "vendor", "my-pi-setup");
+const vendorInstalled = fs.existsSync(path.join(vendorRoot, "node_modules"));
 const piWebDir = path.join(projectRoot, "pi-web");
 const piWebBuilt = fs.existsSync(path.join(piWebDir, ".next", "BUILD_ID"));
 const memoryImportable = pythonProbe.ok
@@ -68,6 +70,17 @@ if (!memoryImportable) {
   }
 } else {
   step("Python memory core", true, "already importable");
+}
+
+// 2a. Vendored extension tree (my-pi-setup) — deps are hoisted into its
+// own node_modules; install only when missing, never touch existing state.
+if (fs.existsSync(path.join(vendorRoot, "package.json"))) {
+  if (!vendorInstalled) {
+    const vendorInstall = run("npm", ["install", "--no-audit", "--no-fund"], { cwd: vendorRoot });
+    step("Vendored extensions", vendorInstall.ok, vendorInstall.ok ? "installed" : (vendorInstall.stderr || "install failed").slice(0, 200));
+  } else {
+    step("Vendored extensions", true, "already installed");
+  }
 }
 
 // 2b. pi-web fork (web dashboards) — install deps and build when missing
