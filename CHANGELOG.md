@@ -2,6 +2,17 @@
 
 All notable changes to Equaxis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [0.3.0] - 2026-08-13
+
+### Added
+- Web approval queue: high-risk calls in headless sessions (pi-web, subagents, `--mode json`) now wait for a decision from the pi-web Approvals panel instead of being blocked; TUI approval flow unchanged. Config: `reliability.approval.webQueue`.
+- Cost aggregation: session token/cost usage (per provider/model + per session) shown in the harness dashboard Overview.
+- Memory bridge self-healing: unexpected Python process exits trigger automatic restart with exponential backoff (5 attempts).
+- npm package slimming: `files` allowlist; publishable at `equaxis-agent@0.3.0`.
+
+### Changed
+- Vendored pi-web fork moved into the repo (`pi-web/`) so all web dashboards survive fresh clones; `npm run setup` installs and builds it.
+
 ## [Unreleased]
 
 ### Added

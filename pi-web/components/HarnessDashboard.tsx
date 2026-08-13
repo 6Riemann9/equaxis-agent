@@ -31,6 +31,12 @@ interface Snapshot {
   reliability: { sessionFile: string; state: ReliabilityState } | null;
   eval: EvalStats | { error: string } | null;
   harbor: HarborData | { error: string } | null;
+  costs: {
+    totalTokens: number;
+    totalCostUsd: number;
+    byModel: Array<{ provider: string; model: string; tokens: number; costUsd: number; sessions: number }>;
+    bySession: Array<{ session: string; modifiedAt: string; tokens: number; costUsd: number }>;
+  } | null;
   traces: {
     total: number;
     byEvent: Record<string, number>;
@@ -163,7 +169,17 @@ function shortDetail(entry: TraceEvent): string | null {
   return null;
 }
 
-type Tab = "overview" | "events" | "files" | "eval" | "harbor";
+type Tab = "overview" | "events" | "files" | "eval" | "harbor" | "approvals";
+
+interface ApprovalItem {
+  requestId: string;
+  toolName?: string;
+  summary?: string;
+  reason?: string;
+  requestedAt?: string;
+  decision?: "approve" | "deny";
+  decidedAt?: string;
+}
 
 export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose: () => void }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -187,6 +203,8 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
   const [fileContent, setFileContent] = useState<FileContent | null>(null);
   const [fileOffset, setFileOffset] = useState(0);
   const [evalSort, setEvalSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "", dir: "asc" });
+  const [approvals, setApprovals] = useState<{ pending: ApprovalItem[]; history: ApprovalItem[] } | null>(null);
+  const [approvalBusy, setApprovalBusy] = useState(false);
 
   const load = useCallback(() => {
     if (!cwd) return;
@@ -242,6 +260,46 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
       })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
   }, [cwd]);
+
+  const loadApprovals = useCallback(() => {
+    if (!cwd) return;
+    setError(null);
+    fetch(`/api/harness/approvals?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(String(body?.error ?? `HTTP ${response.status}`));
+        setApprovals(body as { pending: ApprovalItem[]; history: ApprovalItem[] });
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+  }, [cwd]);
+
+  const decideApproval = useCallback(async (requestId: string, decision: "approve" | "deny") => {
+    if (!cwd) return;
+    setApprovalBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/harness/approvals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd, requestId, decision }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(String(body?.error ?? `HTTP ${response.status}`));
+      loadApprovals();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setApprovalBusy(false);
+    }
+  }, [cwd, loadApprovals]);
+
+  // Poll the approval queue while the tab is open.
+  useEffect(() => {
+    if (tab !== "approvals") return;
+    loadApprovals();
+    const timer = window.setInterval(loadApprovals, 5000);
+    return () => window.clearInterval(timer);
+  }, [tab, loadApprovals]);
 
   const loadFileContent = useCallback((entry: FileEntry, nextOffset: number) => {
     if (!cwd) return;
@@ -320,6 +378,9 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
           <button className={tab === "files" ? "active" : ""} onClick={() => openTab("files")}>Files</button>
           <button className={tab === "eval" ? "active" : ""} onClick={() => openTab("eval")}>Eval</button>
           <button className={tab === "harbor" ? "active" : ""} onClick={() => openTab("harbor")}>Harbor</button>
+          <button className={tab === "approvals" ? "active" : ""} onClick={() => openTab("approvals")}>
+            Approvals{approvals && approvals.pending.length > 0 ? ` (${approvals.pending.length})` : ""}
+          </button>
           {traces && traces.failureEvents > 0 && (
             <button className={`harness-failures-tab${failedOnly && tab === "events" ? " active" : ""}`} onClick={() => { setTab("events"); setFailedOnly(true); setOffset(0); loadEvents(0, { failed: true }); }}>
               Failures ({traces.failureEvents})
@@ -369,6 +430,33 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
                   ))}
                 </div>
               </section>
+
+              {snapshot?.costs && (
+                <section className="harness-section">
+                  <div className="harness-section-title">Session costs</div>
+                  <div className="harness-metrics harness-metrics-2">
+                    <div><span>Total tokens</span><strong>{snapshot.costs.totalTokens.toLocaleString()}</strong></div>
+                    <div><span>Total cost</span><strong>${snapshot.costs.totalCostUsd.toFixed(4)}</strong></div>
+                  </div>
+                  <div className="harness-eval-table-wrap" style={{ marginTop: 10 }}>
+                    <table className="harness-eval-table">
+                      <thead>
+                        <tr><th>Provider / Model</th><th>Sessions</th><th>Tokens</th><th>Cost</th></tr>
+                      </thead>
+                      <tbody>
+                        {snapshot.costs.byModel.map((row, index) => (
+                          <tr key={index}>
+                            <td><code>{row.provider}/{row.model}</code></td>
+                            <td>{row.sessions}</td>
+                            <td>{row.tokens.toLocaleString()}</td>
+                            <td>${row.costUsd.toFixed(4)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
 
               <section className="harness-section">
                 <div className="harness-section-title">Configuration</div>
@@ -592,6 +680,53 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
                   )}
                 </>
               )}
+            </section>
+          )}
+
+          {tab === "approvals" && (
+            <section className="harness-section">
+              <div className="harness-section-title">
+                Pending approvals{approvals && approvals.pending.length > 0 ? ` · ${approvals.pending.length} waiting` : ""}
+              </div>
+              {!approvals ? (
+                <div className="harness-empty">Loading approvals…</div>
+              ) : approvals.pending.length === 0 ? (
+                <div className="harness-empty">No pending approvals. High-risk calls in headless sessions wait here for your decision.</div>
+              ) : (
+                <div className="harness-approval-list">
+                  {approvals.pending.map((request) => (
+                    <div key={request.requestId} className="harness-approval">
+                      <div className="harness-approval-meta">
+                        <span className="harness-approval-tool">{request.toolName ?? "tool"}</span>
+                        <code>{request.requestId}</code>
+                        {request.requestedAt && <span className="harness-approval-time">{formatTime(request.requestedAt)}</span>}
+                      </div>
+                      {request.reason && <div className="harness-approval-reason">{request.reason}</div>}
+                      {request.summary && <pre className="harness-approval-summary">{request.summary.slice(0, 1200)}</pre>}
+                      <div className="harness-actions-row">
+                        <button className="harness-approve-btn" disabled={approvalBusy} onClick={() => void decideApproval(request.requestId, "approve")}>
+                          {approvalBusy ? "…" : "✓ Approve"}
+                        </button>
+                        <button className="harness-deny-btn" disabled={approvalBusy} onClick={() => void decideApproval(request.requestId, "deny")}>
+                          {approvalBusy ? "…" : "✗ Deny"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="harness-section-title" style={{ marginTop: 18 }}>Recent decisions</div>
+              <div className="harness-file-list">
+                {approvals?.history.map((entry) => (
+                  <div key={entry.requestId} className="harness-history-row">
+                    <span className={entry.decision === "approve" ? "harness-approved" : "harness-denied"}>{entry.decision}</span>
+                    <code>{entry.requestId}</code>
+                    {entry.decidedAt && <span className="harness-file-date">{formatTime(entry.decidedAt)}</span>}
+                  </div>
+                ))}
+                {approvals && approvals.history.length === 0 && <div className="harness-empty">No decisions yet.</div>}
+              </div>
             </section>
           )}
 

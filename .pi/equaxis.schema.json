@@ -217,6 +217,20 @@
             },
             "sessionFork": {
               "type": "boolean"
+            },
+            "webQueue": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "timeoutMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 600000
+                }
+              }
             }
           }
         },

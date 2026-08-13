@@ -66,7 +66,12 @@ test("loads as a real Pi extension and blocks high-risk calls without approval U
   fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
   fs.writeFileSync(
     path.join(tempRoot, ".pi", "reliability.json"),
-    JSON.stringify({ mode: "enforce", traceDir: ".pi/runtime", limits: { maxToolCallsPerTurn: 1 } }),
+    JSON.stringify({
+      mode: "enforce",
+      traceDir: ".pi/runtime",
+      limits: { maxToolCallsPerTurn: 1 },
+      approval: { webQueue: { enabled: false } }
+    }),
     "utf8"
   );
 
@@ -420,4 +425,50 @@ test("AST extension previews and applies a hash-checked rename", async (t) => {
   const applied = await extension.tools.get("ast_rename").definition.execute("ast-apply", { path: "sample.ts", line: 0, character: 7, newName: "renamed", apply: true, expectedHash: preview.details.expectedHash });
   assert.equal(applied.details.applied, true);
   assert.match(fs.readFileSync(path.join(tempRoot, "sample.ts"), "utf8"), /renamed/);
+});
+
+test("headless high-risk call is approved via the web approval queue", async (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-web-approval-"));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+
+  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tempRoot, ".pi", "reliability.json"),
+    JSON.stringify({
+      mode: "enforce",
+      traceDir: ".pi/runtime",
+      limits: { maxToolCallsPerTurn: 1 },
+      approval: { webQueue: { enabled: true, timeoutMs: 5000 } }
+    }),
+    "utf8"
+  );
+
+  const loaded = await discoverAndLoadExtensions([extensionPath], tempRoot, path.join(tempRoot, "agent-home"));
+  assert.deepEqual(loaded.errors, []);
+  const extension = loaded.extensions[0];
+  const ctx = makeContext(tempRoot);
+  for (const handler of extension.handlers.get("session_start") ?? []) {
+    await handler({ type: "session_start", reason: "startup" }, ctx);
+  }
+
+  // The pi-web panel writes a decision before/while the headless call waits.
+  const decisionDir = path.join(tempRoot, ".pi", "runtime", "approvals", "decisions");
+  fs.mkdirSync(decisionDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(decisionDir, "web-approve-1.json"),
+    JSON.stringify({ requestId: "web-approve-1", decision: "approve", decidedAt: new Date().toISOString() }),
+    "utf8"
+  );
+
+  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
+  const result = await toolCallHandler(
+    {
+      type: "tool_call",
+      toolCallId: "web-approve-1",
+      toolName: "bash",
+      input: { command: "rm -rf ./temporary-output" }
+    },
+    ctx
+  );
+  assert.equal(result?.block, undefined, "high-risk call proceeds after web approval");
 });

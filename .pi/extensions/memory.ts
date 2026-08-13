@@ -119,6 +119,8 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
       rootDir: config.rootDir,
       bridgePath: memoryBridgePath,
       requestTimeoutMs: config.requestTimeoutMs,
+      autoRestart: true,
+      maxRestarts: 5,
       onDiagnostic: (message: string) => {
         lastDiagnostic = message.slice(-1000);
       }

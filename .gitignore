@@ -1,5 +1,9 @@
 node_modules/
 .pi/runtime/
+.pi/sessions/
+.pi/npm/
+.pi/trust.json
+.pi/models-store.json
 .pi/auth.json
 .pi/oauth.json
 .pi-test-home/

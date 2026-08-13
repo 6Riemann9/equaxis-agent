@@ -5,6 +5,12 @@ import type {
   ToolResultEvent
 } from "@earendil-works/pi-coding-agent";
 import { EvalLoop } from "../../src/eval-loop.mjs";
+import {
+  cleanupApprovals,
+  readApprovalDecision,
+  writeApprovalDecision as persistApprovalDecision,
+  writeApprovalRequest as persistApprovalRequest
+} from "../../src/approval-queue.mjs";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { RISK, classifyToolCall, shouldBlockForLimits, validateToolInput } from "../../src/policy.mjs";
 import { validateEditFreshness } from "../../src/stale-edit.mjs";
@@ -24,6 +30,7 @@ interface HarnessConfig {
     externalEditPolicy: "prompt" | "auto" | "deny";
     externalEditRoots: string[];
     sessionFork: boolean;
+    webQueue: { enabled: boolean; timeoutMs: number };
   };
   limits: {
     maxToolCallsPerTurn: number;
@@ -168,6 +175,44 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     services.trace.record(ctx, event, { mode: state.mode, phase: state.phase, ...data });
   }
 
+  const approvalProjectRoot = () => services.paths.workspace;
+
+  function writeApprovalRequest(cfg: HarnessConfig, requestId: string, toolName: string, summary: string, reason: string): string | null {
+    const web = cfg.approval?.webQueue;
+    if (!web?.enabled) return null;
+    try {
+      return persistApprovalRequest(approvalProjectRoot(), cfg.traceDir, { requestId, toolName, summary, reason });
+    } catch {
+      return null;
+    }
+  }
+
+  function writeApprovalDecision(cfg: HarnessConfig, requestId: string, decision: "approve" | "deny"): boolean {
+    const web = cfg.approval?.webQueue;
+    if (!web?.enabled) return false;
+    try {
+      persistApprovalDecision(approvalProjectRoot(), cfg.traceDir, requestId, decision);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Poll the web decision file until it resolves, the timeout elapses, or the signal aborts. */
+  async function waitForWebApproval(cfg: HarnessConfig, requestId: string, signal?: AbortSignal): Promise<"approve" | "deny" | null> {
+    const web = cfg.approval?.webQueue;
+    if (!web?.enabled) return null;
+    const timeoutMs = Math.max(1000, web.timeoutMs ?? 60_000);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (signal?.aborted) return null;
+      const decision = readApprovalDecision(approvalProjectRoot(), cfg.traceDir, requestId);
+      if (decision?.decision === "approve" || decision?.decision === "deny") return decision.decision;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return null;
+  }
+
   function updateStatus(ctx: ExtensionContext): void {
     const risk = state.lastRisk === RISK.LOW ? "" : ` · ${state.lastRisk}`;
     services.status.set(
@@ -218,6 +263,11 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   pi.on("session_start", async (event, ctx) => {
     config = services.configure(ctx.cwd).reliability as HarnessConfig;
     traceFile = services.paths.traceFile;
+    try {
+      cleanupApprovals(services.paths.workspace, config.traceDir);
+    } catch {
+      // best effort
+    }
     restoreState(ctx);
     const cliMode = pi.getFlag("equaxis-mode");
     if (isMode(cliMode)) state.mode = cliMode;
@@ -334,21 +384,52 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       trace(ctx, "approval_requested", decision);
       updateStatus(ctx);
 
-      if (!ctx.hasUI) {
+      const summary = event.toolName === "bash"
+        ? String((event.input as Record<string, unknown>).command ?? "")
+        : String((event.input as Record<string, unknown>).path ?? event.toolName);
+
+      // Persist the request so the pi-web approvals panel can see it.
+      let webRequestId: string | null = null;
+      try {
+        webRequestId = writeApprovalRequest(config, event.toolCallId, event.toolName, summary, classification.reason);
+      } catch (error) {
+        trace(ctx, "approval_queue_write_failed", { error: String(error) });
+      }
+
+      // TUI sessions confirm interactively; headless sessions poll the web
+      // decision queue for a bounded window instead of blocking outright.
+      let approved: boolean;
+      if (ctx.hasUI) {
+        approved = await ctx.ui.confirm(
+          `High-risk ${event.toolName} action`,
+          `${classification.reason}\n\n${summary.slice(0, 1200)}\n\nAllow this single tool call?`
+        );
+      } else if (!config.approval?.webQueue?.enabled) {
         state.blockedCalls += 1;
         state.phase = "planning";
         trace(ctx, "tool_blocked", { ...decision, reason: "high-risk action has no approval UI" });
         updateStatus(ctx);
         return { block: true, reason: "Reliability Harness: high-risk action blocked because approval UI is unavailable" };
+      } else {
+        const webDecision = await waitForWebApproval(config, event.toolCallId, ctx.signal);
+        if (webDecision === null) {
+          state.blockedCalls += 1;
+          state.phase = "planning";
+          trace(ctx, "tool_blocked", { ...decision, reason: `no web approval decision within ${config.approval.webQueue.timeoutMs}ms` });
+          updateStatus(ctx);
+          return { block: true, reason: "Reliability Harness: high-risk action blocked; no web approval decision arrived in time" };
+        }
+        approved = webDecision === "approve";
       }
 
-      const summary = event.toolName === "bash"
-        ? String((event.input as Record<string, unknown>).command ?? "")
-        : String((event.input as Record<string, unknown>).path ?? event.toolName);
-      const approved = await ctx.ui.confirm(
-        `High-risk ${event.toolName} action`,
-        `${classification.reason}\n\n${summary.slice(0, 1200)}\n\nAllow this single tool call?`
-      );
+      if (webRequestId) {
+        try {
+          writeApprovalDecision(config, event.toolCallId, approved ? "approve" : "deny");
+        } catch {
+          // best effort; the panel derives history from the trace stream too
+        }
+      }
+
       if (!approved) {
         state.blockedCalls += 1;
         state.phase = "planning";

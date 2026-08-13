@@ -68,6 +68,63 @@ try {
   evalStats = { error: error instanceof Error ? error.message : String(error) };
 }
 
+/**
+ * Aggregate token/cost usage from the project's session files. Every assistant
+ * message carries `usage` (input/output/totalTokens + cost breakdown); summing
+ * per provider/model gives a live spend picture for the dashboard.
+ */
+function collectSessionCosts() {
+  const sessionsRoot =
+    process.env.PI_CODING_AGENT_SESSION_DIR ??
+    path.join(os.homedir(), ".pi", "agent", "sessions");
+  const encoded = `--${projectRoot.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  const sessionDir = path.join(sessionsRoot, encoded);
+  if (!fs.existsSync(sessionDir)) return null;
+  const byModel = {};
+  const bySession = [];
+  let totalTokens = 0;
+  let totalCostUsd = 0;
+  const files = fs
+    .readdirSync(sessionDir)
+    .filter((name) => name.endsWith(".jsonl"))
+    .map((name) => ({ name, stat: fs.statSync(path.join(sessionDir, name)) }))
+    .sort((left, right) => left.stat.mtimeMs - right.stat.mtimeMs);
+  for (const { name, stat } of files) {
+    let sessionTokens = 0;
+    let sessionCost = 0;
+    for (const line of fs.readFileSync(path.join(sessionDir, name), "utf8").split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        const usage = entry.message?.usage;
+        if (!usage || typeof usage !== "object") continue;
+        const tokens = Number(usage.totalTokens) || 0;
+        const cost = Number(usage.cost?.total) || 0;
+        if (tokens <= 0 && cost <= 0) continue;
+        const key = `${entry.message?.provider ?? "unknown"}/${entry.message?.model ?? "unknown"}`;
+        const bucket = byModel[key] ?? (byModel[key] = { provider: key.split("/")[0], model: key.split("/")[1], tokens: 0, costUsd: 0, sessions: 0 });
+        bucket.tokens += tokens;
+        bucket.costUsd += cost;
+        sessionTokens += tokens;
+        sessionCost += cost;
+      } catch {
+        // skip malformed lines
+      }
+    }
+    if (sessionTokens > 0 || sessionCost > 0) {
+      bySession.push({ session: name.slice(0, 30), modifiedAt: stat.mtime.toISOString(), tokens: sessionTokens, costUsd: sessionCost });
+    }
+    totalTokens += sessionTokens;
+    totalCostUsd += sessionCost;
+  }
+  return {
+    totalTokens,
+    totalCostUsd,
+    byModel: Object.values(byModel).sort((a, b) => b.costUsd - a.costUsd),
+    bySession: bySession.slice(-15).reverse()
+  };
+}
+
 // Harbor evaluation artifacts: paired budget comparison + latest improvement cycle.
 let harbor = null;
 try {
@@ -186,6 +243,7 @@ process.stdout.write(
       doctor,
       eval: evalStats,
       harbor,
+      costs: collectSessionCosts(),
       reliability: findLatestReliabilityState(),
       traces: {
         total: traces.length,

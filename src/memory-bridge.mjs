@@ -13,23 +13,30 @@ export function buildPythonBridgeEnv(baseEnv = process.env) {
 }
 
 export class MemoryBridge {
-  constructor({ cwd, pythonCommand, rootDir, bridgePath, requestTimeoutMs = 60000, onDiagnostic = (_message) => {} }) {
+  constructor({ cwd, pythonCommand, rootDir, bridgePath, requestTimeoutMs = 60000, onDiagnostic = (_message) => {}, autoRestart = false, maxRestarts = 5 }) {
     this.cwd = cwd;
     this.pythonCommand = pythonCommand;
     this.rootDir = path.resolve(cwd, rootDir);
     this.bridgePath = bridgePath ? path.resolve(bridgePath) : path.join(this.cwd, "bridge", "memory_bridge.py");
     this.requestTimeoutMs = requestTimeoutMs;
     this.onDiagnostic = onDiagnostic;
+    this.autoRestart = autoRestart;
+    this.maxRestarts = maxRestarts;
     this.process = null;
     this.started = false;
     this.pending = new Map();
     this.nextId = 1;
     this.startPromise = null;
+    this.stopRequested = false;
+    this.restartCount = 0;
+    this.restartTimer = null;
   }
 
   async start() {
     if (this.process && !this.process.killed && this.started) return;
     if (this.startPromise) return this.startPromise;
+    this.stopRequested = false;
+    this.restartCount = 0;
 
     this.startPromise = new Promise((resolve, reject) => {
       const child = spawn(this.pythonCommand, ["-u", this.bridgePath, "--root", this.rootDir], {
@@ -57,6 +64,15 @@ export class MemoryBridge {
         this.rejectAll(error);
         this.process = null;
         this.started = false;
+        if (this.autoRestart && !this.stopRequested && this.restartCount < this.maxRestarts) {
+          const delayMs = 1000 * 2 ** this.restartCount;
+          this.restartCount += 1;
+          this.onDiagnostic(`Memory bridge exited unexpectedly; restarting in ${delayMs}ms (attempt ${this.restartCount}/${this.maxRestarts})`);
+          this.restartTimer = setTimeout(() => {
+            this.restartTimer = null;
+            void this.start().catch(() => {});
+          }, delayMs);
+        }
       });
 
       this.request("ping", {}, { timeoutMs: this.requestTimeoutMs, skipStart: true })
@@ -145,6 +161,11 @@ export class MemoryBridge {
   }
 
   async stop() {
+    this.stopRequested = true;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     const child = this.process;
     if (!child) return;
     const exited = child.exitCode !== null

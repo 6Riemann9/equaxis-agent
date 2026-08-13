@@ -43,7 +43,11 @@
       "externalEditRoots": [
         "<workspace>"
       ],
-      "sessionFork": false
+      "sessionFork": false,
+      "webQueue": {
+        "enabled": true,
+        "timeoutMs": 60000
+      }
     },
     "limits": {
       "maxToolCallsPerTurn": 30,

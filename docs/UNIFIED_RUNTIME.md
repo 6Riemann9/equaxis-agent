@@ -99,6 +99,14 @@ pi-web fork 顶栏的 **Equaxis Harness** 按钮打开实时 harness 面板（`/
 
 数据来源：`scripts/harness-snapshot.mjs`（一次性 JSON 快照，~1s，无副作用），fork 的 `app/api/harness` 路由以项目根为 cwd 执行它；事件/文件浏览由 `app/api/harness/events|files|file` 直读文件实现（事件流限 64MB、单文件限 32MB/10 万行）。共享的 `lib/equaxis-project.ts` 提供 `findEquaxisRoot`、`runEquaxisScript`、`getProjectSessionDir`（优先用 `PI_CODING_AGENT_SESSION_DIR`，避免依赖服务器进程的 homedir）。
 
+## Web 审批队列
+
+高风险调用在 **headless 会话**（pi-web 驱动、subagent、`--mode json`）里不再被直接阻断：harness 把请求写入 `.pi/runtime/approvals/requests/<id>.json` 并轮询决策文件（`approvals/decisions/<id>.json`，默认 60s 窗口，配置 `reliability.approval.webQueue.{enabled,timeoutMs}`）。pi-web 的 Harness 面板 **Approvals** tab 显示 pending 队列（工具名、原因、命令摘要）并提供 Approve/Deny；历史决策保留最近 50 条。TUI 会话仍走交互确认，行为不变。session_start 时清理过期请求。
+
+## 成本聚合
+
+Harness 面板 Overview 的 **Session costs** 段从项目 session 文件聚合助手消息的 `usage`：总 token、总成本、按 provider/model 分组的 token/成本（最近 15 个会话明细）。
+
 ## Shared Runtime Services
 
 `createExtensionRuntimeServices()` supplies:
