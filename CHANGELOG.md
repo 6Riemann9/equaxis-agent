@@ -2,6 +2,25 @@
 
 All notable changes to Equaxis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [0.3.2] - 2026-08-14
+
+### Added
+- Runtime cost brake: session cost summed at turn end; warns at `reliability.costBrake.warnAtFraction` and blocks high-risk calls at `maxSessionCostUsd` until `/equaxis-budget reset` (default 2.0 USD).
+- Structured high-risk approvals: approve / deny / deny-and-rephrase / approve-all-remaining-this-turn (`reliability.approval.denyRephrase`, `batchPerTurn`).
+- Loop stop condition: consecutive identical tool calls within a turn are blocked (`limits.maxRepeatedCalls`, default 3).
+- `/equaxis-mission` command: objective/status/turns/last-outcome persisted across turns and forks.
+- Unified tool contract foundation (`src/tool-contract.mjs`): versioned ToolDescriptor/Invocation/Outcome shapes recorded in tool_result traces.
+- Subagent failure spill: full output written to `.pi/runtime/subagents/artifacts/<id>-attempt<N>.out`; error carries stderr tail + path.
+- pi-web harness dashboard visual refresh (cards, risk pills, eval rate colors, pulses, transitions).
+
+### Changed
+- Subagent budgets default to 60s timeout / 1 retry; timeouts are terminal (never auto-retried).
+- Subagent result schema validation now uses TypeBox (nested objects, arrays, enums, unions).
+- Web approvals are event-driven (`fs.watch`) with bounded poll fallback.
+- Evaluation fully off the runtime path: the harness writes only trace facts; offline consumers rebuild history from the trace stream.
+- Audit mode counts invalid calls toward the per-turn limit.
+- README: removed the Default Provider section.
+
 ## [0.3.1] - 2026-08-13
 
 ### Changed
