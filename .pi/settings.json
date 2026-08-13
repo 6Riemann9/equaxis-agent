@@ -1,10 +1,12 @@
 {
   "defaultProvider": "openai-inprior",
   "defaultModel": "gpt-5.5",
-  "defaultThinkingLevel": "xhigh",
+  "defaultThinkingLevel": "off",
   "enabledModels": [
     "openai-inprior/gpt-5.5",
-    "openai-inprior/gpt-5.6-sol"
+    "openai-inprior/gpt-5.6-sol",
+    "deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-v4-pro"
   ],
   "compaction": {
     "enabled": true,
@@ -12,6 +14,145 @@
     "keepRecentTokens": 64000
   },
   "packages": [
-    "npm:billion-context-pi"
-  ]
+    "npm:billion-context-pi",
+    "npm:pi-web-access"
+  ],
+  "subagents": {
+    "agentOverrides": {
+      "advisor": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "intercom",
+          "compress",
+          "decompress",
+          "search_context",
+          "acp_status"
+        ]
+      },
+      "context-builder": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "write",
+          "web_search",
+          "intercom",
+          "compress",
+          "decompress",
+          "search_context",
+          "acp_status"
+        ]
+      },
+      "delegate": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "edit",
+          "write",
+          "contact_supervisor",
+          "compress",
+          "decompress",
+          "search_context",
+          "acp_status"
+        ]
+      },
+      "oracle": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "intercom",
+          "compress",
+          "decompress",
+          "search_context",
+          "acp_status"
+        ]
+      },
+      "planner": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "intercom",
+          "compress",
+          "decompress",
+          "search_context",
+          "acp_status"
+        ]
+      },
+      "researcher": {
+        "tools": [
+          "read",
+          "write",
+          "web_search",
+          "fetch_content",
+          "get_search_content",
+          "intercom",
+          "compress",
+          "decompress",
+          "search_context",
+          "acp_status"
+        ]
+      },
+      "reviewer": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "edit",
+          "write",
+          "intercom",
+          "compress",
+          "decompress",
+          "search_context",
+          "acp_status"
+        ]
+      },
+      "scout": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "write",
+          "intercom",
+          "compress",
+          "decompress",
+          "search_context",
+          "acp_status"
+        ]
+      },
+      "worker": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "edit",
+          "write",
+          "contact_supervisor",
+          "compress",
+          "decompress",
+          "search_context",
+          "acp_status"
+        ]
+      }
+    }
+  }
 }

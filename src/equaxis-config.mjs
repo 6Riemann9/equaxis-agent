@@ -36,7 +36,8 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
       writesOutsideWorkspace: true,
       externalEditPolicy: "prompt",
       externalEditRoots: [],
-      sessionFork: false
+      sessionFork: false,
+      webQueue: { enabled: true, timeoutMs: 60000 }
     },
     limits: { maxToolCallsPerTurn: 30, maxHighRiskCallsPerTurn: 3, maxRepairAttemptsPerError: 2 },
     toolRouting: { enabled: true, maxCandidates: 5 }
