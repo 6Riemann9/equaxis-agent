@@ -45,6 +45,7 @@ All notable changes to Equaxis are documented here. Format follows [Keep a Chang
 - Explicit embedding model wiring (Chroma `embedding_function` derived from `long_term.embedding_model`).
 - Subagent engine integration test exercising the DAG runtime + persistence end to end.
 - pi-web fork: memory atlas with editing, harness dashboard (overview/events/failures/files/eval/harbor), Obsidian-style knowledge graph.
+- pi-web harness dashboard visual refresh: rounded panel with blurred backdrop and accent top bar, card-style metrics with hover lift and status dots, risk-level pill badges, health progress bar, color-coded eval success rates (ok/warn/bad pills), risk-bordered event rows, tab count badges, pulsing pending-approval indicator, spinner loading states, sticky eval table header with zebra rows, and subtle transitions throughout.
 
 ### Fixed
 - pi-web launch on Windows: the `/pi-web` command wrapped the server in `cmd /c "set ... && ..."`, whose nested quotes Node escapes as `\"` and cmd misparses — the server never started and the command timed out with "did not become ready". `launchPiWeb` now spawns the launcher directly with the agent/session dirs passed through the spawn `env` option (works on every platform, no shell quoting).

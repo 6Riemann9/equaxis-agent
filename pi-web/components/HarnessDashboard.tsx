@@ -110,7 +110,12 @@ interface HarborData {
   } | null;
 }
 
-const RISK_COLORS: Record<string, string> = { low: "#16a34a", medium: "#f59e0b", high: "#dc2626" };
+function rateClass(rate: number | null): string {
+  if (rate == null) return "na";
+  if (rate >= 0.9) return "ok";
+  if (rate >= 0.6) return "warn";
+  return "bad";
+}
 const PAGE_SIZE = 100;
 const FILE_PAGE_SIZE = 200;
 
@@ -374,17 +379,17 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
         <div className="harness-tabs">
           <button className={tab === "overview" ? "active" : ""} onClick={() => openTab("overview")}>Overview</button>
           <button className={tab === "events" ? "active" : ""} onClick={() => openTab("events")}>
-            Events{traces && traces.total > 0 ? ` (${traces.total})` : ""}
+            Events{traces && traces.total > 0 ? <span className="harness-tab-count">{traces.total}</span> : null}
           </button>
           <button className={tab === "files" ? "active" : ""} onClick={() => openTab("files")}>Files</button>
           <button className={tab === "eval" ? "active" : ""} onClick={() => openTab("eval")}>Eval</button>
           <button className={tab === "harbor" ? "active" : ""} onClick={() => openTab("harbor")}>Harbor</button>
           <button className={tab === "approvals" ? "active" : ""} onClick={() => openTab("approvals")}>
-            Approvals{approvals && approvals.pending.length > 0 ? ` (${approvals.pending.length})` : ""}
+            Approvals{approvals && approvals.pending.length > 0 ? <span className="harness-tab-count">{approvals.pending.length}</span> : null}
           </button>
           {traces && traces.failureEvents > 0 && (
             <button className={`harness-failures-tab${failedOnly && tab === "events" ? " active" : ""}`} onClick={() => { setTab("events"); setFailedOnly(true); setOffset(0); loadEvents(0, { failed: true }); }}>
-              Failures ({traces.failureEvents})
+              Failures <span className="harness-tab-count">{traces.failureEvents}</span>
             </button>
           )}
         </div>
@@ -392,14 +397,14 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
         <div className="harness-body">
           {error && <div className="harness-error">{error}<button onClick={() => { if (tab === "events") loadEvents(0); else if (tab === "files") loadFiles(); else load(); }}>Retry</button></div>}
           {tab === "overview" && (
-            !snapshot ? <div className="harness-empty">{loading ? "Loading harness..." : "Select an Equaxis workspace to inspect the harness."}</div> : <>
+            !snapshot ? <div className="harness-empty">{loading ? <><span className="harness-spinner" />Loading harness…</> : "Select an Equaxis workspace to inspect the harness."}</div> : <>
               {reliability && (
                 <section className="harness-live">
                   <div className="harness-section-title">Reliability harness</div>
                   <div className="harness-metrics">
-                    <div><span>Mode</span><strong className={reliability.mode === "enforce" ? "harness-enforce" : ""}>{reliability.mode}</strong></div>
+                    <div><span>Mode</span><strong className={reliability.mode === "enforce" ? "harness-enforce" : ""}><span className={`harness-metric-dot ${reliability.mode === "off" ? "off" : "on"}`} />{reliability.mode}</strong></div>
                     <div><span>Phase</span><strong>{reliability.phase}</strong></div>
-                    <div><span>Last risk</span><strong style={{ color: RISK_COLORS[reliability.lastRisk] ?? "var(--text)" }}>{reliability.lastRisk}</strong></div>
+                    <div><span>Last risk</span><strong><span className={`harness-risk-pill ${reliability.lastRisk}`}>{reliability.lastRisk}</span></strong></div>
                     <div><span>Turn count</span><strong>{reliability.turnCount}</strong></div>
                     <div><span>Tool calls</span><strong>{reliability.toolCalls}</strong></div>
                     <div><span>Approved</span><strong>{reliability.approvedCalls}</strong></div>
@@ -426,6 +431,7 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
                     </span>
                   )}
                 </div>
+                <div className="harness-progress"><span style={{ width: `${healthChecks.length ? (passing / healthChecks.length) * 100 : 0}%` }} /></div>
                 <div className="harness-checks">
                   {healthChecks.map((check) => (
                     <div key={check.name} className={check.status ? "harness-check ok" : "harness-check bad"}>
@@ -550,12 +556,12 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
                       const detail = shortDetail(entry);
                       const isExpanded = expandedEvent === index;
                       return (
-                        <div key={index} className={`harness-event-row clickable${/failed|error|blocked|denied/.test(String(entry.event)) ? " failed" : ""}`} onClick={() => setExpandedEvent(isExpanded ? null : index)}>
+                        <div key={index} className={`harness-event-row clickable${/failed|error|blocked|denied/.test(String(entry.event)) ? " failed" : ""}`} data-risk={entry.risk ?? undefined} onClick={() => setExpandedEvent(isExpanded ? null : index)}>
                           <code className="harness-event-time">{formatTime(entry.timestamp ?? "")}</code>
                           <span className="harness-event-name">{entry.event ?? "?"}</span>
                           {entry.phase && <em>{String(entry.phase)}</em>}
                           {entry.toolName && <code className="harness-event-tool">{String(entry.toolName)}</code>}
-                          {entry.risk && <span className="harness-event-risk">{String(entry.risk)}</span>}
+                          {entry.risk && <span className={`harness-risk-pill ${String(entry.risk)}`}>{String(entry.risk)}</span>}
                           {entry.sessionId && <span className="harness-event-session">{String(entry.sessionId).slice(0, 12)}…</span>}
                           {detail && <span className="harness-event-error" title={detail}>{detail.slice(0, 90)}</span>}
                           {isExpanded && (
@@ -604,7 +610,7 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
                             <td>{row.tool}</td>
                             <td className="harness-eval-caps">{row.capabilities.join(", ") || "—"}</td>
                             <td>{row.attempts}</td>
-                            <td>{row.successRate != null ? `${(row.successRate * 100).toFixed(0)}%` : "—"}</td>
+                            <td>{row.successRate != null ? <span className={`harness-rate ${rateClass(row.successRate)}`}>{(row.successRate * 100).toFixed(0)}%</span> : <span className="harness-rate na">—</span>}</td>
                             <td>{row.failures}{row.unknowns > 0 ? ` (+${row.unknowns}?)` : ""}</td>
                             <td>{row.averageLatencyMs != null ? `${row.averageLatencyMs}ms` : "—"}</td>
                             <td>{row.averageInputTokens != null ? `${Math.round(row.averageInputTokens)}/${Math.round(row.averageOutputTokens ?? 0)}` : "—"}</td>
@@ -701,8 +707,9 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
               ) : (
                 <div className="harness-approval-list">
                   {approvals.pending.map((request) => (
-                    <div key={request.requestId} className="harness-approval">
+                    <div key={request.requestId} className="harness-approval pending">
                       <div className="harness-approval-meta">
+                        <span className="harness-pending-dot" />
                         <span className="harness-approval-tool">{request.toolName ?? "tool"}</span>
                         <code>{request.requestId}</code>
                         {request.requestedAt && <span className="harness-approval-time">{formatTime(request.requestedAt)}</span>}

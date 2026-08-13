@@ -1487,37 +1487,54 @@ span.linenumber {
 .memory-graph-detail-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .memory-graph-detail-title strong { font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
 .memory-graph-detail-title button { border: none; background: none; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1; }
-/* Equaxis harness dashboard */
-.harness-backdrop { position: fixed; inset: 0; z-index: 700; display: flex; align-items: stretch; justify-content: center; background: color-mix(in srgb, var(--bg) 78%, #000); }
-.harness-panel { width: min(1180px, 100%); height: 100%; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
-.harness-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 30px 34px 24px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
-.harness-kicker { color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .14em; }
+/* Equaxis harness dashboard — visual refresh */
+.harness-backdrop { position: fixed; inset: 0; z-index: 700; display: flex; align-items: stretch; justify-content: center; background: color-mix(in srgb, var(--bg) 74%, #000); backdrop-filter: blur(6px); }
+.harness-panel { position: relative; width: min(1180px, 100%); height: 100%; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); color: var(--text); box-shadow: 0 24px 80px rgba(0,0,0,.45); }
+.harness-panel::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; z-index: 5; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 35%, transparent)); }
+.harness-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 30px 34px 22px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+.harness-kicker { color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .18em; }
 .harness-panel h1 { margin: 7px 0 5px; font-size: 24px; line-height: 1.1; font-weight: 650; }
 .harness-header p { margin: 0; color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
 .harness-header-actions { display: flex; gap: 6px; }
-.harness-icon-button { width: 34px; height: 34px; border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); cursor: pointer; font-size: 18px; line-height: 1; }
-.harness-icon-button:hover { color: var(--text); background: var(--bg-hover); }
+.harness-icon-button { width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-muted); cursor: pointer; font-size: 18px; line-height: 1; transition: color .12s ease, background .12s ease, border-color .12s ease, transform .12s ease; }
+.harness-icon-button:hover { color: var(--text); background: var(--bg-hover); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); transform: translateY(-1px); }
+.harness-icon-button:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 1px; }
 .harness-body { flex: 1; overflow: auto; padding: 22px 34px 40px; display: flex; flex-direction: column; gap: 22px; }
+.harness-body > section { animation: harness-fade .18s ease; }
 .harness-section-title { display: flex; align-items: center; gap: 10px; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; }
-.harness-ok-tag { padding: 1px 8px; border-radius: 9px; background: rgba(22,163,74,.12); color: #16a34a; font-size: 10px; }
-.harness-bad-tag { padding: 1px 8px; border-radius: 9px; background: rgba(220,38,38,.12); color: #f87171; font-size: 10px; }
-.harness-metrics { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--border); background: var(--border); }
-.harness-metrics > div { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; background: var(--bg-panel); }
+.harness-ok-tag { padding: 2px 9px; border-radius: 999px; background: rgba(22,163,74,.14); color: #4ade80; font-size: 10px; font-weight: 600; }
+.harness-bad-tag { padding: 2px 9px; border-radius: 999px; background: rgba(220,38,38,.14); color: #f87171; font-size: 10px; font-weight: 600; }
+.harness-metrics { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
+.harness-metrics > div { display: flex; flex-direction: column; gap: 7px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); transition: transform .12s ease, border-color .12s ease; }
+.harness-metrics > div:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .harness-metrics span { color: var(--text-muted); font-size: 10px; }
 .harness-metrics strong { font-size: 20px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; text-transform: capitalize; }
 .harness-enforce { color: var(--accent); }
 .harness-blocked { color: #f59e0b; }
 .harness-failed { color: #f87171; }
-.harness-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 18px; }
-.harness-check { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; font-size: 12px; }
-.harness-check-mark { font-size: 11px; flex-shrink: 0; }
-.harness-check.ok .harness-check-mark { color: #16a34a; }
-.harness-check.bad .harness-check-mark { color: #f87171; }
+.harness-metric-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; vertical-align: 2px; }
+.harness-metric-dot.on { background: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.16); }
+.harness-metric-dot.off { background: #f87171; box-shadow: 0 0 0 3px rgba(220,38,38,.16); }
+.harness-risk-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; line-height: 1.3; }
+.harness-risk-pill.low { background: rgba(22,163,74,.14); color: #4ade80; }
+.harness-risk-pill.medium { background: rgba(245,158,11,.15); color: #fbbf24; }
+.harness-risk-pill.high { background: rgba(220,38,38,.15); color: #f87171; }
+.harness-risk-pill.blocked { background: rgba(220,38,38,.22); color: #fca5a5; }
+.harness-progress { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; margin: 0 0 12px; }
+.harness-progress > span { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, #16a34a, #4ade80); transition: width .3s ease; }
+.harness-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; }
+.harness-check { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 8px; font-size: 12px; transition: background .12s ease; }
+.harness-check:hover { background: color-mix(in srgb, var(--bg-hover) 70%, transparent); }
+.harness-check-mark { flex-shrink: 0; display: inline-flex; width: 17px; height: 17px; border-radius: 50%; align-items: center; justify-content: center; font-size: 10px; }
+.harness-check.ok .harness-check-mark { color: #16a34a; background: rgba(22,163,74,.14); }
+.harness-check.bad .harness-check-mark { color: #f87171; background: rgba(220,38,38,.14); }
 .harness-check-name { color: var(--text); white-space: nowrap; }
+.harness-check.bad .harness-check-name { color: #f87171; }
 .harness-check-detail { color: var(--text-dim); font: 10px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .harness-all-clear { margin-top: 8px; color: #16a34a; font-size: 12px; }
 .harness-config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
-.harness-config-card { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px; border: 1px solid var(--border); background: var(--bg-panel); font-size: 12px; }
+.harness-config-card { display: flex; flex-direction: column; gap: 5px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); font-size: 12px; transition: border-color .12s ease, transform .12s ease; }
+.harness-config-card:hover { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); transform: translateY(-1px); }
 .harness-config-card b { color: var(--text); font-size: 12px; margin-bottom: 2px; }
 .harness-config-card span { color: var(--text-muted); overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
 .harness-config-card code { color: var(--text-dim); font: 10px var(--font-mono); overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
@@ -1525,7 +1542,7 @@ span.linenumber {
 .harness-eval-sortable:hover { color: var(--text); }
 .harness-eval-sort-ind { color: var(--accent); }
 .harness-stream-grid { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 18px; align-items: start; }
-.harness-event-stats { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border); background: var(--bg-panel); padding: 8px 10px; }
+.harness-event-stats { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); padding: 8px 10px; }
 .harness-event-stat { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 11px; color: var(--text-muted); }
 .harness-event-stat b { color: var(--text-dim); font-weight: 500; font-variant-numeric: tabular-nums; }
 .harness-recent { display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow-y: auto; }
@@ -1538,45 +1555,51 @@ span.linenumber {
 .harness-event-risk { color: var(--text-muted); font-size: 10px; flex-shrink: 0; }
 .harness-event-error { color: #f87171; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .harness-error, .harness-empty { padding: 34px; color: var(--text-muted); text-align: center; font-size: 12px; }
-.harness-error button { margin-left: 12px; padding: 6px 10px; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text); cursor: pointer; }
+.harness-empty { border: 1px dashed var(--border); border-radius: 12px; }
+.harness-error button { margin-left: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); color: var(--text); cursor: pointer; }
 /* harness tabs + trace browser + file browser */
 .harness-tabs { display: flex; gap: 2px; padding: 0 34px; border-bottom: 1px solid var(--border); background: var(--bg-panel); flex-shrink: 0; }
-.harness-tabs button { padding: 10px 14px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; }
+.harness-tabs button { position: relative; padding: 11px 14px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; transition: color .14s ease; }
 .harness-tabs button:hover { color: var(--text); }
 .harness-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
 .harness-tabs .harness-failures-tab { color: #f87171; }
 .harness-tabs .harness-failures-tab.active { border-bottom-color: #f87171; }
+.harness-tab-count { display: inline-block; margin-left: 5px; padding: 1px 7px; border-radius: 999px; background: var(--bg); color: var(--text-dim); font-size: 9px; font-weight: 600; line-height: 1.5; }
+.harness-tabs button.active .harness-tab-count { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.harness-tabs .harness-failures-tab .harness-tab-count { background: rgba(220,38,38,.12); color: #f87171; }
 .harness-failure-link { border: none; background: none; color: #f87171; cursor: pointer; font: inherit; font-size: 11px; padding: 0; }
 .harness-failure-link:hover { text-decoration: underline; }
 .harness-events-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.harness-events-toolbar select, .harness-events-toolbar input { height: 30px; padding: 0 9px; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text); outline: none; font: inherit; font-size: 12px; }
-.harness-events-toolbar select:focus, .harness-events-toolbar input:focus { border-color: var(--accent); }
+.harness-events-toolbar select, .harness-events-toolbar input { height: 30px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); color: var(--text); outline: none; font: inherit; font-size: 12px; transition: border-color .12s ease; }
+.harness-events-toolbar select:focus, .harness-events-toolbar input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
 .harness-events-toolbar input { width: 180px; }
-.harness-action-btn { padding: 4px 10px; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font: inherit; font-size: 11px; }
+.harness-action-btn { padding: 5px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font: inherit; font-size: 11px; transition: color .12s ease, border-color .12s ease; }
 .harness-action-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
 .harness-action-btn:disabled { opacity: 0.4; cursor: default; }
-.harness-failure-toggle { padding: 4px 10px; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font: inherit; font-size: 11px; }
-.harness-failure-toggle.active { border-color: #f87171; color: #f87171; }
+.harness-failure-toggle { padding: 5px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font: inherit; font-size: 11px; }
+.harness-failure-toggle.active { border-color: #f87171; color: #f87171; background: rgba(220,38,38,.08); }
 .harness-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0; font-size: 11px; color: var(--text-muted); }
 .harness-event-list { display: flex; flex-direction: column; gap: 2px; }
-.harness-event-row { display: flex; align-items: baseline; gap: 10px; padding: 5px 8px; border-bottom: 1px solid var(--border); font-size: 11px; min-width: 0; flex-wrap: wrap; }
+.harness-event-row { display: flex; align-items: baseline; gap: 10px; padding: 6px 9px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; font-size: 11px; min-width: 0; flex-wrap: wrap; border-radius: 0 7px 7px 0; transition: background .12s ease; }
+.harness-event-row[data-risk="high"] { border-left-color: rgba(220,38,38,.55); }
+.harness-event-row[data-risk="medium"] { border-left-color: rgba(245,158,11,.55); }
 .harness-event-row.clickable { cursor: pointer; }
 .harness-event-row.clickable:hover { background: var(--bg-hover); }
-.harness-event-row.failed { border-left: 3px solid #f87171; }
+.harness-event-row.failed { border-left: 3px solid #f87171; background: rgba(220,38,38,.05); }
 .harness-event-session { color: var(--text-dim); font: 10px var(--font-mono); flex-shrink: 0; }
-.harness-event-raw { flex-basis: 100%; margin: 6px 0 2px; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font: 10.5px/1.5 var(--font-mono); color: var(--text-muted); overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+.harness-event-raw { flex-basis: 100%; margin: 6px 0 2px; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font: 10.5px/1.5 var(--font-mono); color: var(--text-muted); overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
 .harness-file-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 .harness-file-path { font: 12px var(--font-mono); color: var(--text); }
 .harness-file-meta { color: var(--text-dim); font-size: 11px; }
 .harness-file-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 18px; }
-.harness-file-item { display: flex; align-items: baseline; gap: 12px; padding: 6px 10px; border: none; border-bottom: 1px solid var(--border); background: none; color: var(--text-muted); cursor: pointer; text-align: left; font: inherit; font-size: 11px; min-width: 0; }
+.harness-file-item { display: flex; align-items: baseline; gap: 12px; padding: 6px 10px; border: none; border-bottom: 1px solid var(--border); background: none; color: var(--text-muted); cursor: pointer; text-align: left; font: inherit; font-size: 11px; min-width: 0; transition: background .12s ease; }
 .harness-file-item:hover { background: var(--bg-hover); color: var(--text); }
-.harness-file-kind { flex-shrink: 0; padding: 0 7px; border-radius: 8px; background: var(--bg); color: var(--text-dim); font-size: 9px; text-transform: uppercase; }
-.harness-file-kind.missing { color: #f87171; }
+.harness-file-kind { flex-shrink: 0; padding: 1px 8px; border-radius: 8px; background: var(--bg); color: var(--text-dim); font-size: 9px; text-transform: uppercase; }
+.harness-file-kind.missing { color: #f87171; background: rgba(220,38,38,.1); }
 .harness-file-item code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--font-mono); }
 .harness-file-size { margin-left: auto; color: var(--text-dim); flex-shrink: 0; }
 .harness-file-date { color: var(--text-dim); font-size: 10px; flex-shrink: 0; }
-.harness-file-lines { display: flex; flex-direction: column; font: 11px/1.6 var(--font-mono); border: 1px solid var(--border); background: var(--bg-panel); }
+.harness-file-lines { display: flex; flex-direction: column; font: 11px/1.6 var(--font-mono); border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
 .harness-file-line { display: flex; gap: 12px; padding: 0 10px; }
 .harness-file-line:hover { background: var(--bg-hover); }
 .harness-line-n { flex-shrink: 0; width: 48px; text-align: right; color: var(--text-dim); user-select: none; }
@@ -1584,32 +1607,45 @@ span.linenumber {
 /* harness eval + harbor panels */
 .harness-metrics-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .harness-metrics-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.harness-eval-table-wrap { overflow-x: auto; border: 1px solid var(--border); }
+.harness-eval-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
 .harness-eval-table { width: 100%; border-collapse: collapse; font-size: 11px; white-space: nowrap; }
-.harness-eval-table th { text-align: left; padding: 7px 10px; background: var(--bg-panel); color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border); }
-.harness-eval-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
+.harness-eval-table thead th { position: sticky; top: 0; z-index: 1; }
+.harness-eval-table th { text-align: left; padding: 8px 10px; background: var(--bg-panel); color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border); }
+.harness-eval-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
+.harness-eval-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--bg) 60%, var(--bg-panel)); }
 .harness-eval-table tr:hover td { background: var(--bg-hover); }
 .harness-eval-table code { font: 10.5px var(--font-mono); color: var(--accent); }
 .harness-eval-caps { color: var(--text-muted); }
 .harness-eval-errors { color: #f87171; }
+.harness-rate { display: inline-block; padding: 1px 8px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.harness-rate.ok { background: rgba(22,163,74,.14); color: #4ade80; }
+.harness-rate.warn { background: rgba(245,158,11,.15); color: #fbbf24; }
+.harness-rate.bad { background: rgba(220,38,38,.14); color: #f87171; }
+.harness-rate.na { color: var(--text-dim); }
 /* harness approvals */
 .harness-approval-list { display: flex; flex-direction: column; gap: 10px; }
-.harness-approval { border: 1px solid var(--border); background: var(--bg-panel); padding: 12px 14px; }
-.harness-approval-meta { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.harness-approval { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); padding: 13px 15px; }
+.harness-approval.pending { border-color: rgba(245,158,11,.5); box-shadow: 0 0 0 3px rgba(245,158,11,.07); }
+.harness-approval-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.harness-pending-dot { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 0 rgba(245,158,11,.5); animation: harness-pulse 1.6s infinite; flex-shrink: 0; }
 .harness-approval-tool { color: var(--accent); font-weight: 600; font-size: 12px; }
 .harness-approval-meta code { color: var(--text-dim); font: 10px var(--font-mono); }
 .harness-approval-time { margin-left: auto; color: var(--text-dim); font-size: 10px; }
 .harness-approval-reason { color: var(--text-muted); font-size: 11px; margin-bottom: 6px; }
-.harness-approval-summary { margin: 0 0 10px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font: 11px/1.5 var(--font-mono); color: var(--text); white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow-y: auto; }
+.harness-approval-summary { margin: 0 0 10px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font: 11px/1.5 var(--font-mono); color: var(--text); white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow-y: auto; }
 .harness-actions-row { display: flex; gap: 8px; }
-.harness-approve-btn { padding: 5px 14px; border: none; border-radius: 5px; background: #16a34a; color: #fff; cursor: pointer; font-size: 12px; font-weight: 600; }
-.harness-approve-btn:hover:not(:disabled) { background: #15803d; }
-.harness-deny-btn { padding: 5px 14px; border: none; border-radius: 5px; background: #dc2626; color: #fff; cursor: pointer; font-size: 12px; font-weight: 600; }
-.harness-deny-btn:hover:not(:disabled) { background: #b91c1c; }
-.harness-approve-btn:disabled, .harness-deny-btn:disabled { opacity: 0.5; cursor: default; }
+.harness-approve-btn { padding: 6px 15px; border: none; border-radius: 7px; background: #16a34a; color: #fff; cursor: pointer; font-size: 12px; font-weight: 600; transition: filter .12s ease, transform .12s ease; box-shadow: 0 1px 0 rgba(0,0,0,.18) inset; }
+.harness-approve-btn:hover:not(:disabled) { background: #15803d; filter: brightness(1.05); transform: translateY(-1px); }
+.harness-deny-btn { padding: 6px 15px; border: none; border-radius: 7px; background: #dc2626; color: #fff; cursor: pointer; font-size: 12px; font-weight: 600; transition: filter .12s ease, transform .12s ease; box-shadow: 0 1px 0 rgba(0,0,0,.18) inset; }
+.harness-deny-btn:hover:not(:disabled) { background: #b91c1c; filter: brightness(1.05); transform: translateY(-1px); }
+.harness-approve-btn:disabled, .harness-deny-btn:disabled { opacity: 0.5; cursor: default; transform: none; }
 .harness-history-row { display: flex; align-items: baseline; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 11px; }
 .harness-history-row code { color: var(--text-dim); font: 10px var(--font-mono); }
 .harness-approved { color: #16a34a; text-transform: uppercase; font-size: 10px; font-weight: 600; }
 .harness-denied { color: #f87171; text-transform: uppercase; font-size: 10px; font-weight: 600; }
+.harness-spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: harness-spin .7s linear infinite; vertical-align: -2px; margin-right: 7px; }
+@keyframes harness-spin { to { transform: rotate(360deg); } }
+@keyframes harness-pulse { 0% { box-shadow: 0 0 0 0 rgba(245,158,11,.45); } 70% { box-shadow: 0 0 0 7px rgba(245,158,11,0); } 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); } }
+@keyframes harness-fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @media (max-width: 900px) { .harness-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } .harness-checks { grid-template-columns: 1fr; } .harness-stream-grid { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .harness-header, .harness-body, .harness-tabs { padding-left: 18px; padding-right: 18px; } .harness-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
