@@ -71,12 +71,27 @@ function findEquaxisRoot(cwd: string): string {
 function launchPiWeb(root: string): void {
   const agentDir = path.join(root, ".pi");
   const sessionDir = historicalSessionDir();
-  const launcher = piWebLauncher(root);
-  const command = process.platform === "win32" ? "cmd.exe" : "sh";
-  const args = process.platform === "win32"
-    ? ["/d", "/s", "/c", `set "PATH=${gitBashDir()};%PATH%" && set "PI_CODING_AGENT_DIR=${agentDir}" && set "PI_CODING_AGENT_SESSION_DIR=${sessionDir}" && ${launcher} -H ${HOST} -p ${PORT} --no-open`]
-    : ["-lc", `PI_CODING_AGENT_DIR=${shellQuote(agentDir)} PI_CODING_AGENT_SESSION_DIR=${shellQuote(sessionDir)} ${launcher} -H ${HOST} -p ${PORT} --no-open`];
-  const child = spawn(command, args, { cwd: root, detached: true, stdio: "ignore" });
+  const { command, args } = piWebLauncher(root);
+  // Pass the agent/session dirs through the spawn env option instead of a
+  // cmd.exe/sh wrapper: nested quotes in `cmd /c "set ... && ..."` break on
+  // Windows (Node escapes embedded quotes as \" which cmd misparses), so the
+  // server never starts. Direct spawn also works for the vendored fork and
+  // the global install on every platform.
+  const env = {
+    ...process.env,
+    PI_CODING_AGENT_DIR: agentDir,
+    PI_CODING_AGENT_SESSION_DIR: sessionDir,
+    PATH: [gitBashDir(), process.env.PATH].filter(Boolean).join(path.delimiter)
+  };
+  const child = spawn(command, [...args, "-H", HOST, "-p", String(PORT), "--no-open"], {
+    cwd: root,
+    env,
+    detached: true,
+    stdio: "ignore"
+  });
+  child.on("error", () => {
+    // Unresolvable launcher surfaces in the readiness check; never crash the host.
+  });
   child.unref();
 }
 
@@ -88,7 +103,7 @@ function gitBashDir(): string {
   return candidates.find((candidate) => existsSync(path.join(candidate, "bash.exe"))) ?? "";
 }
 
-function piWebLauncher(root: string): string {
+function piWebLauncher(root: string): { command: string; args: string[] } {
   // Prefer the versioned fork in the repo (pi-web/), then the legacy
   // source-cache copy, then the global install.
   const candidates = [
@@ -98,14 +113,14 @@ function piWebLauncher(root: string): string {
   for (const localBin of candidates) {
     const localBuild = path.join(path.dirname(path.dirname(localBin)), ".next", "BUILD_ID");
     if (existsSync(localBin) && existsSync(localBuild)) {
-      return `"${process.execPath}" "${localBin}"`;
+      return { command: process.execPath, args: [localBin] };
     }
   }
   if (process.platform === "win32" && process.env.APPDATA) {
     const bin = path.join(process.env.APPDATA, "npm", "node_modules", "@agegr", "pi-web", "bin", "pi-web.js");
-    if (existsSync(bin)) return `"${process.execPath}" "${bin}"`;
+    if (existsSync(bin)) return { command: process.execPath, args: [bin] };
   }
-  return "pi-web";
+  return { command: "pi-web", args: [] };
 }
 
 function historicalSessionDir(): string {
@@ -191,10 +206,6 @@ function openBrowser(url: string): void {
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
   const child = spawn(command, args, { detached: true, stdio: "ignore" });
   child.unref();
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
 function oneLine(text: string): string {

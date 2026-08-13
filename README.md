@@ -158,6 +158,26 @@ Switch modes from the TUI:
 /equaxis-mode off
 ```
 
+## Runtime Profiles
+
+`runtime.profile` in `.pi/equaxis.json` decides which extensions load. Profiles are a selection policy, not feature flags — individual extensions can still be added/removed via `extensions.enabled` / `extensions.disabled`.
+
+| Profile | Loads | Default |
+|---|---|---|
+| `raw` | No Equaxis extensions (Pi baseline) | no |
+| `minimal` | Governance core: policy, approval, trace, budgets, harness status UI | no |
+| `standard` | `minimal` + local in-process engineering tools (protocol probes, AST, tool catalog/scheduler) | yes |
+| `full` | Everything in the manifest: memory, skills, subagents, web crawler, pi-web, vendored extensions | no |
+
+`minimal` / `standard` never spawn the Python memory bridge, open network connections or start subagent processes; those capabilities (memory, skills, subagent engine, web crawler, pi-web) require `full` or an explicit `extensions.enabled` entry. The active profile is recorded in the `session_start` trace and reported by `npm run equaxis -- --doctor` and the runtime dashboard.
+
+```text
+runtime.profile = "full"        # everything, e.g. research/eval workflows
+runtime.profile = "standard"    # default: governance + engineering tools
+runtime.profile = "minimal"     # governance core only
+runtime.profile = "raw"         # plain Pi, no Equaxis extensions
+```
+
 ## Architecture
 
 Equaxis keeps Pi as the real agent. The project adds deterministic layers around it.
@@ -196,7 +216,7 @@ Important files:
 
 ## Evaluation Loop
 
-Equaxis includes a deterministic improvement cycle for agent quality work.
+Equaxis includes a deterministic improvement cycle for agent quality work. The runtime itself only produces facts: every tool outcome is written to the reliability trace as `eval_outcome_recorded`. Evaluation never runs inside the agent loop — dashboards, `equaxis eval snapshot/export-harbor` and the cycle below rebuild full history from the trace stream (plus the offline ledger `.pi/runtime/eval-loop/events.jsonl` for manual records, candidates and decisions).
 
 ```text
 Harbor results / runtime traces
