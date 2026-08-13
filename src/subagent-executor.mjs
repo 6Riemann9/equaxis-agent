@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { killProcessTree, spawnTracked } from "./process-cleanup.mjs";
 import { prepareRuntimeIsolation } from "./runtime-isolation.mjs";
 
 /**
@@ -56,14 +57,22 @@ export function createPiJsonExecutor(options = {}) {
             extraEnv: isolation.extraEnv,
             allowSecretExtraEnv: isolation.allowSecretExtraEnv
           });
-      const child = spawnImpl(nodePath, args, { cwd: spawnOptions.cwd, env: spawnOptions.env, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawnTracked({
+        command: nodePath,
+        args,
+        options: { cwd: spawnOptions.cwd, env: spawnOptions.env, stdio: ["ignore", "pipe", "pipe"] },
+        label: `subagent:${task.id}`,
+        spawnImpl
+      });
       let stdout = "";
       let stderr = "";
       let settled = false;
       const done = (error) => {
         if (settled) return;
         settled = true;
-        child.kill();
+        // Kill the whole process tree so grandchildren (shells, servers)
+        // cannot outlive the subagent on cancel/timeout/exit.
+        if (child?.pid) void killProcessTree(child.pid);
         if (error) return reject(error);
         resolve({ ok: true, id: task.id, label: task.label, output: stdout.trim(), stderr: stderr.trim() });
       };
@@ -80,7 +89,7 @@ export function createPiJsonExecutor(options = {}) {
       });
       if (signal) {
         signal.addEventListener("abort", () => {
-          child.kill("SIGTERM");
+          if (child?.pid) void killProcessTree(child.pid, { signal: "SIGTERM" });
           done(new Error("cancelled"));
         }, { once: true });
       }

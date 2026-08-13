@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { killProcessTree, spawnTracked } from "./process-cleanup.mjs";
 
 function parseHeaders(text) {
   const headers = new Map();
@@ -90,13 +90,17 @@ export function createStdioTransport(streams, options = {}) {
 }
 
 export function spawnProtocolProcess(command, args = [], options = {}) {
-  const spawnImpl = options.spawnImpl ?? spawn;
-  const child = spawnImpl(command, args, {
-    cwd: options.cwd,
-    env: options.env ?? process.env,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: options.windowsHide ?? true,
-    shell: false
+  const child = spawnTracked({
+    command,
+    args,
+    options: {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: options.windowsHide ?? true,
+      shell: false
+    },
+    label: `protocol:${String(command).split(/[\\/]/).pop()}`
   });
   const transport = createStdioTransport({
     input: child.stdin,
@@ -105,7 +109,12 @@ export function spawnProtocolProcess(command, args = [], options = {}) {
   });
   const close = () => {
     transport.close();
-    if (!child.killed && typeof child.kill === "function") child.kill(options.signal ?? "SIGTERM");
+    if (child?.pid) {
+      // Direct kill first (keeps child.killed semantics for callers), then
+      // sweep the whole tree so grandchildren cannot linger.
+      if (!child.killed) child.kill(options.signal ?? "SIGTERM");
+      void killProcessTree(child.pid, { signal: options.signal ?? "SIGKILL" });
+    }
   };
   return { process: child, transport, close };
 }

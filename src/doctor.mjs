@@ -5,6 +5,7 @@ import { loadConfig } from "./config.mjs";
 import { checkExtensionContracts } from "./extension-compat.mjs";
 import { loadEquaxisConfig } from "./equaxis-config.mjs";
 import { loadMemoryConfig } from "./memory-config.mjs";
+import { describeProcessCleanup } from "./process-cleanup.mjs";
 import { describeRuntimeIsolation } from "./runtime-isolation.mjs";
 import { isRuntimeProfile, profileExtensionSelection } from "./runtime-profiles.mjs";
 import { describeSubagentPersistence } from "./subagent-state-store.mjs";
@@ -213,6 +214,8 @@ export function runDoctor(options = {}) {
   checks.push(check("Cost brake", Boolean(costBrake?.enabled), costBrake?.enabled ? `maxSessionCostUsd=${costBrake.maxSessionCostUsd}; warnAt=${costBrake.warnAtFraction}` : "disabled"));
   const isolation = describeRuntimeIsolation(startup.unifiedConfig);
   checks.push(check("Runtime isolation", isolation.enabled, isolation.detail));
+  const cleanup = describeProcessCleanup();
+  checks.push(check("Process cleanup", true, `strategy=${cleanup.strategy}; registered=${cleanup.registered}`));
   const budgets = startup.unifiedConfig?.subagents?.budgets;
   const timeoutDetail = budgets?.timeoutMs ? `${budgets.timeoutMs}ms` : "none";
   checks.push(check("Subagent budgets", true, `timeout=${timeoutDetail}; maxRetries=${budgets?.maxRetries ?? 0}`));

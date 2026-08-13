@@ -18,6 +18,7 @@ import {
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { RISK, classifyToolCall, containsSecretLikeInput, shouldBlockForLimits, validateToolInput } from "../../src/policy.mjs";
 import { createToolInvocation, createToolOutcome, riskMetadataFromPolicy } from "../../src/tool-contract.mjs";
+import { sweepRegisteredChildren } from "../../src/process-cleanup.mjs";
 import { validateEditFreshness } from "../../src/stale-edit.mjs";
 import { registerRepairAttempt, validationFeedback } from "../../src/tool-repair.mjs";
 
@@ -709,6 +710,21 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
 
   pi.on("agent_end", async (_event, ctx) => {
     trace(ctx, "agent_end", { evaluation: evalSnapshot() });
+  });
+
+  pi.on("session_shutdown", async () => {
+    // Sweep any registered child processes (subagents, protocol adapters,
+    // memory bridge) that were not stopped by their owner, so cancellation
+    // and exit never leave residual processes behind.
+    const results = await sweepRegisteredChildren();
+    for (const result of results) {
+      services.trace.record(undefined as unknown as ExtensionContext, "process_cleanup_swept", {
+        pid: result.pid,
+        label: result.label,
+        killed: result.killed,
+        reason: result.reason ?? null
+      });
+    }
   });
 
   pi.on("session_before_fork", async (event, ctx) => {

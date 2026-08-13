@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { killProcessTree, spawnTracked } from "./process-cleanup.mjs";
 import path from "node:path";
 import readline from "node:readline";
 
@@ -39,11 +39,16 @@ export class MemoryBridge {
     this.restartCount = 0;
 
     this.startPromise = new Promise((resolve, reject) => {
-      const child = spawn(this.pythonCommand, ["-u", this.bridgePath, "--root", this.rootDir], {
-        cwd: this.cwd,
-        env: buildPythonBridgeEnv(),
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true
+      const child = spawnTracked({
+        command: this.pythonCommand,
+        args: ["-u", this.bridgePath, "--root", this.rootDir],
+        options: {
+          cwd: this.cwd,
+          env: buildPythonBridgeEnv(),
+          stdio: ["pipe", "pipe", "pipe"],
+          windowsHide: true
+        },
+        label: "memory-bridge"
       });
       this.process = child;
       child.stdout.setEncoding("utf8");
@@ -176,7 +181,9 @@ export class MemoryBridge {
     } catch {
       // Best-effort shutdown; the process is terminated below.
     }
-    if (child.exitCode === null && !child.killed) child.kill();
+    // Terminate the whole process tree so the Python bridge and any children
+    // it spawned cannot linger after stop.
+    if (child?.pid && child.exitCode === null && !child.killed) void killProcessTree(child.pid);
     await Promise.race([
       exited,
       new Promise((resolve) => setTimeout(resolve, 3000))

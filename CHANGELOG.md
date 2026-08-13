@@ -5,6 +5,7 @@ All notable changes to Equaxis are documented here. Format follows [Keep a Chang
 ## [0.3.2] - 2026-08-14
 
 ### Added
+- Unified process cleanup protocol (`src/process-cleanup.mjs`): platform-aware process-tree kill (taskkill /T /F on Windows, process-group SIGKILL elsewhere), a registry of spawned children swept on session shutdown (`process_cleanup_swept` trace), and tracked spawning wired into subagents, protocol adapters (LSP/DAP process mode) and the Python memory bridge. Doctor reports the cleanup strategy.
 - Runtime cost brake: session cost summed at turn end; warns at `reliability.costBrake.warnAtFraction` and blocks high-risk calls at `maxSessionCostUsd` until `/equaxis-budget reset` (default 2.0 USD).
 - Structured high-risk approvals: approve / deny / deny-and-rephrase / approve-all-remaining-this-turn (`reliability.approval.denyRephrase`, `batchPerTurn`).
 - Loop stop condition: consecutive identical tool calls within a turn are blocked (`limits.maxRepeatedCalls`, default 3).
