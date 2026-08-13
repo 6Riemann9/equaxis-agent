@@ -17,6 +17,7 @@ import {
 } from "../../src/approval-queue.mjs";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { RISK, classifyToolCall, containsSecretLikeInput, shouldBlockForLimits, validateToolInput } from "../../src/policy.mjs";
+import { createToolInvocation, createToolOutcome, riskMetadataFromPolicy } from "../../src/tool-contract.mjs";
 import { validateEditFreshness } from "../../src/stale-edit.mjs";
 import { registerRepairAttempt, validationFeedback } from "../../src/tool-repair.mjs";
 
@@ -43,6 +44,11 @@ interface HarnessConfig {
     maxHighRiskCallsPerTurn: number;
     maxRepairAttemptsPerError: number;
     maxRepeatedCalls: number;
+  };
+  costBrake: {
+    enabled: boolean;
+    maxSessionCostUsd: number;
+    warnAtFraction: number;
   };
 }
 
@@ -73,6 +79,10 @@ interface HarnessState {
   // Set when the user opted into approving the remaining high-risk calls
   // of this turn (approval.batchPerTurn); transient, never persisted.
   batchApprovedTurn: boolean;
+  // Session cost brake state: once triggered, high-risk calls are blocked
+  // until the budget is reset (/equaxis-budget reset). Persisted.
+  costBrakeTriggered: boolean;
+  costWarned: boolean;
 }
 
 interface PendingTool {
@@ -119,7 +129,9 @@ function initialState(mode: HarnessMode): HarnessState {
     lastRisk: RISK.LOW,
     mission: { objective: "", startedAt: "", turns: 0, lastOutcome: "none", status: "idle" },
     failedCallsAtTurnStart: 0,
-    batchApprovedTurn: false
+    batchApprovedTurn: false,
+    costBrakeTriggered: false,
+    costWarned: false
   };
 }
 
@@ -174,7 +186,9 @@ function persisted(state: HarnessState): PersistedState {
     approvedCalls: state.approvedCalls,
     failedCalls: state.failedCalls,
     lastRisk: state.lastRisk,
-    mission: state.mission
+    mission: state.mission,
+    costBrakeTriggered: state.costBrakeTriggered,
+    costWarned: state.costWarned
   };
 }
 
@@ -302,9 +316,45 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       highRiskCallsThisTurn: 0,
       failedCallsAtTurnStart: 0,
       batchApprovedTurn: false,
+      costBrakeTriggered: latest.data.costBrakeTriggered ?? false,
+      costWarned: latest.data.costWarned ?? false,
       // Snapshots from before mission tracking lack the field; keep a safe default.
       mission: latest.data.mission ?? { objective: "", startedAt: "", turns: 0, lastOutcome: "none", status: "idle" }
     };
+  }
+
+  /** Sum assistant-message usage cost across the current session branch. */
+  function sessionCost(ctx: ExtensionContext): number {
+    let cost = 0;
+    try {
+      for (const entry of ctx.sessionManager.getBranch()) {
+        if (entry.type === "message" && entry.message?.role === "assistant") {
+          cost += Number(entry.message.usage?.cost?.total ?? 0);
+        }
+      }
+    } catch {
+      // session iteration is best-effort; a failure never blocks tool calls
+    }
+    return cost;
+  }
+
+  /** Warn at a fraction of the session budget, then hard-stop high-risk calls. */
+  function applyCostBrake(ctx: ExtensionContext): void {
+    const brake = config.costBrake;
+    if (!brake?.enabled || state.mode === "off") return;
+    const cost = sessionCost(ctx);
+    const limit = brake.maxSessionCostUsd;
+    if (state.costBrakeTriggered) return;
+    if (!state.costWarned && limit > 0 && cost >= limit * brake.warnAtFraction) {
+      state.costWarned = true;
+      trace(ctx, "cost_brake_warning", { costUsd: Number(cost.toFixed(4)), limitUsd: limit });
+      if (ctx.hasUI) ctx.ui.notify(`Session cost ${cost.toFixed(4)} USD approaching the ${limit} USD budget.`, "warning");
+    }
+    if (limit > 0 && cost >= limit) {
+      state.costBrakeTriggered = true;
+      trace(ctx, "cost_brake_triggered", { costUsd: Number(cost.toFixed(4)), limitUsd: limit });
+      if (ctx.hasUI) ctx.ui.notify(`Session cost ${cost.toFixed(4)} USD reached the ${limit} USD budget. High-risk calls are now blocked; run /equaxis-budget reset to resume.`, "error");
+    }
   }
 
   function evalSnapshot(): Record<string, number> {
@@ -410,6 +460,9 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
           updateStatus(ctx);
           return { block: true, reason: `Reliability Harness: ${reason}` };
         }
+        // Audit mode lets the call through but still counts it so the
+        // per-turn tool limit applies to repeated invalid calls too.
+        state.toolCallsThisTurn += 1;
       }
       classification = classifyToolCall(event.toolName, event.input, config, ctx.cwd);
     } catch (error) {
@@ -428,13 +481,32 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     state.toolCallsThisTurn += 1;
     if (classification.risk === RISK.HIGH) state.highRiskCallsThisTurn += 1;
     const containsSecret = classification.reason === "possible raw secret in tool arguments";
+    // Unified tool contract: the invocation envelope carries policy risk
+    // metadata; trace consumers keep the legacy field names via spread.
+    const invocation = createToolInvocation({
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      arguments: compactInput(event, containsSecret),
+      risk: classification.risk,
+      reason: classification.reason
+    });
     const decision = {
+      ...invocation,
       toolCallId: event.toolCallId,
       toolName: event.toolName,
       input: compactInput(event, containsSecret),
       risk: classification.risk,
       reason: classification.reason
     };
+
+    // Cost brake: once the session budget is exhausted, high-risk calls are
+    // blocked until the user resets the budget (/equaxis-budget reset).
+    if (state.costBrakeTriggered && classification.risk === RISK.HIGH && state.mode === "enforce") {
+      state.blockedCalls += 1;
+      trace(ctx, "tool_blocked", { ...decision, reason: "session cost budget exhausted" });
+      updateStatus(ctx);
+      return { block: true, reason: `Reliability Harness: session cost budget reached (${config.costBrake?.maxSessionCostUsd} USD); run /equaxis-budget reset to resume` };
+    }
 
     // Loop stop condition: the same call repeated consecutively is a retry
     // loop. Block further repeats this turn and record the stop condition.
@@ -599,7 +671,16 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       risk: call?.risk ?? "unknown",
       capability: call?.capability ?? capabilityForTool(event.toolName),
       isError: event.isError,
-      latencyMs
+      latencyMs,
+      outcomeContract: createToolOutcome({
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        ok: !event.isError,
+        error: event.isError ? "TOOL_ERROR" : null,
+        retryable: false,
+        evidence: call?.reason ? { risk: call.risk, reason: call.reason } : null
+      }),
+      riskMetadata: riskMetadataFromPolicy(call ? { risk: call.risk, reason: call.reason, approval: false } : undefined)
     });
     updateStatus(ctx);
   });
@@ -620,7 +701,8 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     pending.clear();
     state.mission.turns += 1;
     state.mission.lastOutcome = state.failedCalls > state.failedCallsAtTurnStart ? "failed" : "ok";
-    trace(ctx, "turn_end", { turnIndex: event.turnIndex, evaluation: evalSnapshot(), mission: state.mission });
+    applyCostBrake(ctx);
+    trace(ctx, "turn_end", { turnIndex: event.turnIndex, evaluation: evalSnapshot(), mission: state.mission, costUsd: Number(sessionCost(ctx).toFixed(4)) });
     saveState();
     updateStatus(ctx);
   });
@@ -703,6 +785,27 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       }
       ctx.ui.notify(
         `Mission: ${mission.objective}\nstatus=${mission.status}; turns=${mission.turns}; lastOutcome=${mission.lastOutcome}; startedAt=${mission.startedAt}`,
+        "info"
+      );
+    }
+  });
+
+  pi.registerCommand("equaxis-budget", {
+    description: "Show the session cost budget and reset the brake",
+    handler: async (args, ctx) => {
+      const brake = config.costBrake;
+      const cost = sessionCost(ctx);
+      const action = args.trim().toLowerCase();
+      if (action === "reset") {
+        state.costBrakeTriggered = false;
+        state.costWarned = false;
+        saveState();
+        trace(ctx, "cost_brake_reset", { costUsd: Number(cost.toFixed(4)), limitUsd: brake?.maxSessionCostUsd });
+        ctx.ui.notify(`Cost brake reset. Session cost ${cost.toFixed(4)} USD.`, "info");
+        return;
+      }
+      ctx.ui.notify(
+        `Session cost: ${cost.toFixed(4)} USD${brake?.enabled ? ` of ${brake.maxSessionCostUsd} USD budget` : " (brake disabled)"}${state.costBrakeTriggered ? "; brake ACTIVE" : ""}`,
         "info"
       );
     }

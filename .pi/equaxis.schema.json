@@ -289,6 +289,29 @@
               "maximum": 50
             }
           }
+        },
+        "costBrake": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "maxSessionCostUsd",
+            "warnAtFraction"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxSessionCostUsd": {
+              "type": "number",
+              "minimum": 0.01
+            },
+            "warnAtFraction": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 1
+            }
+          }
         }
       }
     },

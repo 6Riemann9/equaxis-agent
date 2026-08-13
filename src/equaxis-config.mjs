@@ -42,7 +42,8 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
       batchPerTurn: true
     },
     limits: { maxToolCallsPerTurn: 30, maxHighRiskCallsPerTurn: 3, maxRepairAttemptsPerError: 2, maxRepeatedCalls: 3 },
-    toolRouting: { enabled: true, maxCandidates: 5 }
+    toolRouting: { enabled: true, maxCandidates: 5 },
+    costBrake: { enabled: true, maxSessionCostUsd: 2.0, warnAtFraction: 0.8 }
   },
   advisor: {
     enabled: false,
@@ -351,6 +352,14 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertRecord(config.reliability.toolRouting, configPath, "reliability.toolRouting");
   assertBoolean(config.reliability.toolRouting.enabled, configPath, "reliability.toolRouting.enabled");
   assertInteger(config.reliability.toolRouting.maxCandidates, configPath, "reliability.toolRouting.maxCandidates", 1, 50);
+  assertRecord(config.reliability.costBrake, configPath, "reliability.costBrake");
+  assertBoolean(config.reliability.costBrake.enabled, configPath, "reliability.costBrake.enabled");
+  if (!Number.isFinite(config.reliability.costBrake.maxSessionCostUsd) || config.reliability.costBrake.maxSessionCostUsd < 0.01) {
+    throw configError(configPath, "reliability.costBrake.maxSessionCostUsd", "must be a positive number");
+  }
+  if (!Number.isFinite(config.reliability.costBrake.warnAtFraction) || config.reliability.costBrake.warnAtFraction < 0.1 || config.reliability.costBrake.warnAtFraction > 1) {
+    throw configError(configPath, "reliability.costBrake.warnAtFraction", "must be between 0.1 and 1");
+  }
 
   assertRecord(config.advisor, configPath, "advisor");
   assertBoolean(config.advisor.enabled, configPath, "advisor.enabled");

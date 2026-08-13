@@ -57,6 +57,11 @@
       "maxRepairAttemptsPerError": 2,
       "maxRepeatedCalls": 3
     },
+    "costBrake": {
+      "enabled": true,
+      "maxSessionCostUsd": 2.0,
+      "warnAtFraction": 0.8
+    },
     "toolRouting": {
       "enabled": true,
       "maxCandidates": 5

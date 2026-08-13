@@ -14,6 +14,9 @@ All notable changes to Equaxis are documented here. Format follows [Keep a Chang
 - High-risk approvals are now structured dialogs: approve / deny / deny-and-rephrase (the model is told what to avoid) / approve-all-high-risk-calls-this-turn (approval.batchPerTurn, opt-in per turn). Config: reliability.approval.denyRephrase, reliability.approval.batchPerTurn.
 - Loop stop condition: the same tool call repeated consecutively within a turn is blocked (limits.maxRepeatedCalls, default 3) with a loop_stop_triggered trace event.
 - Failed subagent output is spilled to .pi/runtime/subagents/artifacts/<id>-attempt<N>.out; the failure message carries the stderr tail and the artifact path for diagnosis.
+- Runtime cost brake: session cost is summed from assistant usage at turn end; at reliability.costBrake.warnAtFraction the harness warns once, and at maxSessionCostUsd high-risk calls are blocked until /equaxis-budget reset. Config: reliability.costBrake (default 2.0 USD, warn at 80%).
+- Audit mode now counts invalid tool calls toward the per-turn limit so repeated invalid calls cannot spin forever.
+- Unified tool contract foundation (src/tool-contract.mjs): versioned ToolDescriptor / ToolInvocation / ToolOutcome shapes and policy-risk mapping; the harness builds invocations through the contract and records outcomeContract + riskMetadata in tool_result traces.
 
 ## [0.3.0] - 2026-08-13
 
