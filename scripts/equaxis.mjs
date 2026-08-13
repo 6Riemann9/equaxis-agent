@@ -69,21 +69,21 @@ async function handleLocalCommand(args) {
   }
   if (group === "eval") {
     const loop = localEvalLoop();
-    if (command === "record") return printJson(loop.record(parseJsonArg(payload)));
-    if (command === "snapshot") return printJson(loop.snapshot(parseJsonArg(payload)));
-    if (command === "decide") return printJson(compareCandidate({
+    if (command === "record") { printJson(loop.record(parseJsonArg(payload))); return true; }
+    if (command === "snapshot") { printJson(loop.snapshot(parseJsonArg(payload))); return true; }
+    if (command === "decide") { printJson(compareCandidate({
       ...parseJsonArg(payload),
       minSamples: unifiedConfig.evaluation?.minSamples,
       minSuccessRateDelta: unifiedConfig.evaluation?.minSuccessRateDelta,
       maxLatencyRegression: unifiedConfig.evaluation?.maxLatencyRegression,
       maxCostRegression: unifiedConfig.evaluation?.maxCostRegression,
       confidenceZ: unifiedConfig.evaluation?.confidenceZ
-    }));
-    if (command === "export-harbor") return printJson(exportEvalLoopForHarbor({ projectRoot, ...parseJsonArg(payload) }));
+    })); return true; }
+    if (command === "export-harbor") { printJson(exportEvalLoopForHarbor({ projectRoot, ...parseJsonArg(payload) })); return true; }
   }
   if (group === "gates" && command === "check") {
     const report = evaluateRuntimeGates(parseJsonArg(payload), unifiedConfig.runtime?.gates);
-    if (args.includes("--json")) return printJson(report);
+    if (args.includes("--json")) { printJson(report); return true; }
     console.log(formatRuntimeGateReport(report));
     process.exit(report.ok ? 0 : 1);
   }
@@ -96,33 +96,33 @@ async function handleLocalCommand(args) {
       apply: command === "apply",
       retentionDays: governance.retentionDays
     });
-    if (args.includes("--json")) return printJson(report);
+    if (args.includes("--json")) { printJson(report); return true; }
     console.log(formatMemoryGovernanceReport(report));
     return true;
   }
   if (group === "config" && command === "migrate") {
     const report = runConfigMigration({ projectRoot, dryRun: !args.includes("--write") });
-    if (args.includes("--json")) return printJson(report);
+    if (args.includes("--json")) { printJson(report); return true; }
     console.log(formatConfigMigrationReport(report));
     return true;
   }
   if (group === "resources" && command === "read") {
     const registry = createDefaultResourceProviderRegistry({ projectRoot });
     const result = await registry.read(payload);
-    if (args.includes("--json")) return printJson(result);
+    if (args.includes("--json")) { printJson(result); return true; }
     console.log(result.text);
     return true;
   }
   if (group === "runtime" && (command === "dashboard" || command === "status")) {
     const dashboard = buildRuntimeDashboard({ projectRoot, cwd: process.cwd(), env: process.env, config: unifiedConfig });
-    if (args.includes("--json")) return printJson(dashboard);
+    if (args.includes("--json")) { printJson(dashboard); return true; }
     console.log(formatRuntimeDashboard(dashboard));
     return true;
   }
   if (group === "versions") {
     const store = new VersionStore({ projectRoot });
-    if (command === "add") return printJson(store.writeCandidate(parseJsonArg(payload)));
-    if (command === "list") return printJson(store.list(payload));
+    if (command === "add") { printJson(store.writeCandidate(parseJsonArg(payload))); return true; }
+    if (command === "list") { printJson(store.list(payload)); return true; }
   }
   return false;
 }
@@ -166,11 +166,32 @@ if (cliArgs[0] === "--doctor") {
   process.exit(report.ok ? 0 : 1);
 }
 
+/**
+ * Resolve Pi's settings.json (the same file the spawned CLI reads via
+ * getAgentDir()). Falls back to project-root settings, then to the
+ * historical hardcoded defaults.
+ */
+function readPiSettings() {
+  const candidates = [
+    path.join(process.cwd(), ".pi", "settings.json"),
+    path.join(projectRoot, ".pi", "settings.json")
+  ];
+  for (const file of candidates) {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      // try the next candidate
+    }
+  }
+  return {};
+}
+
 const hasOption = (name) => cliArgs.some((arg) => arg === name || arg.startsWith(`${name}=`));
+const piSettings = readPiSettings();
 const modelArgs = [];
-if (!hasOption("--provider")) modelArgs.push("--provider", "openai-inprior");
-if (!hasOption("--model")) modelArgs.push("--model", "gpt-5.5");
-if (!hasOption("--thinking")) modelArgs.push("--thinking", "xhigh");
+if (!hasOption("--provider")) modelArgs.push("--provider", piSettings.defaultProvider ?? "openai-inprior");
+if (!hasOption("--model")) modelArgs.push("--model", piSettings.defaultModel ?? "gpt-5.5");
+if (!hasOption("--thinking")) modelArgs.push("--thinking", piSettings.defaultThinkingLevel ?? "xhigh");
 
 const result = spawnSync(
   process.execPath,

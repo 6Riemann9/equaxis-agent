@@ -64,6 +64,11 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
       enabled: true,
       auditPath: ".pi/runtime/memory-governance/memories.jsonl",
       retentionDays: { hot: 3650, warm: 365, cold: 180 }
+    },
+    dream: {
+      enabled: true,
+      onShutdown: true,
+      maxEntries: 200
     }
   },
   skills: {
@@ -153,8 +158,9 @@ function assertExternalRoots(value, configPath) {
     throw configError(configPath, "reliability.approval.externalEditRoots", "must be an array of non-empty paths");
   }
   for (const root of value) {
+    if (root === "<workspace>") continue; // portable token, resolved at use time
     if (!isPortableAbsolute(root)) {
-      throw configError(configPath, "reliability.approval.externalEditRoots", "must contain absolute paths");
+      throw configError(configPath, "reliability.approval.externalEditRoots", "must contain absolute paths or the <workspace> token");
     }
   }
 }
@@ -265,7 +271,8 @@ function mergeConfig(base, custom) {
         ...base.memory.governance,
         ...(custom.memory?.governance ?? {}),
         retentionDays: { ...base.memory.governance.retentionDays, ...(custom.memory?.governance?.retentionDays ?? {}) }
-      }
+      },
+      dream: { ...base.memory.dream, ...(custom.memory?.dream ?? {}) }
     },
     skills: { ...base.skills, ...(custom.skills ?? {}) },
     evaluation: { ...base.evaluation, ...(custom.evaluation ?? {}) },

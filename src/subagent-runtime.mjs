@@ -62,7 +62,12 @@ export class SubagentRuntime {
     const snapshots = this.stateStore?.loadSnapshots?.() ?? [];
     for (const snapshot of snapshots) {
       if (!snapshot?.id || this.tasks.has(snapshot.id)) continue;
-      if (!["completed", "failed", "cancelled"].includes(snapshot.status)) continue;
+      // In-flight work cannot be resumed after a restart: keep it visible as
+      // failed (with the reason) instead of dropping it silently. Blocked
+      // dependents of a failed task are failed by #releaseBlocked, so nothing
+      // becomes an orphan.
+      const terminal = ["completed", "failed", "cancelled"].includes(snapshot.status);
+      const status = terminal ? snapshot.status : "failed";
       const task = {
         id: snapshot.id,
         label: snapshot.label ?? snapshot.id,
@@ -73,12 +78,12 @@ export class SubagentRuntime {
         timeoutMs: snapshot.timeoutMs ?? null,
         maxRetries: snapshot.maxRetries ?? 0,
         attempts: snapshot.attempts ?? 0,
-        status: snapshot.status,
+        status,
         createdAt: snapshot.createdAt ?? now(),
         startedAt: snapshot.startedAt ?? null,
-        completedAt: snapshot.completedAt ?? null,
+        completedAt: terminal ? snapshot.completedAt ?? null : now(),
         result: snapshot.result ?? null,
-        error: snapshot.error ?? null,
+        error: terminal ? snapshot.error ?? null : `interrupted by restart (was ${snapshot.status})`,
         controller: new AbortController(),
         promise: null,
         restored: true

@@ -41,7 +41,7 @@
       "writesOutsideWorkspace": true,
       "externalEditPolicy": "auto",
       "externalEditRoots": [
-        "D:/test/mianshi/equaxis-agent"
+        "<workspace>"
       ],
       "sessionFork": false
     },
@@ -74,6 +74,13 @@
         "warm": 365,
         "cold": 180
       }
+    },
+    "dream": {
+      "enabled": true,
+      "onShutdown": true,
+      "maxEntries": 200,
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash"
     }
   },
   "skills": {
@@ -114,9 +121,8 @@
   },
   "protocols": {
     "lsp": {
-      "command": "node",
+      "command": "typescript-language-server",
       "args": [
-        "C:\\Users\\32032\\AppData\\Roaming\\npm\\node_modules\\typescript-language-server\\lib\\cli.mjs",
         "--stdio"
       ],
       "cwd": "",

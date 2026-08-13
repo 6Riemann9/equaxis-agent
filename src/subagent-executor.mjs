@@ -43,7 +43,10 @@ export function createPiJsonExecutor(options = {}) {
       const child = spawnImpl(nodePath, args, { cwd: spawnOptions.cwd, env: spawnOptions.env, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";
       let stderr = "";
+      let settled = false;
       const done = (error) => {
+        if (settled) return;
+        settled = true;
         child.kill();
         if (error) return reject(error);
         resolve({ ok: true, id: task.id, label: task.label, output: stdout.trim(), stderr: stderr.trim() });

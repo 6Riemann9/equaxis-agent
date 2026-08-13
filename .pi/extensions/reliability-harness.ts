@@ -154,7 +154,9 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   let traceFile = services.paths.traceFile;
   const pending = new Map<string, PendingTool>();
   const repairAttempts = new Map<string, number>();
-  const evalLoop = new EvalLoop();
+  // Persist eval outcomes to .pi/runtime/eval-loop/events.jsonl so dashboards
+  // and the harbor export see them, not just the in-memory copy + traces.
+  const evalLoop = new EvalLoop({ projectRoot: process.cwd(), persist: true });
   let activeModel: ActiveModel = { provider: "unknown", id: "unknown" };
 
   pi.registerFlag("equaxis-mode", {

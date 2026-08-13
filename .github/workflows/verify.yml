@@ -1,0 +1,47 @@
+name: verify
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Python memory core
+        run: python -m pip install -e ./vendor/agent-memory
+
+      - name: Type check
+        run: npm run check
+
+      - name: Node test suite
+        run: npm test
+
+      - name: Protocol regression
+        run: npm run test:protocols
+
+      - name: Python memory tests
+        run: npm run test:memory
+
+      - name: Python eval tests
+        run: npm run test:eval

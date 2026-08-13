@@ -8,6 +8,7 @@ from typing import Any
 
 import chromadb
 from chromadb.api.models.Collection import Collection
+from chromadb.utils import embedding_functions
 
 from memory.config import MemoryConfig
 from memory.exceptions import SearchError, StorageError
@@ -20,10 +21,38 @@ class LongTermMemoryStore:
         try:
             self.config.chroma_path.mkdir(parents=True, exist_ok=True)
             self.client = chromadb.PersistentClient(path=str(self.config.chroma_path))
-            self.drawers = self.client.get_or_create_collection(name=self.config.long_term.collection_name)
-            self.closets = self.client.get_or_create_collection(name=self.config.long_term.closet_collection_name)
+            # Pin the embedding function only when creating a new collection:
+            # Chroma stores the embedding-function identity on the collection and
+            # rejects a different one on existing stores. The configured model is
+            # still validated up front so unsupported values fail fast.
+            existing = {collection.name for collection in self.client.list_collections()}
+            drawer_ef = self._embedding_function() if self.config.long_term.collection_name not in existing else None
+            closet_ef = self._embedding_function() if self.config.long_term.closet_collection_name not in existing else None
+            self.drawers = self.client.get_or_create_collection(
+                name=self.config.long_term.collection_name,
+                embedding_function=drawer_ef,
+            )
+            self.closets = self.client.get_or_create_collection(
+                name=self.config.long_term.closet_collection_name,
+                embedding_function=closet_ef,
+            )
         except Exception as e:
             raise StorageError(f"Failed to initialize long-term memory store: {e}") from e
+
+    def _embedding_function(self):
+        """Resolve the configured embedding model to a Chroma embedding function.
+
+        Chroma's implicit default is all-MiniLM-L6-v2 (ONNX); pinning it here
+        makes the dependency explicit, configurable, and fail-fast on unsupported
+        values instead of silently shipping a different model.
+        """
+        model = (self.config.long_term.embedding_model or "all-MiniLM-L6-v2").strip().lower()
+        if model in ("all-minilm-l6-v2", "default", ""):
+            return embedding_functions.ONNXMiniLM_L6_V2()
+        raise StorageError(
+            f"Unsupported long_term.embedding_model: {self.config.long_term.embedding_model} "
+            "(supported: all-MiniLM-L6-v2)"
+        )
 
     def add_drawer(
         self,
@@ -119,6 +148,44 @@ class LongTermMemoryStore:
 
     def delete_drawer(self, drawer_id: str) -> None:
         self.drawers.delete(ids=[drawer_id])
+
+    def update_drawer(
+        self,
+        drawer_id: str,
+        content: str | None = None,
+        wing: str | None = None,
+        room: str | None = None,
+        hall: HallType | None = None,
+        source_file: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        added_by: str | None = None,
+    ) -> DrawerRecord | None:
+        """Update an existing drawer in place, preserving its id.
+
+        Fields left as ``None`` keep their current value. Returns ``None``
+        when no drawer with ``drawer_id`` exists.
+        """
+        existing = self.get_drawer(drawer_id)
+        if existing is None:
+            return None
+        record = DrawerRecord(
+            drawer_id=drawer_id,
+            wing=wing if wing is not None else existing.wing,
+            room=room if room is not None else existing.room,
+            hall=hall if hall is not None else existing.hall,
+            content=content if content is not None else existing.content,
+            source_file=source_file if source_file is not None else existing.source_file,
+            chunk_index=existing.chunk_index,
+            added_by=added_by if added_by is not None else existing.added_by,
+            filed_at=existing.filed_at,
+            metadata={**existing.metadata, **(metadata or {})},
+        )
+        self.drawers.upsert(
+            ids=[drawer_id],
+            documents=[record.content],
+            metadatas=[self._drawer_metadata(record)],
+        )
+        return record
 
     def list_wings(self) -> dict[str, int]:
         payload = self.drawers.get(include=["metadatas"])

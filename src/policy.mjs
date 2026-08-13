@@ -68,7 +68,9 @@ export function isOutsideWorkspace(targetPath, cwd) {
 export function isWithinConfiguredRoot(targetPath, cwd, roots = []) {
   const resolvedTarget = realPathWithExistingParent(path.resolve(cwd, targetPath));
   return roots.some((root) => {
-    const resolvedRoot = realPathWithExistingParent(path.resolve(root));
+    // "<workspace>" is a portable token that resolves to the current project
+    // root, so configs stay machine-independent.
+    const resolvedRoot = realPathWithExistingParent(path.resolve(root === "<workspace>" ? cwd : root));
     const relative = path.relative(resolvedRoot, resolvedTarget);
     return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
   });

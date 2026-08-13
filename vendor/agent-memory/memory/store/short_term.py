@@ -114,7 +114,19 @@ class ShortTermMemoryStore:
             self.config.dream_cursor_path.write_text("0\n", encoding="utf-8")
 
     def _next_cursor(self) -> int:
-        return self._read_int(self.config.cursor_path) + 1
+        current = self._read_int(self.config.cursor_path)
+        if current <= 0:
+            # The cursor file may be corrupt or missing; derive the next
+            # cursor from the existing history so nothing is re-recorded.
+            try:
+                current = max(
+                    (entry.cursor for entry in self._iter_history_entries()),
+                    default=0,
+                )
+            except (OSError, ValueError):
+                current = 0
+            self._write_int(self.config.cursor_path, current)
+        return current + 1
 
     @staticmethod
     def _history_payload(entry: HistoryEntry) -> dict:
@@ -136,8 +148,11 @@ class ShortTermMemoryStore:
     def _read_int(path: Path) -> int:
         if not path.exists():
             return 0
-        raw = path.read_text(encoding="utf-8").strip()
-        return int(raw) if raw else 0
+        try:
+            raw = path.read_text(encoding="utf-8").strip()
+            return int(raw) if raw else 0
+        except (OSError, ValueError):
+            return 0
 
     @staticmethod
     def _write_int(path: Path, value: int) -> None:

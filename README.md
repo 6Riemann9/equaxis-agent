@@ -4,7 +4,7 @@ Reliable agent runtime powered by the official Pi Coding Agent.
 
 ![Node](https://img.shields.io/badge/node-%3E%3D22.19-339933)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB)
-![Pi](https://img.shields.io/badge/pi-0.80.10-111111)
+![Pi](https://img.shields.io/badge/pi-0.83.0-111111)
 ![Evaluation](https://img.shields.io/badge/evaluation-Harbor-blue)
 
 Equaxis 是一个面向真实工程环境的 Agent runtime 样例：它不重写 Pi，不包一层聊天壳，而是在官方 `@earendil-works/pi-coding-agent` 之上，通过 Extension API 加上可靠性治理、工具安全、Memory、Trace 和离线评测闭环。
@@ -39,7 +39,14 @@ Requirements:
 ```powershell
 git clone https://github.com/6Riemann9/equaxis-agent.git
 cd equaxis-agent
+npm run setup
+```
+
+`npm run setup` checks the toolchain (Node ≥22.19, Python), installs missing dependencies (npm + Python memory core), validates the unified config, and runs the doctor. For a strict local install instead:
+
+```sh
 npm install
+npm run install:equaxis -- --dry-run
 npm run setup:memory
 npm run verify:full
 ```
@@ -75,21 +82,33 @@ npm run equaxis
 |---|---|
 | Reliability Harness | Deterministic tool risk classification, protected paths, high-risk approval, per-turn limits |
 | Tool Validation | Semantic argument checks after SDK schema validation, repair feedback, retry exhaustion |
+| Stale Edit Guard | Blocks exact-replacement edits when target hashes drift or `oldText` is missing/ambiguous |
 | Tool Catalog | `tool_search` exposes a small ranked candidate set instead of dumping every tool into context |
 | Tool Scheduler | `tool_schedule` builds DAG waves for safe parallel reads and serialized side effects |
+| Subagent Runtime | Provides structured subagent spawn/status/wait/cancel lifecycle, schema checks and trace events |
+| LSP Client | Provides JSON-RPC initialize/definition/diagnostics primitives, exposed through `lsp_probe` |
+| DAP Client | Provides Debug Adapter Protocol initialize/launch/attach/breakpoints/stack/scopes/variables primitives, exposed through `dap_probe` |
+| AST Tools | JavaScript/TypeScript symbol inspection and hash-checked single-file rename preview/application, exposed through `ast_inspect` and `ast_rename` |
+| Advisor Model | Optional recommendation-only advisor hooks for high-risk tools, complex plans and result review, exposed through `advisor_consult` |
 | Result Middleware | Distinguishes transport success from business-usable output with evidence and predicate checks |
 | MCP Adapter | Normalizes text, structured content, resources and protocol errors into one envelope |
+| Resource URI | Parses and normalizes 14 URI schemes (file/http/https/memory/tool/mcp/agent/skill/pr/issue/trace/eval/history/artifact); `agent`/`history`/`artifact` have read providers |
 | Context Budget | Keeps tool/skill manifests compact and trims activated context under a hard token budget |
-| Memory | Short-term history, long-term semantic memory, knowledge graph, and governed memory writes |
+| Memory | Short-term history, long-term semantic memory, knowledge graph, and governed `recall / retain / reflect / learn / memory_edit` UX |
 | Web Crawl | Public HTTP/HTTPS crawler with localhost/private-network blocking and redirect checks |
 | Trace | JSONL audit trail for decisions, approvals, tool timings and results |
-| Evaluation | Harbor adapter, capability matrix, layered hypotheses, A/B analysis and deployment decisions |
+| Evaluation | Harbor adapter plus model × tool × capability × outcome telemetry, capability matrix, A/B analysis and deployment decisions |
 
 ## Commands
 
 ```powershell
 # Full Pi + Equaxis extensions
 npm run equaxis
+
+# Productized local install/update/release checks
+npm run install:equaxis
+npm run update:equaxis -- --dry-run
+npm run release:equaxis -- --dry-run
 
 # Raw Pi, no extensions
 npm run pi:raw
@@ -117,9 +136,11 @@ Inside the Pi TUI:
 | `/equaxis-trace` | Show trace file location |
 | `/equaxis-eval` | Show lightweight evaluation counters |
 | `/memory` | Show memory status |
-| `/memory-search <query>` | Search long-term memory |
+| `/memory-search <query>` | Search long-term memory; tool UX also exposes `recall`, `retain`, `learn`, and `memory_edit` |
 | `/memory-restart` | Restart the Python memory bridge |
 | `/web-fetch <url>` | Fetch and extract one public web page |
+
+Protocol tools are available as normal Pi tools: `advisor_consult`, `lsp_probe`, and `dap_probe`. They default to in-memory probes, while explicit `mode: "process"` calls can use locked LSP/DAP adapter commands from `.pi/equaxis.json`. External adapter processes remain high-risk calls and require policy approval. AST tools are also available as `ast_inspect` and `ast_rename`; rename application requires a fresh hash from a preview.
 
 ## Runtime Modes
 
@@ -211,19 +232,19 @@ See [Evaluation Architecture](docs/EVALUATION_ARCHITECTURE.md) for the full desi
 
 ## Default Provider
 
-Equaxis registers a Pi provider named `openai-inprior` and defaults to:
+Equaxis registers a Pi provider named `openai-inprior` (models `gpt-5.5` and `gpt-5.6-sol`) and defaults to:
 
 | Setting | Value |
 |---|---|
 | Model | `gpt-5.5` |
 | API | OpenAI Responses-compatible endpoint |
 | Base URL | `https://api.inprior.com` |
-| Thinking | `xhigh` |
+| Thinking | `off` (see `.pi/settings.json` `defaultThinkingLevel`) |
 | Context | `1,000,000` tokens |
 | Max output | `100,000` tokens |
 | Storage | `store: false` |
 
-Provider configuration lives in [`.pi/extensions/provider.ts`](.pi/extensions/provider.ts) and [`.pi/settings.json`](.pi/settings.json). Credentials are read from `OPENAI_API_KEY` first, then `.equaxis/credentials/openai.key`.
+DeepSeek (`deepseek-v4-flash` / `deepseek-v4-pro`) is enabled as a built-in provider via `.pi/auth.json` — see [docs/PROVIDER.md](docs/PROVIDER.md). Provider configuration lives in [`.pi/extensions/provider.ts`](.pi/extensions/provider.ts) and [`.pi/settings.json`](.pi/settings.json). Credentials are read from `OPENAI_API_KEY` first, then `.equaxis/credentials/openai.key`.
 
 ## Safety Model
 
@@ -269,6 +290,6 @@ npm run test:eval
 npm run verify:full
 ```
 
-The project currently pins Pi `0.80.10` to avoid upstream event API drift during reliability and evaluation work.
+The project currently pins Pi `0.83.0` (see `package.json` and `.pi/extensions/contracts.json` `piRange`) to avoid upstream event API drift during reliability and evaluation work.
 
 Official Pi entry point: https://pi.dev/

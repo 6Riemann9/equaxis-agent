@@ -368,6 +368,31 @@
               }
             }
           }
+        },
+        "dream": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "onShutdown": {
+              "type": "boolean"
+            },
+            "maxEntries": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "provider": {
+              "type": "string",
+              "minLength": 1
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },
@@ -627,6 +652,36 @@
               "type": "boolean"
             }
           }
+        }
+      }
+    },
+    "advisor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["recommend", "review"]
+        },
+        "triggers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "complexPlanStepThreshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
         }
       }
     }

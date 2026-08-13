@@ -1,7 +1,8 @@
 {
   "name": "equaxis-agent",
   "version": "0.2.0",
-  "private": true,
+  "private": false,
+  "license": "MIT",
   "type": "module",
   "description": "Equaxis: a governed, observable and reliable agent runtime powered by Pi.",
   "bin": {
@@ -14,6 +15,7 @@
     "pi:explicit": "node scripts/equaxis.mjs",
     "pi:json": "node scripts/equaxis.mjs --mode json",
     "doctor": "node scripts/equaxis.mjs --doctor",
+    "setup": "node scripts/setup.mjs",
     "install:equaxis": "node scripts/equaxis-product.mjs install",
     "update:equaxis": "node scripts/equaxis-product.mjs update",
     "release:equaxis": "node scripts/equaxis-product.mjs release",
@@ -34,6 +36,7 @@
     "typebox": "^1.1.38"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "^0.83.0",
     "@earendil-works/pi-tui": "^0.83.0",
     "@types/node": "24.12.4",
     "typescript": "5.9.3"

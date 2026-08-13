@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 from dataclasses import asdict, is_dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -105,6 +105,141 @@ def build_memory_context(memory: AgentMemory, payload: dict[str, Any]) -> str:
     return str(messages[0].get("content", "")) if messages else ""
 
 
+def build_export(memory: AgentMemory, payload: dict[str, Any]) -> dict[str, Any]:
+    limit = max(1, min(int(payload.get("limit", 2000)), 5000))
+    visualization = build_visualization(memory, {"limit": limit})
+    history = memory.manager.short_term.read_unprocessed_history(0)
+    return {
+        "generated_at": visualization["generated_at"],
+        "status": visualization["status"],
+        "drawers": visualization["drawers"],
+        "facts": visualization["facts"],
+        "history": [
+            {
+                "cursor": entry.cursor,
+                "timestamp": entry.timestamp.isoformat(),
+                "session_id": entry.session_id,
+                "content": entry.content,
+            }
+            for entry in history
+        ],
+    }
+
+
+def run_memory_repair(memory: AgentMemory, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Repair the short-term cursor and report store integrity.
+
+    Fixes: a corrupt/missing record cursor (rebuilt from history). Reports:
+    history line parse failures and lone-surrogate damage, drawer count, and
+    embedding readiness (a real probe query that loads the embedding model).
+
+    With ``clean=True``, history lines containing U+FFFD (mojibake from old
+    encoding damage) are dropped entirely — opt-in, since it deletes content.
+    """
+    payload = payload or {}
+    short = memory.manager.short_term
+    cursor_path = short.config.cursor_path
+    stored_cursor = short._read_int(cursor_path)
+    max_cursor = max((entry.cursor for entry in short._iter_history_entries()), default=0)
+    repaired = stored_cursor <= 0 and max_cursor > 0
+    if repaired:
+        short._write_int(cursor_path, max_cursor)
+
+    damaged_lines = 0
+    unparseable_lines = 0
+    total_lines = 0
+    cleaned = 0
+    history_path = short.config.history_path
+    if cursor_path.parent.exists() and history_path.exists():
+        lines = history_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in lines:
+            total_lines += 1
+            if "\ufffd" in line:
+                damaged_lines += 1
+            try:
+                json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                unparseable_lines += 1
+        if payload.get("clean") and damaged_lines:
+            kept = [line for line in lines if "\ufffd" not in line]
+            cleaned = total_lines - len(kept)
+            history_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+
+    drawers = 0
+    try:
+        drawers = len(memory.manager.long_term.drawers.get(include=["metadatas"])["ids"])
+    except Exception as error:  # pragma: no cover - depends on chroma state
+        drawers = -1
+
+    embedding = {"ok": False, "model": memory.manager.long_term.config.long_term.embedding_model}
+    try:
+        memory.manager.long_term.drawers.query(query_texts=["readiness probe"], n_results=1)
+        embedding["ok"] = True
+    except Exception as error:
+        embedding["error"] = str(error)
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cursor": {"stored": stored_cursor, "rebuilt": max_cursor, "repaired": repaired},
+        "history": {"lines": total_lines, "damaged": damaged_lines, "unparseable": unparseable_lines},
+        "drawers": drawers,
+        "embedding": embedding,
+        "cleaned": cleaned,
+    }
+
+
+def build_visualization(memory: AgentMemory, payload: dict[str, Any]) -> dict[str, Any]:
+    limit = max(1, min(int(payload.get("limit", 500)), 500))
+    drawer_payload = memory.manager.long_term.drawers.get(
+        limit=limit,
+        include=["documents", "metadatas"],
+    )
+    drawers = []
+    ids = drawer_payload.get("ids") or []
+    documents = drawer_payload.get("documents") or []
+    metadatas = drawer_payload.get("metadatas") or []
+    for index, drawer_id in enumerate(ids):
+        metadata = metadatas[index] if index < len(metadatas) else {}
+        drawers.append({
+            "id": drawer_id,
+            "content": documents[index] if index < len(documents) else "",
+            "wing": metadata.get("wing", "unknown"),
+            "room": metadata.get("room", "general"),
+            "hall": metadata.get("hall", "hall_general"),
+            "source_file": metadata.get("source_file", ""),
+            "filed_at": metadata.get("filed_at"),
+            "metadata": memory.manager.long_term._extra_metadata(metadata),
+        })
+
+    with memory.manager.knowledge_graph.connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM triples ORDER BY extracted_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    facts = []
+    for row in rows:
+        fact = dict(row)
+        fact["metadata"] = json.loads(fact.get("metadata") or "{}")
+        facts.append(fact)
+
+    status = memory.status()
+    rooms = {
+        wing: memory.manager.long_term.list_rooms(wing)
+        for wing in status.get("wings", {})
+    }
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "rooms": rooms,
+        "drawers": drawers,
+        "facts": facts,
+        "truncated": {
+            "drawers": sum(status.get("wings", {}).values()) > len(drawers),
+            "facts": status.get("knowledge_graph", {}).get("triples", 0) > len(facts),
+        },
+    }
+
+
 def dispatch(memory: AgentMemory, action: str, payload: dict[str, Any]) -> Any:
     if action == "ping":
         return {"version": "0.1.0", "rootDir": str(memory.root_dir)}
@@ -159,8 +294,55 @@ def dispatch(memory: AgentMemory, action: str, payload: dict[str, Any]) -> Any:
             raise ValueError("drawer_id is required")
         memory.manager.long_term.delete_drawer(drawer_id)
         return {"deleted": True, "drawer_id": drawer_id}
+    if action == "update_memory":
+        drawer_id = str(payload["drawer_id"]).strip()
+        if not drawer_id:
+            raise ValueError("drawer_id is required")
+        hall_raw = payload.get("hall")
+        hall = HallType(str(hall_raw)) if hall_raw is not None else None
+        updated = memory.manager.long_term.update_drawer(
+            drawer_id=drawer_id,
+            content=payload.get("content"),
+            wing=payload.get("wing"),
+            room=payload.get("room"),
+            hall=hall,
+            source_file=payload.get("source_file"),
+            metadata=payload.get("metadata"),
+            added_by=payload.get("added_by"),
+        )
+        if updated is None:
+            raise ValueError(f"Unknown drawer: {drawer_id}")
+        return {"updated": True, "record": updated}
     if action == "status":
         return memory.status()
+    if action == "pending_history":
+        limit = max(1, min(int(payload.get("limit", 200)), 500))
+        dream_cursor = memory.manager.short_term.get_last_dream_cursor()
+        entries = memory.manager.short_term.read_unprocessed_history(dream_cursor, limit=limit)
+        return {
+            "dream_cursor": dream_cursor,
+            "entries": [
+                {
+                    "cursor": entry.cursor,
+                    "content": entry.content,
+                    "session_id": entry.session_id,
+                    "timestamp": entry.timestamp.isoformat(),
+                }
+                for entry in entries
+            ],
+        }
+    if action == "set_dream_cursor":
+        cursor = int(payload["cursor"])
+        if cursor < 0:
+            raise ValueError("cursor must be >= 0")
+        memory.manager.short_term.set_last_dream_cursor(cursor)
+        return {"ok": True, "dream_cursor": cursor}
+    if action == "visualize":
+        return build_visualization(memory, payload)
+    if action == "export":
+        return build_export(memory, payload)
+    if action == "repair":
+        return run_memory_repair(memory, payload)
     if action == "close":
         memory.close()
         return {"closed": True}
@@ -170,8 +352,17 @@ def dispatch(memory: AgentMemory, action: str, payload: dict[str, Any]) -> Any:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Equaxis Agent Memory JSONL bridge")
     parser.add_argument("--root", required=True, help="Memory data root")
+    parser.add_argument("--snapshot", action="store_true", help="Print one visualization snapshot and exit")
+    parser.add_argument("--limit", type=int, default=500, help="Snapshot item limit (max 500)")
     args = parser.parse_args()
     memory = AgentMemory(root_dir=Path(args.root))
+
+    if args.snapshot:
+        try:
+            print(json.dumps(clean_surrogates(build_visualization(memory, {"limit": args.limit})), ensure_ascii=True, default=json_default))
+            return 0
+        finally:
+            memory.close()
 
     for raw_line in sys.stdin:
         request_id: str | None = None

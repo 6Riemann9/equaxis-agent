@@ -83,7 +83,7 @@ export function buildRuntimeDashboard(options = {}) {
     versions: { total: versionItems.length, byKind: groupCounts(versionItems, "kind"), byStatus: groupCounts(versionItems, "status") },
     runtimeFiles: {
       protocolTrace: fileInfo(projectRoot, ".pi/runtime/protocols/traces.jsonl"),
-      subagentEvents: fileInfo(projectRoot, ".pi/runtime/subagents/events.jsonl")
+      subagentEvents: fileInfo(projectRoot, path.join(subagents?.persistence?.rootDir ?? ".pi/runtime/subagents", "events.jsonl"))
     }
   };
 }

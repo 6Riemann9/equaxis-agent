@@ -50,6 +50,31 @@ test("runs the vendored Python memory core through the persistent bridge", async
   });
   const drawerId = remember.record.drawer_id;
   assert.ok(drawerId);
+
+  const updated = await bridge.request("update_memory", {
+    drawer_id: drawerId,
+    content: "Updated memory content.",
+    room: "integration-edit",
+    hall: "hall_preferences",
+    source_file: "pi-web-test"
+  });
+  assert.equal(updated.record.drawer_id, drawerId);
+  assert.equal(updated.record.content, "Updated memory content.");
+  assert.equal(updated.record.room, "integration-edit");
+  assert.equal(updated.record.hall, "hall_preferences");
+  assert.equal(updated.record.source_file, "pi-web-test");
+
+  const visualize = await bridge.request("visualize", { limit: 500 });
+  const found = visualize.drawers.find((drawer) => drawer.id === drawerId);
+  assert.ok(found, "updated drawer appears in visualize snapshot");
+  assert.equal(found.content, "Updated memory content.");
+  assert.equal(found.room, "integration-edit");
+
+  await assert.rejects(
+    bridge.request("update_memory", { drawer_id: "drawer_does_not_exist" }),
+    /Unknown drawer/
+  );
+
   const deleted = await bridge.request("delete_memory", { drawer_id: drawerId });
   assert.deepEqual(deleted, { deleted: true, drawer_id: drawerId });
 

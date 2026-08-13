@@ -4,7 +4,16 @@ import { createEvalEvent } from "./eval-loop.mjs";
 
 function parseJsonl(filePath) {
   if (!fs.existsSync(filePath)) return [];
-  return fs.readFileSync(filePath, "utf8").split(/\r?\n/).filter((line) => line.trim()).map((line) => JSON.parse(line));
+  const records = [];
+  for (const line of fs.readFileSync(filePath, "utf8").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      records.push(JSON.parse(line));
+    } catch {
+      // skip malformed lines instead of aborting the whole export
+    }
+  }
+  return records;
 }
 
 function eventRecords(inputPath) {
@@ -23,7 +32,7 @@ export function evalEventToHarborRecord(event, options = {}) {
   return {
     taskId: event.taskId ?? `${event.tool.name}:${event.capabilities.join(",")}`,
     trialId: event.traceId ?? event.taskId ?? null,
-    attempt: 1,
+    attempt: options.attempt ?? 1,
     variant: event.cohort ?? event.version.id ?? "baseline",
     taskArea: event.tool.name,
     capabilityTags: event.capabilities,
@@ -48,7 +57,15 @@ export function exportEvalLoopForHarbor(options = {}) {
   const inputPath = path.resolve(projectRoot, options.input ?? ".pi/runtime/eval-loop/events.jsonl");
   const outputDir = path.resolve(projectRoot, options.outputDir ?? ".pi/runtime/eval-loop/harbor");
   const cycleId = options.cycleId ?? `eval-loop-${new Date().toISOString().replaceAll(":", "-")}`;
-  const records = eventRecords(inputPath).map((event) => evalEventToHarborRecord(event, options));
+  // Number attempts per logical task so retries surface as attempt 2, 3, …
+  // instead of every row being attempt 1 (which broke pass@N accounting).
+  const attemptsByTask = new Map();
+  const records = eventRecords(inputPath).map((event) => {
+    const taskId = event.taskId ?? `${event.tool.name}:${event.capabilities.join(",")}`;
+    const attempt = (attemptsByTask.get(taskId) ?? 0) + 1;
+    attemptsByTask.set(taskId, attempt);
+    return evalEventToHarborRecord(event, { ...options, attempt });
+  });
   const baseline = records.filter((record) => record.variant === "baseline" || record.variant === "current");
   const candidates = records.filter((record) => !baseline.includes(record));
   fs.mkdirSync(outputDir, { recursive: true });

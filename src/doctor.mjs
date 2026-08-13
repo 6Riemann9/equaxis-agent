@@ -13,6 +13,8 @@ const REQUIRED_EXTENSIONS = [
   "provider.ts",
   "reliability-harness.ts",
   "memory.ts",
+  "skills.ts",
+  "subagent-engine.ts",
   "web-crawler.ts",
   "tool-catalog.ts",
   "tool-scheduler.ts",
@@ -39,6 +41,47 @@ function checkNodeVersion(checks, nodeVersion) {
 function checkRuntimeFiles(checks, projectRoot) {
   const missingExtensions = REQUIRED_EXTENSIONS.filter((name) => !fs.existsSync(path.join(projectRoot, ".pi", "extensions", name)));
   checks.push(check("Runtime files", missingExtensions.length === 0, missingExtensions.length ? `missing: ${missingExtensions.join(", ")}` : "all extensions present"));
+}
+
+function checkMemoryStore(checks, projectRoot) {
+  const memoryRoot = path.join(projectRoot, ".equaxis", "memory");
+  if (!fs.existsSync(memoryRoot)) {
+    checks.push(check("Memory store", true, "not initialized yet (.equaxis/memory absent)"));
+    return;
+  }
+  const historyPath = path.join(memoryRoot, "history", "history.jsonl");
+  const cursorPath = path.join(memoryRoot, "history", ".cursor");
+  let historyOk = false;
+  let historyDetail = "history missing";
+  if (fs.existsSync(historyPath)) {
+    try {
+      const lines = fs.readFileSync(historyPath, "utf8").split(/\r?\n/).filter(Boolean);
+      if (lines.length > 0) JSON.parse(lines[lines.length - 1]);
+      historyOk = true;
+      historyDetail = `${lines.length} entries`;
+    } catch {
+      historyDetail = "history unreadable or corrupt";
+    }
+  }
+  let cursorOk = !fs.existsSync(cursorPath) || historyOk === false;
+  let cursorDetail = "cursor missing";
+  if (fs.existsSync(cursorPath)) {
+    try {
+      const raw = fs.readFileSync(cursorPath, "utf8").trim();
+      const parsed = Number(raw);
+      cursorOk = Number.isInteger(parsed) && parsed >= 0;
+      cursorDetail = cursorOk ? `cursor ${parsed}` : `corrupt cursor (${JSON.stringify(raw)})`;
+    } catch {
+      cursorOk = false;
+      cursorDetail = "cursor unreadable";
+    }
+  }
+  const embeddingsOk = fs.existsSync(path.join(memoryRoot, "long_term", "palace"));
+  checks.push(check(
+    "Memory store",
+    historyOk && cursorOk,
+    `${historyDetail} · ${cursorDetail}${embeddingsOk ? " · embeddings present" : " · embeddings not initialized (first write downloads all-MiniLM-L6-v2)"}`
+  ));
 }
 
 function checkExtensionContractsAtRoot(checks, projectRoot, unifiedConfig) {
@@ -95,6 +138,7 @@ export function runStartupPreflight(options = {}) {
 
   checkNodeVersion(checks, options.nodeVersion ?? process.versions.node);
   checkRuntimeFiles(checks, projectRoot);
+  checkMemoryStore(checks, projectRoot);
 
   try {
     unifiedConfig = loadEquaxisConfig(projectRoot);

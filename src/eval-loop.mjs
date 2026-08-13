@@ -30,11 +30,13 @@ function array(value) {
 }
 
 function keyOf(record) {
-  return [record.model.provider, record.model.id, record.tool.name, ...record.capabilities].join("|");
+  // JSON array serialization round-trips reliably even when a capability tag
+  // or model id contains the legacy "|" separator.
+  return JSON.stringify([record.model.provider, record.model.id, record.tool.name, ...record.capabilities]);
 }
 
 function groupKeyParts(key) {
-  const [provider, model, tool, ...capabilities] = key.split("|");
+  const [provider, model, tool, ...capabilities] = JSON.parse(key);
   return { provider, model, tool, capabilities };
 }
 
@@ -139,10 +141,42 @@ export function compareCandidate({ baseline, candidate, minSamples = 5, minSucce
   return { decision: "scoped", reason: "candidate is comparable but improvement is below deploy threshold", successDelta, latencyDeltaRatio, costDeltaRatio, confidence };
 }
 
+const EVAL_TRACE_EVENT = "eval_outcome_recorded";
+const EVAL_TRACE_FIELDS = [
+  "taskId", "cycleId", "experimentId", "cohort", "model", "tool", "capabilities",
+  "outcome", "score", "errorCode", "latencyMs", "inputTokens", "outputTokens",
+  "costUsd", "traceId", "version", "provenance"
+];
+
+/**
+ * Recover eval outcomes from the reliability trace stream. The live harness
+ * records every outcome into .pi/runtime/traces.jsonl as
+ * `eval_outcome_recorded` (the persisted eval-loop events.jsonl only covers
+ * runs after the harness gained a persisting EvalLoop), so this is the
+ * authoritative full-history source for dashboards.
+ */
+export function collectEvalEventsFromTrace(tracePath, { limit = 10000 } = {}) {
+  if (!fs.existsSync(tracePath)) return [];
+  const events = [];
+  for (const line of fs.readFileSync(tracePath, "utf8").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const entry = safeJsonParse(line);
+    if (entry?.event !== EVAL_TRACE_EVENT) continue;
+    const input = {};
+    for (const field of EVAL_TRACE_FIELDS) {
+      if (field in entry) input[field] = entry[field];
+    }
+    events.push(createEvalEvent(input));
+    if (events.length >= limit) break;
+  }
+  return events;
+}
+
 export class EvalLoop {
   constructor(options = {}) {
     this.events = [];
     this.candidates = [];
+    this.decisions = [];
     this.trace = options.trace ?? (() => {});
     this.persist = Boolean(options.persist || options.persistence?.enabled);
     this.eventFile = this.persist ? eventLogPath({ projectRoot: options.projectRoot, rootDir: options.persistence?.rootDir ?? options.rootDir }) : null;
@@ -157,6 +191,7 @@ export class EvalLoop {
       const record = safeJsonParse(line);
       if (record?.type === "eval_event") this.events.push(createEvalEvent(record.event));
       if (record?.type === "candidate_change") this.candidates.push(record.candidate);
+      if (record?.type === "eval_decision") this.decisions.push(record.decision);
     }
   }
 
@@ -185,6 +220,7 @@ export class EvalLoop {
   decision(input = {}) {
     const result = compareCandidate(input);
     const record = { ...result, decidedAt: new Date().toISOString(), baseline: input.baseline ?? null, candidate: input.candidate ?? null, candidateChange: input.candidateChange ?? null };
+    this.decisions.push(record);
     this.#append({ type: "eval_decision", recordedAt: record.decidedAt, decision: record });
     this.trace("eval_decision_recorded", record);
     return record;
@@ -220,7 +256,8 @@ export class EvalLoop {
         attempts: rows.length,
         successes,
         failures,
-        successRate: rounded(successes / rows.length),
+        unknowns: rows.length - successes - failures,
+        successRate: rows.length ? rounded(successes / rows.length) : null,
         averageScore: mean(rows.map((row) => row.score), 4),
         averageLatencyMs: mean(rows.map((row) => row.latencyMs), 2),
         averageInputTokens: mean(rows.map((row) => row.inputTokens), 2),
@@ -233,12 +270,15 @@ export class EvalLoop {
       || left.tool.localeCompare(right.tool)
       || left.capabilities.join(",").localeCompare(right.capabilities.join(",")));
     const successes = events.filter((event) => event.outcome === "success").length;
+    const failures = events.filter((event) => event.outcome === "failure").length;
     return {
       attempts: events.length,
       successes,
-      failures: events.filter((event) => event.outcome === "failure").length,
+      failures,
+      unknowns: events.length - successes - failures,
       successRate: events.length ? rounded(successes / events.length) : null,
       candidates: [...this.candidates],
+      decisions: [...this.decisions],
       matrix
     };
   }

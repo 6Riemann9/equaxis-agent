@@ -118,7 +118,7 @@ export function selectRelevantSkills(skills, query, options = {}) {
     content: `${skill.description ? `${skill.description}\n` : ""}${skill.body}`,
     skill
   }));
-  const { selected, omitted, usedTokens } = selectWithinBudget(items, { maxTokens });
+  const { selected, omitted, usedTokens } = selectWithinBudget(items, { maxTokens, requiredNames: options.requiredNames });
   return {
     selected: selected.map((item) => ({ ...item.skill, score: item.score, estimatedTokens: item.estimatedTokens })),
     omitted: omitted.map((item) => ({ name: item.name, reason: item.reason, estimatedTokens: item.estimatedTokens })),

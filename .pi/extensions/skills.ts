@@ -77,6 +77,7 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    runGoal.current = event.prompt.slice(0, 120);
     if (!config.enabled || !config.autoInject) return;
     const skills = loadSkills();
     if (!skills.length) return;
@@ -104,10 +105,6 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
       step.status = event.isError ? "failed" : "completed";
       if (event.isError) step.errorCode = "TOOL_ERROR";
     }
-  });
-
-  pi.on("before_agent_start", async (event) => {
-    runGoal.current = event.prompt.slice(0, 120);
   });
 
   pi.on("agent_end", async (_event, ctx) => {

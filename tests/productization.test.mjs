@@ -9,7 +9,7 @@ function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-product-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, ".pi", "extensions"), { recursive: true });
-  for (const name of ["provider.ts", "reliability-harness.ts", "memory.ts", "web-crawler.ts", "tool-catalog.ts", "tool-scheduler.ts", "protocol-tools.ts", "ast-tools.ts"]) {
+  for (const name of ["provider.ts", "reliability-harness.ts", "memory.ts", "skills.ts", "subagent-engine.ts", "web-crawler.ts", "tool-catalog.ts", "tool-scheduler.ts", "protocol-tools.ts", "ast-tools.ts"]) {
     fs.writeFileSync(path.join(root, ".pi", "extensions", name), "export default () => {};\n");
   }
   fs.mkdirSync(path.join(root, "node_modules", "@earendil-works", "pi-coding-agent", "dist"), { recursive: true });
