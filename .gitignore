@@ -23,3 +23,12 @@ nul
 .codex-tmp/
 harbor_eval/jobs/
 .env
+
+# Personal notes and roadmap — never commit
+Equaxis-后续开发路线图.md
+Subagent设计与Agent通信一页速记.md
+agent-system-questions.md
+docs/ARCHITECTURE_REDUCTION_DIRECTIVE.md
+docs/CHAPTER_7_MODEL_POST_TRAINING_STUDY_GUIDE.md
+docs/EXTENSION_COMPATIBILITY.md
+docs/FILE_ARCHITECTURE.md
