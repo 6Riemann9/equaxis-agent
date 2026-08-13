@@ -6,8 +6,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatDoctorReport, runDoctor, runStartupPreflight } from "../src/doctor.mjs";
 import { loadEquaxisConfig } from "../src/equaxis-config.mjs";
-import { compareCandidate, EvalLoop } from "../src/eval-loop.mjs";
+import { compareCandidate, createEvalLoopFromTrace } from "../src/eval-loop.mjs";
 import { exportEvalLoopForHarbor } from "../src/eval-harbor-bridge.mjs";
+import { isRuntimeProfile, profileExtensionSelection } from "../src/runtime-profiles.mjs";
 import { formatProtocolRegressionReport, runProtocolRegression } from "../src/protocol-regression.mjs";
 import { VersionStore } from "../src/version-store.mjs";
 import { buildRuntimeDashboard, formatRuntimeDashboard } from "../src/runtime-dashboard.mjs";
@@ -53,10 +54,16 @@ function printJson(value) {
 }
 
 function localEvalLoop() {
-  return new EvalLoop({
+  // Evaluation is offline: runtime facts live in the reliability trace stream
+  // (eval_outcome_recorded); the ledger (events.jsonl) holds manual records,
+  // candidates and decisions. createEvalLoopFromTrace merges both and drops
+  // legacy duplicated rows by traceId.
+  return createEvalLoopFromTrace({
     persist: unifiedConfig.evaluation?.enabled !== false,
     projectRoot,
-    rootDir: unifiedConfig.evaluation?.rootDir ?? ".pi/runtime/eval-loop"
+    rootDir: unifiedConfig.evaluation?.rootDir ?? ".pi/runtime/eval-loop",
+    traceDir: unifiedConfig.reliability?.traceDir ?? ".pi/runtime",
+    maxFiles: unifiedConfig.reliability?.trace?.maxFiles ?? 3
   });
 }
 
@@ -79,7 +86,7 @@ async function handleLocalCommand(args) {
       maxCostRegression: unifiedConfig.evaluation?.maxCostRegression,
       confidenceZ: unifiedConfig.evaluation?.confidenceZ
     })); return true; }
-    if (command === "export-harbor") { printJson(exportEvalLoopForHarbor({ projectRoot, ...parseJsonArg(payload) })); return true; }
+    if (command === "export-harbor") { printJson(exportEvalLoopForHarbor({ projectRoot, events: loop.events, ...parseJsonArg(payload) })); return true; }
   }
   if (group === "gates" && command === "check") {
     const report = evaluateRuntimeGates(parseJsonArg(payload), unifiedConfig.runtime?.gates);
@@ -150,10 +157,14 @@ if (!extensionContracts.ok) {
   console.error(formatExtensionContractReport(extensionContracts));
   process.exit(1);
 }
-const extensionArgs = extensionPaths(projectRoot, extensionContracts.manifest, unifiedConfig.extensions).flatMap((extensionPath) => [
-  "--extension",
-  extensionPath
-]);
+const runtimeProfile = unifiedConfig.runtime.profile;
+const profileSelection = profileExtensionSelection(runtimeProfile, unifiedConfig.extensions);
+const extensionArgs = profileSelection === null
+  ? []
+  : extensionPaths(projectRoot, extensionContracts.manifest, profileSelection).flatMap((extensionPath) => [
+      "--extension",
+      extensionPath
+    ]);
 
 if (shouldShowBanner({ args: cliArgs })) {
   process.stdout.write(formatEquaxisBanner({ color: !process.env.NO_COLOR }));

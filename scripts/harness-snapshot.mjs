@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { loadEquaxisConfig } from "../src/equaxis-config.mjs";
 import { buildRuntimeDashboard } from "../src/runtime-dashboard.mjs";
 import { runDoctor } from "../src/doctor.mjs";
-import { collectEvalEventsFromTrace, EvalLoop } from "../src/eval-loop.mjs";
+import { collectEvalEventsFromTraceDir, EvalLoop } from "../src/eval-loop.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -80,13 +80,11 @@ try {
   doctor = { ok: false, checks: [], error: error instanceof Error ? error.message : String(error) };
 }
 
-// Eval history: the persisted eval-loop events.jsonl only covers recent runs;
-// the authoritative full history lives in the trace stream as
-// eval_outcome_recorded entries.
+// Eval history: the authoritative full history lives in the trace stream as
+// eval_outcome_recorded entries (including rotated trace archives).
 let evalStats = null;
 try {
-  const tracePath = path.join(projectRoot, ".pi", "runtime", "traces.jsonl");
-  const events = collectEvalEventsFromTrace(tracePath);
+  const events = collectEvalEventsFromTraceDir(projectRoot, ".pi/runtime", { maxFiles: 3 });
   evalStats = new EvalLoop({ events }).snapshot();
 } catch (error) {
   evalStats = { error: error instanceof Error ? error.message : String(error) };

@@ -67,7 +67,7 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     },
     dream: {
       enabled: true,
-      onShutdown: true,
+      onShutdown: false,
       maxEntries: 200
     }
   },

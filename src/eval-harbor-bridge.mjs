@@ -54,13 +54,18 @@ export function evalEventToHarborRecord(event, options = {}) {
 
 export function exportEvalLoopForHarbor(options = {}) {
   const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
+  // Prefer caller-supplied normalized events (e.g. trace-derived via
+  // createEvalLoopFromTrace); fall back to reading the offline ledger file.
+  const events = options.events
+    ? options.events.map((event) => createEvalEvent(event))
+    : eventRecords(path.resolve(projectRoot, options.input ?? ".pi/runtime/eval-loop/events.jsonl"));
   const inputPath = path.resolve(projectRoot, options.input ?? ".pi/runtime/eval-loop/events.jsonl");
   const outputDir = path.resolve(projectRoot, options.outputDir ?? ".pi/runtime/eval-loop/harbor");
   const cycleId = options.cycleId ?? `eval-loop-${new Date().toISOString().replaceAll(":", "-")}`;
   // Number attempts per logical task so retries surface as attempt 2, 3, …
   // instead of every row being attempt 1 (which broke pass@N accounting).
   const attemptsByTask = new Map();
-  const records = eventRecords(inputPath).map((event) => {
+  const records = events.map((event) => {
     const taskId = event.taskId ?? `${event.tool.name}:${event.capabilities.join(",")}`;
     const attempt = (attemptsByTask.get(taskId) ?? 0) + 1;
     attemptsByTask.set(taskId, attempt);

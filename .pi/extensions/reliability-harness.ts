@@ -4,7 +4,7 @@ import type {
   ToolCallEvent,
   ToolResultEvent
 } from "@earendil-works/pi-coding-agent";
-import { EvalLoop } from "../../src/eval-loop.mjs";
+import { createEvalEvent } from "../../src/eval-loop.mjs";
 import {
   cleanupApprovals,
   readApprovalDecision,
@@ -161,9 +161,10 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   let traceFile = services.paths.traceFile;
   const pending = new Map<string, PendingTool>();
   const repairAttempts = new Map<string, number>();
-  // Persist eval outcomes to .pi/runtime/eval-loop/events.jsonl so dashboards
-  // and the harbor export see them, not just the in-memory copy + traces.
-  const evalLoop = new EvalLoop({ projectRoot: process.cwd(), persist: true });
+  // Eval outcomes are runtime facts and are written to the trace stream only
+  // (eval_outcome_recorded). The offline eval ledger, dashboards and the
+  // harbor export derive them from the trace; the runtime never imports the
+  // evaluation core (see docs/ARCHITECTURE_REDUCTION_DIRECTIVE.md P5).
   let activeModel: ActiveModel = { provider: "unknown", id: "unknown" };
 
   pi.registerFlag("equaxis-mode", {
@@ -274,7 +275,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     pending.clear();
     repairAttempts.clear();
     activeModel = currentModelFromContext(ctx);
-    trace(ctx, "session_start", { reason: event.reason, traceFile });
+    trace(ctx, "session_start", { reason: event.reason, traceFile, profile: services.config.runtime.profile });
     updateStatus(ctx);
   });
 
@@ -463,7 +464,9 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     if (event.isError) state.failedCalls += 1;
     state.phase = "planning";
     const latencyMs = call ? Number((performance.now() - call.startedAt).toFixed(2)) : undefined;
-    const evalEvent = evalLoop.record({
+    // Runtime facts only: the outcome goes into the trace stream
+    // (eval_outcome_recorded) so offline evaluation can rebuild full history.
+    const evalEvent = createEvalEvent({
       provider: activeModel.provider,
       modelId: activeModel.id,
       toolName: event.toolName,
@@ -557,6 +560,6 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
 
   pi.registerCommand("equaxis-eval", {
     description: "Show the current reliability evaluation snapshot",
-    handler: async (_args, ctx) => ctx.ui.notify(JSON.stringify({ reliability: evalSnapshot(), runtime: evalLoop.snapshot() }), "info")
+    handler: async (_args, ctx) => ctx.ui.notify(JSON.stringify({ reliability: evalSnapshot() }), "info")
   });
 }

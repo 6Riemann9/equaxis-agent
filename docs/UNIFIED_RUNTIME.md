@@ -90,7 +90,7 @@ pi-web fork 顶栏的 **Equaxis Harness** 按钮打开实时 harness 面板（`/
 
 面板另有五个 tab 提供**完全追溯**：
 
-- **Eval**：从 trace 流（`eval_outcome_recorded`）派生的完整评测矩阵——attempts/successes/failures/unknowns/成功率，按 provider/model/tool/capability 分组的延迟、token、成本、错误码明细。历史数据 1197 条全部可见（此前 dashboard 读空的 eval-loop 文件显示 0；reliability-harness 现改用持久化 EvalLoop，新事件同时落入 `.pi/runtime/eval-loop/events.jsonl`）。
+- **Eval**：从 trace 流（`eval_outcome_recorded`，含轮转归档）派生的完整评测矩阵——attempts/successes/failures/unknowns/成功率，按 provider/model/tool/capability 分组的延迟、token、成本、错误码明细。运行时只写 trace 事实；`.pi/runtime/eval-loop/events.jsonl` 仅保留离线记录（手动 record、candidates、decisions），两者按 traceId 去重合并。
 - **Harbor**：`harbor_eval/jobs/budget-v2-report.json`（equaxis vs pi_control vs gain 的 pass@1/延迟/token/安全率对比）+ 最新 `harbor_eval/reports/*/cycle-report.json`（诊断、假设、实验、决策）。两个 Python 实现是不同工具（预算对比 vs 改进周期），字段名 snake/camelCase 各异，面板按各自形状展示。
 
 - **Events**：完整事件流（8818 条级），倒序分页（每页 100），可按事件类型 / session id / 文本搜索过滤，**failures only** 一键只看失败；点击任意行展开该事件的完整 JSON。

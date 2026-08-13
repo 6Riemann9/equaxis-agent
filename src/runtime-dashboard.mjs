@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { runDoctor } from "./doctor.mjs";
-import { EvalLoop } from "./eval-loop.mjs";
+import { createEvalLoopFromTrace } from "./eval-loop.mjs";
 import { VersionStore } from "./version-store.mjs";
 import { discoverProtocolAdapters } from "./protocol-adapters.mjs";
 import { evaluateRuntimeGates } from "./runtime-gates.mjs";
@@ -27,10 +27,14 @@ export function buildRuntimeDashboard(options = {}) {
   const config = options.config;
   const doctor = runDoctor({ projectRoot, cwd: options.cwd ?? projectRoot, env: options.env ?? process.env, spawnSyncImpl: options.spawnSyncImpl, nodeVersion: options.nodeVersion });
   const evaluationConfig = config?.evaluation ?? { enabled: true, rootDir: ".pi/runtime/eval-loop" };
-  const evalLoop = new EvalLoop({
+  // Runtime facts come from the reliability trace stream; the offline ledger
+  // (events.jsonl) holds manual records, candidates and decisions.
+  const evalLoop = createEvalLoopFromTrace({
     persist: evaluationConfig?.enabled !== false,
     projectRoot,
-    rootDir: evaluationConfig?.rootDir ?? ".pi/runtime/eval-loop"
+    rootDir: evaluationConfig?.rootDir ?? ".pi/runtime/eval-loop",
+    traceDir: config?.reliability?.traceDir ?? ".pi/runtime",
+    maxFiles: config?.reliability?.trace?.maxFiles ?? 3
   });
   const snapshot = evalLoop.snapshot();
   const versions = new VersionStore({ projectRoot }).list();

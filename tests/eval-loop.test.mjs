@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { EvalLoop, compareCandidate, createCandidateChange, createEvalEvent } from "../src/eval-loop.mjs";
+import { collectEvalEventsFromTraceDir, createEvalLoopFromTrace, EvalLoop, compareCandidate, createCandidateChange, createEvalEvent } from "../src/eval-loop.mjs";
 
 function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-eval-loop-"));
@@ -98,4 +98,51 @@ test("normalizes candidate changes with version provenance", () => {
   assert.equal(candidate.version.kind, "skill");
   assert.equal(candidate.provenance.parentVersion.id, "skill-v1");
   assert.equal(candidate.provenance.changes.file, "skills/review/SKILL.md");
+});
+test("collectEvalEventsFromTraceDir reads rotated trace archives newest-last", (t) => {
+  const root = workspace(t);
+  const traceDir = path.join(root, ".pi", "runtime");
+  fs.mkdirSync(traceDir, { recursive: true });
+  const trace = (traceId, toolName) => JSON.stringify({ timestamp: "2026-01-01T00:00:00.000Z", source: "reliability", event: "eval_outcome_recorded", model: { provider: "p", id: "m" }, tool: { name: toolName }, capabilities: ["c"], outcome: "success", latencyMs: 10, traceId }) + "\n";
+  fs.writeFileSync(path.join(traceDir, "traces.2.jsonl"), trace("t-2", "read"));
+  fs.writeFileSync(path.join(traceDir, "traces.1.jsonl"), trace("t-1", "edit"));
+  fs.writeFileSync(path.join(traceDir, "traces.jsonl"), trace("t-0", "bash"));
+  const events = collectEvalEventsFromTraceDir(root, ".pi/runtime", { maxFiles: 3 });
+  assert.equal(events.length, 3);
+  assert.deepEqual(events.map((event) => event.traceId), ["t-2", "t-1", "t-0"]);
+  assert.equal(events[0].tool.name, "read");
+  assert.deepEqual(events[2].capabilities, ["c"]);
+});
+
+test("createEvalLoopFromTrace merges trace facts with the offline ledger and dedupes by traceId", (t) => {
+  const root = workspace(t);
+  const traceDir = path.join(root, ".pi", "runtime");
+  fs.mkdirSync(traceDir, { recursive: true });
+  const traceLine = (traceId, toolName) => JSON.stringify({ timestamp: "2026-01-01T00:00:00.000Z", source: "reliability", event: "eval_outcome_recorded", model: { provider: "p", id: "m" }, tool: { name: toolName }, capabilities: ["c"], outcome: "success", latencyMs: 10, traceId }) + "\n";
+  // trace carries two runtime outcomes; the ledger has one duplicate (same
+  // traceId, legacy harness) plus one manual record without traceId.
+  fs.writeFileSync(path.join(traceDir, "traces.jsonl"), traceLine("t-1", "read") + traceLine("t-2", "edit"));
+  const ledger = new EvalLoop({ persist: true, projectRoot: root });
+  ledger.record({ provider: "p", modelId: "m", toolName: "read", capability: "c", outcome: "success", traceId: "t-1" });
+  ledger.record({ provider: "p", modelId: "m", toolName: "reflect", capability: "c", outcome: "success" });
+  const loop = createEvalLoopFromTrace({ projectRoot: root, traceDir: ".pi/runtime", persist: true });
+  const snapshot = loop.snapshot();
+  assert.equal(snapshot.attempts, 3, "trace t-1,t-2 + ledger reflect (deduped t-1)");
+  const tools = snapshot.matrix.map((row) => row.tool).sort();
+  assert.deepEqual(tools, ["edit", "read", "reflect"]);
+  const read = snapshot.matrix.find((row) => row.tool === "read");
+  assert.equal(read.attempts, 1, "legacy duplicate dropped");
+});
+
+test("createEvalLoopFromTrace with persist disabled keeps trace-only facts", (t) => {
+  const root = workspace(t);
+  const traceDir = path.join(root, ".pi", "runtime");
+  fs.mkdirSync(traceDir, { recursive: true });
+  const line = JSON.stringify({ timestamp: "2026-01-01T00:00:00.000Z", source: "reliability", event: "eval_outcome_recorded", model: { provider: "p", id: "m" }, tool: { name: "read" }, capabilities: ["c"], outcome: "failure", errorCode: "TOOL_ERROR", traceId: "t-9" }) + "\n";
+  fs.writeFileSync(path.join(traceDir, "traces.jsonl"), line);
+  const loop = createEvalLoopFromTrace({ projectRoot: root, traceDir: ".pi/runtime", persist: false });
+  const snapshot = loop.snapshot();
+  assert.equal(snapshot.attempts, 1);
+  assert.equal(snapshot.matrix[0].tool, "read");
+  assert.deepEqual(snapshot.matrix[0].errorCodes, { TOOL_ERROR: 1 });
 });

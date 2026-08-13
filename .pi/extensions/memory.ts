@@ -108,7 +108,9 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
   }
 
   function updateStatus(ctx: ExtensionContext): void {
-    const state = !config.enabled ? "off" : ready ? "ready" : "unavailable";
+    // Memory starts lazily: "idle" means enabled but the Python bridge has
+    // not been spawned yet (first tool use, explicit command, or autoRecall).
+    const state = !config.enabled ? "off" : ready ? "ready" : "idle";
     services.status.set(ctx, "equaxis-memory", `Memory ${state}`);
   }
 
@@ -132,6 +134,7 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
     bridge ??= createBridge(ctx);
     try {
       await bridge.start();
+      if (!ready) trace(ctx, "memory_started", { rootDir: config.rootDir });
       ready = true;
       updateStatus(ctx);
       return bridge;
@@ -370,41 +373,23 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
     config = services.config.memory as MemoryConfig;
     lastRecordedPromptKey = "";
     lastRecordedAssistant = "";
-    if (!config.enabled) {
-      ready = false;
-      updateStatus(ctx);
-      return;
-    }
-    bridge = createBridge(ctx);
-    try {
-      await bridge.start();
-      ready = true;
-      trace(ctx, "memory_started", { rootDir: config.rootDir });
-    } catch (error) {
-      ready = false;
-      trace(ctx, "memory_unavailable", { error: String(error) });
-      ctx.ui.notify(
-        `Equaxis Memory unavailable: ${String(error)}. Run npm run setup:memory.`,
-        "warning"
-      );
-    }
+    // Memory starts lazily: session start alone must not spawn the Python
+    // bridge. It is started on first memory tool use, an explicit /memory
+    // command, or when autoRecall needs context at agent start.
+    ready = false;
     updateStatus(ctx);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     lastContext = ctx;
     if (!config.enabled) return;
-    let memory: MemoryBridge;
-    try {
-      memory = await ensureBridge(ctx);
-    } catch {
-      return;
-    }
-
     const sessionId = ctx.sessionManager.getSessionId();
     let context = "";
     if (config.autoRecall) {
+      // Only autoRecall needs the bridge up front. Without it, the Python
+      // bridge stays dormant until a memory tool or /memory command is used.
       try {
+        const memory = await ensureBridge(ctx);
         const result = await memory.request("context", {
           session_id: sessionId,
           query: event.prompt,
@@ -422,23 +407,25 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
         lastDiagnostic = String(error);
         trace(ctx, "memory_context_failed", { error: String(error) });
       }
-    }
 
-    const promptKey = `${sessionId}:${ctx.sessionManager.getLeafId() ?? "root"}:${event.prompt}`;
-    if (promptKey !== lastRecordedPromptKey && !containsSecretLikeInput({ content: event.prompt })) {
-      try {
-        await memory.request("record_user", {
-          session_id: sessionId,
-          content: event.prompt.slice(0, config.maxStoredMessageChars)
-        }, { signal: ctx.signal });
-        lastRecordedPromptKey = promptKey;
-        trace(ctx, "memory_user_recorded", { chars: Math.min(event.prompt.length, config.maxStoredMessageChars) });
-      } catch (error) {
-        lastDiagnostic = String(error);
-        trace(ctx, "memory_user_record_failed", { error: String(error) });
+      const promptKey = `${sessionId}:${ctx.sessionManager.getLeafId() ?? "root"}:${event.prompt}`;
+      if (promptKey !== lastRecordedPromptKey && !containsSecretLikeInput({ content: event.prompt })) {
+        try {
+          // ensureBridge is idempotent: the bridge is already running here.
+          const memory = await ensureBridge(ctx);
+          await memory.request("record_user", {
+            session_id: sessionId,
+            content: event.prompt.slice(0, config.maxStoredMessageChars)
+          }, { signal: ctx.signal });
+          lastRecordedPromptKey = promptKey;
+          trace(ctx, "memory_user_recorded", { chars: Math.min(event.prompt.length, config.maxStoredMessageChars) });
+        } catch (error) {
+          lastDiagnostic = String(error);
+          trace(ctx, "memory_user_record_failed", { error: String(error) });
+        }
+      } else if (promptKey !== lastRecordedPromptKey) {
+        trace(ctx, "memory_user_record_skipped", { reason: "possible_raw_secret" });
       }
-    } else if (promptKey !== lastRecordedPromptKey) {
-      trace(ctx, "memory_user_record_skipped", { reason: "possible_raw_secret" });
     }
 
     const memoryInstructions = `

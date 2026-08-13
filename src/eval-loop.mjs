@@ -172,6 +172,56 @@ export function collectEvalEventsFromTrace(tracePath, { limit = 10000 } = {}) {
   return events;
 }
 
+/**
+ * Read eval outcomes from every rotated reliability trace file under
+ * traceDir (traces.jsonl plus rotated traces.N.jsonl archives), oldest
+ * archives first. This is the authoritative full-history source: the
+ * runtime harness writes only here (eval_outcome_recorded), never to the
+ * offline eval ledger.
+ */
+export function collectEvalEventsFromTraceDir(projectRoot, traceDir = ".pi/runtime", { maxFiles = 3, limit = 10000 } = {}) {
+  const root = path.resolve(projectRoot, traceDir);
+  const paths = [];
+  for (let index = Number(maxFiles) - 1; index >= 1; index -= 1) {
+    paths.push(path.join(root, "traces." + index + ".jsonl"));
+  }
+  paths.push(path.join(root, "traces.jsonl"));
+  const events = [];
+  for (const tracePath of paths) {
+    for (const event of collectEvalEventsFromTrace(tracePath, { limit: limit - events.length })) {
+      events.push(event);
+      if (events.length >= limit) break;
+    }
+    if (events.length >= limit) break;
+  }
+  return events;
+}
+
+/**
+ * Build an EvalLoop whose events come from the trace stream, merged with the
+ * offline eval ledger (events.jsonl: manual records, candidates, decisions).
+ * Ledger eval_event rows whose traceId already exists in the trace stream are
+ * dropped so legacy duplicated rows do not double-count outcomes.
+ */
+export function createEvalLoopFromTrace(options = {}) {
+  const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
+  const traceEvents = collectEvalEventsFromTraceDir(
+    projectRoot,
+    options.traceDir ?? ".pi/runtime",
+    { maxFiles: options.maxFiles ?? 3, limit: options.limit ?? 10000 }
+  );
+  const loop = new EvalLoop({
+    persist: options.persist !== false,
+    projectRoot,
+    rootDir: options.rootDir ?? ".pi/runtime/eval-loop",
+    trace: options.trace
+  });
+  const traceIds = new Set(traceEvents.map((event) => event.traceId).filter(Boolean));
+  loop.events = loop.events.filter((event) => !event.traceId || !traceIds.has(event.traceId));
+  for (const event of traceEvents) loop.events.push(event);
+  return loop;
+}
+
 export class EvalLoop {
   constructor(options = {}) {
     this.events = [];

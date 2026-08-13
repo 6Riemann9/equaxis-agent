@@ -6,6 +6,7 @@ import { checkExtensionContracts } from "./extension-compat.mjs";
 import { loadEquaxisConfig } from "./equaxis-config.mjs";
 import { loadMemoryConfig } from "./memory-config.mjs";
 import { describeRuntimeIsolation } from "./runtime-isolation.mjs";
+import { isRuntimeProfile, profileExtensionSelection } from "./runtime-profiles.mjs";
 import { describeSubagentPersistence } from "./subagent-state-store.mjs";
 import { discoverProtocolAdapters, summarizeProtocolAdapters } from "./protocol-adapters.mjs";
 
@@ -110,6 +111,19 @@ function checkWorkspaceAccess(checks, cwd) {
   }
 }
 
+function checkRuntimeProfile(checks, unifiedConfig) {
+  const profile = unifiedConfig?.runtime?.profile;
+  if (!isRuntimeProfile(profile)) {
+    checks.push(check("Runtime profile", false, `unknown profile: ${String(profile)}`));
+    return;
+  }
+  const selection = profileExtensionSelection(profile, unifiedConfig?.extensions ?? {});
+  const detail = selection === null
+    ? `${profile} (no Equaxis extensions loaded)`
+    : `${profile} (${selection.enabled.length ? selection.enabled.join(", ") : "all manifest extensions"})`;
+  checks.push(check("Runtime profile", true, detail));
+}
+
 function checkProtocolTools(checks, extensionContracts, unifiedConfig) {
   if (!extensionContracts?.ok) {
     checks.push(check("Protocol tools", false, "skipped because extension contracts failed"));
@@ -143,6 +157,7 @@ export function runStartupPreflight(options = {}) {
   try {
     unifiedConfig = loadEquaxisConfig(projectRoot);
     checks.push(check("Unified config", true, `schema=${unifiedConfig.schemaVersion}; profile=${unifiedConfig.runtime.profile}`));
+    checkRuntimeProfile(checks, unifiedConfig);
     extensionContracts = checkExtensionContractsAtRoot(checks, projectRoot, unifiedConfig);
   } catch (error) {
     checks.push(check("Unified config", false, String(error.message ?? error)));
