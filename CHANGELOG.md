@@ -2,6 +2,11 @@
 
 All notable changes to Equaxis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [0.3.1] - 2026-08-13
+
+### Changed
+- README: removed the Default Provider section (provider configuration lives in .pi/settings.json, .pi/extensions/provider.ts and docs/PROVIDER.md).
+
 ## [0.3.0] - 2026-08-13
 
 ### Added
