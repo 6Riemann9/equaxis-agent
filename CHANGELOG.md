@@ -5,6 +5,14 @@ All notable changes to Equaxis are documented here. Format follows [Keep a Chang
 ## [0.3.2] - 2026-08-14
 
 ### Added
+- Restricted shell allowlist (reliability.commandAllowlist): bash calls are LOW only for known read-only commands (ls/cat/grep/git status/…); unrecognized executables and command chains default to MEDIUM so they are audited instead of silently passing as read-only. Configurable via extraCommands.
+- Worktree sandbox for subagents (subagents.isolation.worktree): when enabled, subagents run in a detached git worktree under .pi/runtime/worktrees and it is force-removed afterwards; falls back to the normal cwd when not a git repository.
+- AST rename post-apply verification: ast_rename accepts verify:"tsc" to run a type check after applying and report the result.
+- Real adapter regression tests (tests/protocol-regression.real.test.mjs): debugpy (DAP over TCP) and typescript-language-server (LSP over stdio) are exercised against real processes; the transport gained connectProtocolSocket for TCP adapters. typescript-language-server added as a devDependency.
+- (Security note) npm audit: 2 high + 1 moderate advisories remain, all inside the pinned @earendil-works/pi-coding-agent@0.83.0 nested deps (brace-expansion, undici). Fixing them requires the 0.84.x upgrade, which is deliberately deferred to keep the extension contract pin (<0.84.0); revisit during the Pi upgrade.
+
+
+### Added
 - Unified process cleanup protocol (`src/process-cleanup.mjs`): platform-aware process-tree kill (taskkill /T /F on Windows, process-group SIGKILL elsewhere), a registry of spawned children swept on session shutdown (`process_cleanup_swept` trace), and tracked spawning wired into subagents, protocol adapters (LSP/DAP process mode) and the Python memory bridge. Doctor reports the cleanup strategy.
 - Runtime cost brake: session cost summed at turn end; warns at `reliability.costBrake.warnAtFraction` and blocks high-risk calls at `maxSessionCostUsd` until `/equaxis-budget reset` (default 2.0 USD).
 - Structured high-risk approvals: approve / deny / deny-and-rephrase / approve-all-remaining-this-turn (`reliability.approval.denyRephrase`, `batchPerTurn`).

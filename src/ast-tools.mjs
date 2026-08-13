@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -5,6 +6,10 @@ import { hashText } from "./stale-edit.mjs";
 
 const SUPPORTED_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"]);
 const IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".pi", ".equaxis", "dist", "build", "coverage"]);
+
+function defaultRunCommand(command, args, options) {
+  return spawnSync(command, args, { cwd: options?.cwd, encoding: "utf8", windowsHide: true, timeout: 60_000 });
+}
 
 function assertWorkspacePath(cwd, absolutePath, label) {
   const relativePath = path.relative(cwd, absolutePath);
@@ -144,5 +149,13 @@ export function renameAst(input, options = {}) {
     for (const file of files) writeFileAtomic(file.filePath, file.updatedText);
   }
   const preview = Object.fromEntries(files.map((file) => [file.path, file.updatedText.slice(0, 4000)]));
-  return { path: relative(cwd, target.absolutePath), scope, symbol: rename.displayName ?? null, newName, changed: files.some((file) => file.editCount > 0), applied: input.apply === true, expectedHash: hashes[relative(cwd, target.absolutePath)] ?? hashText(target.text), expectedHashes: hashes, editCount: files.reduce((sum, file) => sum + file.editCount, 0), files: files.map(({ filePath, updatedText, ...file }) => file), edits: files.find((file) => file.filePath === target.absolutePath)?.edits ?? [], preview: preview[relative(cwd, target.absolutePath)] ?? "", previews: preview };
+  const result = { path: relative(cwd, target.absolutePath), scope, symbol: rename.displayName ?? null, newName, changed: files.some((file) => file.editCount > 0), applied: input.apply === true, expectedHash: hashes[relative(cwd, target.absolutePath)] ?? hashText(target.text), expectedHashes: hashes, editCount: files.reduce((sum, file) => sum + file.editCount, 0), files: files.map(({ filePath, updatedText, ...file }) => file), edits: files.find((file) => file.filePath === target.absolutePath)?.edits ?? [], preview: preview[relative(cwd, target.absolutePath)] ?? "", previews: preview };
+  // Optional post-apply verification: run a type check after a workspace
+  // rename so cross-file breakage surfaces immediately. Opt-in via verify.
+  if (input.apply === true && input.verify === "tsc") {
+    const run = options.runCommand ?? defaultRunCommand;
+    const outcome = run("npx", ["tsc", "--noEmit"], { cwd });
+    result.verify = { kind: "tsc", ok: outcome.status === 0, output: String(outcome.stderr || outcome.stdout || "").trim().slice(0, 2000) };
+  }
+  return result;
 }

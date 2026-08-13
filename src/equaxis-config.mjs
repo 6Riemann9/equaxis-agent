@@ -43,7 +43,8 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     },
     limits: { maxToolCallsPerTurn: 30, maxHighRiskCallsPerTurn: 3, maxRepairAttemptsPerError: 2, maxRepeatedCalls: 3 },
     toolRouting: { enabled: true, maxCandidates: 5 },
-    costBrake: { enabled: true, maxSessionCostUsd: 2.0, warnAtFraction: 0.8 }
+    costBrake: { enabled: true, maxSessionCostUsd: 2.0, warnAtFraction: 0.8 },
+    commandAllowlist: { enabled: true, extraCommands: [] }
   },
   advisor: {
     enabled: false,
@@ -112,7 +113,8 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
       enabled: true,
       scrubEnv: true,
       outputRoot: ".pi/runtime/isolated",
-      extraEnvAllowlist: []
+      extraEnvAllowlist: [],
+      worktree: false
     }
   }
 });
@@ -352,6 +354,11 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertRecord(config.reliability.toolRouting, configPath, "reliability.toolRouting");
   assertBoolean(config.reliability.toolRouting.enabled, configPath, "reliability.toolRouting.enabled");
   assertInteger(config.reliability.toolRouting.maxCandidates, configPath, "reliability.toolRouting.maxCandidates", 1, 50);
+  assertRecord(config.reliability.commandAllowlist, configPath, "reliability.commandAllowlist");
+  assertBoolean(config.reliability.commandAllowlist.enabled, configPath, "reliability.commandAllowlist.enabled");
+  if (!Array.isArray(config.reliability.commandAllowlist.extraCommands) || config.reliability.commandAllowlist.extraCommands.some((item) => typeof item !== "string" || !item.trim())) {
+    throw configError(configPath, "reliability.commandAllowlist.extraCommands", "must be an array of non-empty strings");
+  }
   assertRecord(config.reliability.costBrake, configPath, "reliability.costBrake");
   assertBoolean(config.reliability.costBrake.enabled, configPath, "reliability.costBrake.enabled");
   if (!Number.isFinite(config.reliability.costBrake.maxSessionCostUsd) || config.reliability.costBrake.maxSessionCostUsd < 0.01) {
@@ -451,6 +458,7 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertRecord(config.subagents.isolation, configPath, "subagents.isolation");
   assertBoolean(config.subagents.isolation.enabled, configPath, "subagents.isolation.enabled");
   assertBoolean(config.subagents.isolation.scrubEnv, configPath, "subagents.isolation.scrubEnv");
+  assertBoolean(config.subagents.isolation.worktree, configPath, "subagents.isolation.worktree");
   assertLocalPath(config.subagents.isolation.outputRoot, configPath, "subagents.isolation.outputRoot");
   if (!Array.isArray(config.subagents.isolation.extraEnvAllowlist) || config.subagents.isolation.extraEnvAllowlist.some((item) => typeof item !== "string" || !item.trim())) {
     throw configError(configPath, "subagents.isolation.extraEnvAllowlist", "must be an array of non-empty strings");

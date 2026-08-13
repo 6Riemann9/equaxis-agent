@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { killProcessTree, spawnTracked } from "./process-cleanup.mjs";
 import { prepareRuntimeIsolation } from "./runtime-isolation.mjs";
+import { prepareWorktreeSandbox, removeWorktree } from "./worktree-sandbox.mjs";
 
 /**
  * Real subagent executor that runs Pi in JSON mode as a subprocess per agent.
@@ -42,21 +43,30 @@ export function createPiJsonExecutor(options = {}) {
   return async function piJsonExecutor(task, { signal } = {}) {
     if (!task?.prompt) throw new Error("subagent prompt is required");
     const args = [piEntry, ...baseArgs, "--mode", "json", task.prompt];
-    return new Promise((resolve, reject) => {
-      const spawnOptions = isolation.enabled === false
-        ? { cwd, env: baseEnv }
-        : prepareRuntimeIsolation({
-            projectRoot,
-            cwd,
-            env: baseEnv,
-            kind: "subagent",
-            id: task.id,
-            outputRoot: isolation.outputRoot ?? path.join(".pi", "runtime", "isolated"),
-            scrubEnv: isolation.scrubEnv,
-            extraEnvAllowlist: isolation.extraEnvAllowlist,
-            extraEnv: isolation.extraEnv,
-            allowSecretExtraEnv: isolation.allowSecretExtraEnv
-          });
+    // Optional worktree sandbox: run the subagent in a detached git worktree
+    // when isolation.worktree is enabled. Falls back to the normal cwd when
+    // the project is not a git repository or git fails.
+    let worktreeCwd = null;
+    if (isolation.worktree === true) {
+      worktreeCwd = await prepareWorktreeSandbox(projectRoot, task.id, { execImpl: options.gitImpl });
+    }
+    const runCwd = worktreeCwd ?? cwd;
+    try {
+      return await new Promise((resolve, reject) => {
+        const spawnOptions = isolation.enabled === false
+          ? { cwd: runCwd, env: baseEnv }
+          : prepareRuntimeIsolation({
+              projectRoot,
+              cwd: runCwd,
+              env: baseEnv,
+              kind: "subagent",
+              id: task.id,
+              outputRoot: isolation.outputRoot ?? path.join(".pi", "runtime", "isolated"),
+              scrubEnv: isolation.scrubEnv,
+              extraEnvAllowlist: isolation.extraEnvAllowlist,
+              extraEnv: isolation.extraEnv,
+              allowSecretExtraEnv: isolation.allowSecretExtraEnv
+            });
       const child = spawnTracked({
         command: nodePath,
         args,
@@ -87,12 +97,15 @@ export function createPiJsonExecutor(options = {}) {
         const detail = artifact ? ` (full output: ${artifact})` : "";
         done(new Error(`pi json subprocess exited ${code}: ${tail}${detail}`));
       });
-      if (signal) {
-        signal.addEventListener("abort", () => {
-          if (child?.pid) void killProcessTree(child.pid, { signal: "SIGTERM" });
-          done(new Error("cancelled"));
-        }, { once: true });
-      }
-    });
+        if (signal) {
+          signal.addEventListener("abort", () => {
+            if (child?.pid) void killProcessTree(child.pid, { signal: "SIGTERM" });
+            done(new Error("cancelled"));
+          }, { once: true });
+        }
+      });
+    } finally {
+      if (worktreeCwd) await removeWorktree(projectRoot, task.id, { execImpl: options.gitImpl });
+    }
   };
 }

@@ -62,6 +62,10 @@
       "maxSessionCostUsd": 2.0,
       "warnAtFraction": 0.8
     },
+    "commandAllowlist": {
+      "enabled": true,
+      "extraCommands": []
+    },
     "toolRouting": {
       "enabled": true,
       "maxCandidates": 5
@@ -119,7 +123,8 @@
       "enabled": true,
       "scrubEnv": true,
       "outputRoot": ".pi/runtime/isolated",
-      "extraEnvAllowlist": []
+      "extraEnvAllowlist": [],
+      "worktree": false
     }
   },
   "evaluation": {

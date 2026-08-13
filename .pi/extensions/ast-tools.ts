@@ -49,7 +49,8 @@ export default function astToolsExtension(pi: ExtensionAPI): void {
       apply: Type.Optional(Type.Boolean({ default: false, description: "Write the rename; requires expectedHash" })),
       scope: ScopeField,
       expectedHash: Type.Optional(Type.String({ minLength: 64, maxLength: 64, description: "SHA-256 returned by a fresh single-file preview" })),
-      expectedHashes: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Per-file SHA-256 hashes returned by a fresh workspace preview" }))
+      expectedHashes: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Per-file SHA-256 hashes returned by a fresh workspace preview" })),
+      verify: Type.Optional(Type.Union([Type.Literal("tsc")], { description: "Run a TypeScript type check after applying the rename and report the result" }))
     }),
     async execute(_toolCallId, params) {
       const result = renameAst(params, { cwd: context?.cwd ?? process.cwd() });

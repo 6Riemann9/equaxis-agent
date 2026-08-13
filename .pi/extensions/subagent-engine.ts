@@ -20,6 +20,13 @@ interface SubagentEngineConfig {
     enabled?: boolean;
     rootDir?: string;
   };
+  isolation?: {
+    enabled?: boolean;
+    scrubEnv?: boolean;
+    outputRoot?: string;
+    extraEnvAllowlist?: string[];
+    worktree?: boolean;
+  };
 }
 
 const resultSchemaParameter = Type.Optional(Type.Object({}, {
@@ -54,7 +61,14 @@ export default function subagentEngine(pi: ExtensionAPI): void {
     stateStore,
     executor: createPiJsonExecutor({
       piEntry: config?.piEntry || defaultPiEntry,
-      args: config?.jsonArgs ?? []
+      args: config?.jsonArgs ?? [],
+      isolation: {
+        enabled: config?.isolation?.enabled !== false,
+        scrubEnv: config?.isolation?.scrubEnv,
+        outputRoot: config?.isolation?.outputRoot,
+        extraEnvAllowlist: config?.isolation?.extraEnvAllowlist,
+        worktree: config?.isolation?.worktree === true
+      }
     }),
     trace: (event: string, data: Record<string, unknown>) => services.trace.record({} as ExtensionContext, `subagent_${event}`, data)
   });

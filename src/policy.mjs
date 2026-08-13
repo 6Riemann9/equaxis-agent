@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import { isAllowlistedCommand } from "./shell-allowlist.mjs";
 
 export const RISK = Object.freeze({ LOW: "low", MEDIUM: "medium", HIGH: "high", BLOCKED: "blocked" });
 
@@ -22,12 +23,17 @@ const MEDIUM_RISK_BASH = [
   { pattern: /\b(docker|kubectl|terraform)\b/i, reason: "infrastructure command" }
 ];
 
-export function classifyBash(command) {
+export function classifyBash(command, options = {}) {
   const high = HIGH_RISK_BASH.find(({ pattern }) => pattern.test(command));
   if (high) return { risk: RISK.HIGH, reason: high.reason };
   const medium = MEDIUM_RISK_BASH.find(({ pattern }) => pattern.test(command));
   if (medium) return { risk: RISK.MEDIUM, reason: medium.reason };
-  return { risk: RISK.LOW, reason: "read-only or low-risk command" };
+  // Restricted-shell rule: LOW only for known read-only commands;
+  // unrecognized executables default to MEDIUM so they are audited.
+  if (options.allowlist !== false && isAllowlistedCommand(command, options.extraCommands)) {
+    return { risk: RISK.LOW, reason: "read-only or low-risk command" };
+  }
+  return { risk: RISK.MEDIUM, reason: "command not in the safe allowlist" };
 }
 
 export function normalizeForPolicy(value) {
@@ -202,7 +208,10 @@ export function classifyToolCall(toolName, input, config, cwd) {
     if (protectedPattern) {
       return { risk: RISK.BLOCKED, reason: `shell write targets protected path: ${protectedPattern}`, approval: false };
     }
-    const result = classifyBash(command);
+    const result = classifyBash(command, {
+      allowlist: config.commandAllowlist?.enabled !== false,
+      extraCommands: config.commandAllowlist?.extraCommands ?? []
+    });
     return { ...result, approval: result.risk === RISK.HIGH && config.approval.highRiskBash };
   }
 

@@ -1,3 +1,4 @@
+import net from "node:net";
 import { killProcessTree, spawnTracked } from "./process-cleanup.mjs";
 
 function parseHeaders(text) {
@@ -117,4 +118,23 @@ export function spawnProtocolProcess(command, args = [], options = {}) {
     }
   };
   return { process: child, transport, close };
+}
+
+/**
+ * Connect to an external protocol adapter over TCP (e.g. debugpy.adapter,
+ * which is a TCP server rather than a stdio process). Returns the same
+ * transport interface as spawnProtocolProcess so callers are interchangeable.
+ */
+export function connectProtocolSocket(host, port, options = {}) {
+  const socket = net.createConnection({ host, port });
+  const transport = createStdioTransport({
+    input: socket,
+    output: socket,
+    error: undefined
+  }, { destroyOutput: true });
+  const close = () => {
+    transport.close();
+    if (!socket.destroyed) socket.destroy();
+  };
+  return { socket, transport, close, kind: "tcp" };
 }

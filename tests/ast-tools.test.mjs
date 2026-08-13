@@ -70,3 +70,33 @@ test("rejects workspace AST apply when any affected file changed", (t) => {
   fs.appendFileSync(path.join(root, "b.ts"), "\n", "utf8");
   assert.throws(() => renameAst({ path: "a.ts", line: 0, character: 13, newName: "renamed", scope: "workspace", apply: true, expectedHashes: preview.expectedHashes }, { cwd: root }), /b\.ts|changed since preview/);
 });
+test("workspace apply can verify with tsc after applying", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-ast-verify-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "a.ts"), "export const value = 1;\n", "utf8");
+  fs.writeFileSync(path.join(root, "b.ts"), "import { value } from './a';\nconsole.log(value);\n", "utf8");
+  const preview = renameAst({ path: "a.ts", line: 0, character: 13, newName: "renamed", scope: "workspace" }, { cwd: root });
+  const applied = renameAst({
+    path: "a.ts", line: 0, character: 13, newName: "renamed", scope: "workspace",
+    apply: true, expectedHashes: preview.expectedHashes, verify: "tsc"
+  }, {
+    cwd: root,
+    runCommand: () => ({ status: 0, stdout: "", stderr: "" })
+  });
+  assert.equal(applied.applied, true);
+  assert.deepEqual(applied.verify, { kind: "tsc", ok: true, output: "" });
+});
+
+test("verify reports a failing type check without blocking the apply", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-ast-verify-fail-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "a.ts"), "export const value = 1;\n", "utf8");
+  const preview = renameAst({ path: "a.ts", line: 0, character: 13, newName: "renamed" }, { cwd: root });
+  const applied = renameAst({ path: "a.ts", line: 0, character: 13, newName: "renamed", apply: true, expectedHash: preview.expectedHash, verify: "tsc" }, {
+    cwd: root,
+    runCommand: () => ({ status: 1, stdout: "", stderr: "error TS2304: cannot find name 'renamed'" })
+  });
+  assert.equal(applied.applied, true, "apply still lands");
+  assert.equal(applied.verify.ok, false);
+  assert.match(applied.verify.output, /TS2304/);
+});

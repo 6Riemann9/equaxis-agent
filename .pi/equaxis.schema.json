@@ -312,6 +312,26 @@
               "maximum": 1
             }
           }
+        },
+        "commandAllowlist": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "extraCommands"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "extraCommands": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
         }
       }
     },
@@ -623,6 +643,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "worktree": {
+              "type": "boolean"
             }
           }
         }

@@ -51,6 +51,10 @@ interface HarnessConfig {
     maxSessionCostUsd: number;
     warnAtFraction: number;
   };
+  commandAllowlist: {
+    enabled: boolean;
+    extraCommands: string[];
+  };
 }
 
 interface MissionState {
