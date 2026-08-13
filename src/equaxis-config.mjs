@@ -98,8 +98,8 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     piEntry: "",
     jsonArgs: [],
     budgets: {
-      timeoutMs: null,
-      maxRetries: 0
+      timeoutMs: 60000,
+      maxRetries: 1
     },
     persistence: {
       enabled: true,

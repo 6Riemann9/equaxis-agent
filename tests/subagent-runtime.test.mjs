@@ -64,7 +64,7 @@ test("fails subagents whose result violates schema", async () => {
   });
   const result = await runtime.wait("schema");
   assert.equal(result.status, "failed");
-  assert.match(result.error, /missing required result field: score/);
+  assert.match(result.error, /result does not match schema: must have required properties score/);
 });
 
 test("retries failed subagents within their retry budget", async () => {
@@ -211,5 +211,45 @@ test("cancels a blocked subagent waiting on dependencies", async () => {
   assert.equal(runtime.cancel("blocked", "drop").status, "cancelled");
   assert.equal((await runtime.wait("blocked")).error, "drop");
   runtime.cancel("running", "stop");
+test("TypeBox result schema validates nested arrays and enums", async () => {
+  const runtime = new SubagentRuntime({ executor: async () => ({ ok: true, rows: [{ id: 1 }], mode: "x" }) });
+  runtime.spawn({
+    id: "nested-schema",
+    prompt: "return nested",
+    schema: {
+      type: "object",
+      required: ["rows", "mode"],
+      properties: {
+        rows: { type: "array", items: { type: "object", required: ["id"], properties: { id: { type: "string" } } } },
+        mode: { enum: ["a", "b"] }
+      }
+    }
+  });
+  const result = await runtime.wait("nested-schema");
+  assert.equal(result.status, "failed");
+  assert.match(result.error, /result does not match schema/);
+  const runtimeOk = new SubagentRuntime({ executor: async () => ({ rows: [{ id: "x" }], mode: "b" }) });
+  runtimeOk.spawn({ id: "nested-ok", prompt: "ok", schema: { type: "object", required: ["rows", "mode"], properties: { rows: { type: "array", items: { type: "object", required: ["id"], properties: { id: { type: "string" } } } }, mode: { enum: ["a", "b"] } } } });
+  const ok = await runtimeOk.wait("nested-ok");
+  assert.equal(ok.status, "completed");
+});
+
+test("timeout is terminal even with a retry budget", async () => {
+  let attempts = 0;
+  const runtime = new SubagentRuntime({
+    defaultMaxRetries: 3,
+    executor: async (_task, { signal }) => {
+      attempts += 1;
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    }
+  });
+  runtime.spawn({ id: "terminal-timeout", prompt: "slow", timeoutMs: 100 });
+  const result = await runtime.wait("terminal-timeout");
+  assert.equal(result.status, "failed");
+  assert.equal(result.attempts, 1, "timeouts must not retry");
+  assert.match(result.error, /timed out after 100ms/);
+});
   assert.equal((await runtime.wait("running")).status, "cancelled");
 });

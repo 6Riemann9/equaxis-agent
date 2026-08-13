@@ -5,14 +5,17 @@ import type {
   ToolResultEvent
 } from "@earendil-works/pi-coding-agent";
 import { createEvalEvent } from "../../src/eval-loop.mjs";
+import fs from "node:fs";
+import path from "node:path";
 import {
+  approvalRoot,
   cleanupApprovals,
   readApprovalDecision,
   writeApprovalDecision as persistApprovalDecision,
   writeApprovalRequest as persistApprovalRequest
 } from "../../src/approval-queue.mjs";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
-import { RISK, classifyToolCall, shouldBlockForLimits, validateToolInput } from "../../src/policy.mjs";
+import { RISK, classifyToolCall, containsSecretLikeInput, shouldBlockForLimits, validateToolInput } from "../../src/policy.mjs";
 import { validateEditFreshness } from "../../src/stale-edit.mjs";
 import { registerRepairAttempt, validationFeedback } from "../../src/tool-repair.mjs";
 
@@ -39,6 +42,14 @@ interface HarnessConfig {
   };
 }
 
+interface MissionState {
+  objective: string;
+  startedAt: string;
+  turns: number;
+  lastOutcome: "ok" | "failed" | "none";
+  status: "idle" | "active" | "complete";
+}
+
 interface HarnessState {
   mode: HarnessMode;
   phase: Phase;
@@ -50,6 +61,11 @@ interface HarnessState {
   toolCallsThisTurn: number;
   highRiskCallsThisTurn: number;
   lastRisk: string;
+  // Lightweight mission tracking: the current objective, its progress and
+  // outcome. This is the harness-side analog of a task/goal state; it is
+  // persisted with the session so forks and restarts keep the picture.
+  mission: MissionState;
+  failedCallsAtTurnStart: number;
 }
 
 interface PendingTool {
@@ -57,6 +73,7 @@ interface PendingTool {
   risk: string;
   reason: string;
   capability: string;
+  toolName: string;
 }
 
 interface ActiveModel {
@@ -64,7 +81,7 @@ interface ActiveModel {
   id: string;
 }
 
-interface PersistedState extends Omit<HarnessState, "toolCallsThisTurn" | "highRiskCallsThisTurn"> {}
+interface PersistedState extends Omit<HarnessState, "toolCallsThisTurn" | "highRiskCallsThisTurn" | "failedCallsAtTurnStart"> {}
 
 const STATE_ENTRY = "equaxis-reliability-state";
 const STATUS_KEY = "equaxis";
@@ -92,7 +109,9 @@ function initialState(mode: HarnessMode): HarnessState {
     failedCalls: 0,
     toolCallsThisTurn: 0,
     highRiskCallsThisTurn: 0,
-    lastRisk: RISK.LOW
+    lastRisk: RISK.LOW,
+    mission: { objective: "", startedAt: "", turns: 0, lastOutcome: "none", status: "idle" },
+    failedCallsAtTurnStart: 0
   };
 }
 
@@ -146,7 +165,8 @@ function persisted(state: HarnessState): PersistedState {
     blockedCalls: state.blockedCalls,
     approvedCalls: state.approvedCalls,
     failedCalls: state.failedCalls,
-    lastRisk: state.lastRisk
+    lastRisk: state.lastRisk,
+    mission: state.mission
   };
 }
 
@@ -199,19 +219,43 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     }
   }
 
-  /** Poll the web decision file until it resolves, the timeout elapses, or the signal aborts. */
+  /**
+   * Wait for a web approval decision. Event-driven via fs.watch on the
+   * decisions directory (wakes the waiter on file changes) with a bounded
+   * poll fallback for platforms where fs.watch is unreliable. Resolves on
+   * decision, timeout, or abort.
+   */
   async function waitForWebApproval(cfg: HarnessConfig, requestId: string, signal?: AbortSignal): Promise<"approve" | "deny" | null> {
     const web = cfg.approval?.webQueue;
     if (!web?.enabled) return null;
     const timeoutMs = Math.max(1000, web.timeoutMs ?? 60_000);
     const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (signal?.aborted) return null;
-      const decision = readApprovalDecision(approvalProjectRoot(), cfg.traceDir, requestId);
-      if (decision?.decision === "approve" || decision?.decision === "deny") return decision.decision;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    const decisionsDir = path.join(approvalRoot(approvalProjectRoot(), cfg.traceDir), "decisions");
+    let watcher: fs.FSWatcher | null = null;
+    let wake: (() => void) | null = null;
+    const sleep = (ms: number) => new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      wake = () => { clearTimeout(timer); resolve(); };
+    });
+    try {
+      fs.mkdirSync(decisionsDir, { recursive: true });
+      watcher = fs.watch(decisionsDir, { persistent: false }, () => wake?.());
+    } catch {
+      watcher = null; // fs.watch unavailable: fall back to plain polling
     }
-    return null;
+    try {
+      // With a watcher we are woken on changes; poll only as a safety net.
+      const pollMs = watcher ? 5000 : 1000;
+      while (Date.now() < deadline) {
+        if (signal?.aborted) return null;
+        const decision = readApprovalDecision(approvalProjectRoot(), cfg.traceDir, requestId);
+        if (decision?.decision === "approve" || decision?.decision === "deny") return decision.decision;
+        await sleep(pollMs);
+      }
+      return null;
+    } finally {
+      watcher?.close();
+    }
   }
 
   function updateStatus(ctx: ExtensionContext): void {
@@ -244,7 +288,10 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       mode: restoredMode,
       phase: "idle",
       toolCallsThisTurn: 0,
-      highRiskCallsThisTurn: 0
+      highRiskCallsThisTurn: 0,
+      failedCallsAtTurnStart: 0,
+      // Snapshots from before mission tracking lack the field; keep a safe default.
+      mission: latest.data.mission ?? { objective: "", startedAt: "", turns: 0, lastOutcome: "none", status: "idle" }
     };
   }
 
@@ -287,6 +334,16 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event, ctx) => {
     trace(ctx, "agent_requested", { promptLength: event.prompt.length });
+    // Track the current objective as a lightweight mission so long-running
+    // work keeps a progress picture across turns and forks.
+    if (!containsSecretLikeInput({ content: event.prompt })) {
+      const objective = event.prompt.trim().slice(0, 160);
+      if (objective && objective !== state.mission.objective) {
+        state.mission.objective = objective;
+        state.mission.startedAt = new Date().toISOString();
+        state.mission.status = "active";
+      }
+    }
     if (state.mode === "off") return;
     return { systemPrompt: `${event.systemPrompt}${RELIABILITY_PROMPT}` };
   });
@@ -300,6 +357,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     state.phase = "planning";
     state.toolCallsThisTurn = 0;
     state.highRiskCallsThisTurn = 0;
+    state.failedCallsAtTurnStart = state.failedCalls;
     repairAttempts.clear();
     trace(ctx, "turn_start", { turnIndex: event.turnIndex });
     updateStatus(ctx);
@@ -448,7 +506,8 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       startedAt: performance.now(),
       risk: classification.risk,
       reason: classification.reason,
-      capability: capabilityForTool(event.toolName)
+      capability: capabilityForTool(event.toolName),
+      toolName: event.toolName
     });
     trace(ctx, state.mode === "audit" && (policyBlocked || limitReason) ? "tool_audit_violation" : "tool_allowed", {
       ...decision,
@@ -490,7 +549,21 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
 
   pi.on("turn_end", async (event, ctx) => {
     state.phase = "complete";
-    trace(ctx, "turn_end", { turnIndex: event.turnIndex, evaluation: evalSnapshot() });
+    // Tools that never delivered a tool_result (killed, timed out, aborted)
+    // would otherwise leak in the pending map; report and drop them so the
+    // next turn starts with a clean slate.
+    for (const [toolCallId, call] of pending) {
+      trace(ctx, "tool_pending_dropped", {
+        toolCallId,
+        toolName: call.toolName,
+        risk: call.risk,
+        reason: "no tool_result before turn end"
+      });
+    }
+    pending.clear();
+    state.mission.turns += 1;
+    state.mission.lastOutcome = state.failedCalls > state.failedCallsAtTurnStart ? "failed" : "ok";
+    trace(ctx, "turn_end", { turnIndex: event.turnIndex, evaluation: evalSnapshot(), mission: state.mission });
     saveState();
     updateStatus(ctx);
   });
@@ -561,5 +634,20 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   pi.registerCommand("equaxis-eval", {
     description: "Show the current reliability evaluation snapshot",
     handler: async (_args, ctx) => ctx.ui.notify(JSON.stringify({ reliability: evalSnapshot() }), "info")
+  });
+
+  pi.registerCommand("equaxis-mission", {
+    description: "Show the current mission objective and progress",
+    handler: async (_args, ctx) => {
+      const mission = state.mission;
+      if (!mission?.objective) {
+        ctx.ui.notify("No mission tracked yet; start a new task to record one.", "info");
+        return;
+      }
+      ctx.ui.notify(
+        `Mission: ${mission.objective}\nstatus=${mission.status}; turns=${mission.turns}; lastOutcome=${mission.lastOutcome}; startedAt=${mission.startedAt}`,
+        "info"
+      );
+    }
   });
 }

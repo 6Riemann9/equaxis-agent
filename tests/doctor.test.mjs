@@ -130,7 +130,7 @@ test("doctor checks protocol tool declarations", (t) => {
   );
   assert.equal(
     report.checks.find((item) => item.name === "Subagent budgets").detail,
-    "timeout=none; maxRetries=0"
+    "timeout=60000ms; maxRetries=1"
   );
   assert.equal(
     report.checks.find((item) => item.name === "Subagent persistence").detail,

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { Value } from "typebox/value";
 
 function now() {
   return new Date().toISOString();
@@ -28,19 +29,16 @@ function boundedInteger(value, fallback, { min, max, field }) {
 
 function validateResultSchema(value, schema) {
   if (!schema) return null;
-  if (schema.type === "object" && (!value || typeof value !== "object" || Array.isArray(value))) {
-    return "result must be an object";
+  // TypeBox's Value library compiles plain JSON Schema objects as well as
+  // TypeBox schemas, covering nested objects, arrays (items), enums and
+  // unions — beyond the flat type/required checks it replaces.
+  try {
+    if (Value.Check(schema, value)) return null;
+    const first = [...Value.Errors(schema, value)][0];
+    return first?.message ? `result does not match schema: ${first.message}` : "result does not match schema";
+  } catch (error) {
+    return `invalid result schema: ${String(error?.message ?? error)}`;
   }
-  for (const key of schema.required ?? []) {
-    if (value?.[key] === undefined) return `missing required result field: ${key}`;
-  }
-  const properties = schema.properties ?? {};
-  for (const [key, definition] of Object.entries(properties)) {
-    if (value?.[key] === undefined || !definition?.type) continue;
-    if (definition.type === "array" && !Array.isArray(value[key])) return `result field ${key} must be array`;
-    if (definition.type !== "array" && typeof value[key] !== definition.type) return `result field ${key} must be ${definition.type}`;
-  }
-  return null;
 }
 
 export class SubagentRuntime {
@@ -48,8 +46,8 @@ export class SubagentRuntime {
     this.executor = options.executor ?? (async () => ({ ok: true }));
     this.maxConcurrent = options.maxConcurrent ?? 2;
     this.trace = options.trace ?? (() => {});
-    this.defaultTimeoutMs = options.defaultTimeoutMs ?? null;
-    this.defaultMaxRetries = options.defaultMaxRetries ?? 0;
+    this.defaultTimeoutMs = options.defaultTimeoutMs ?? 60000;
+    this.defaultMaxRetries = options.defaultMaxRetries ?? 1;
     this.stateStore = options.stateStore ?? null;
     this.tasks = new Map();
     this.inboxes = new Map();
@@ -323,7 +321,10 @@ export class SubagentRuntime {
           this.trace("subagent_completed", { id: task.id, traceId: task.traceId, attempts: task.attempts });
           break;
         } catch (error) {
-          const cancelled = task.controller.signal.aborted || error?.code === "ABORT_ERR";
+          // Timeouts are terminal: the budget is exhausted, so retrying with
+          // the same timeout would only double the wait. Retries are for
+          // transient executor failures, not for budget exhaustion.
+          const cancelled = task.controller.signal.aborted || error?.code === "ABORT_ERR" || error?.code === "TIMEOUT";
           if (cancelled || task.attempts > task.maxRetries) throw error;
           task.error = String(error?.message ?? error);
           this.trace("subagent_retry", { id: task.id, traceId: task.traceId, attempt: task.attempts, error: task.error });

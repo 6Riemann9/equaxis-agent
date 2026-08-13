@@ -135,6 +135,7 @@ Inside the Pi TUI:
 | `/equaxis-policy` | Show protected paths and call limits |
 | `/equaxis-trace` | Show trace file location |
 | `/equaxis-eval` | Show lightweight evaluation counters |
+| `/equaxis-mission` | Show the current mission objective, status, turns and last outcome |
 | `/memory` | Show memory status |
 | `/memory-search <query>` | Search long-term memory; tool UX also exposes `recall`, `retain`, `learn`, and `memory_edit` |
 | `/memory-restart` | Restart the Python memory bridge |

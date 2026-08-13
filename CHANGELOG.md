@@ -6,6 +6,11 @@ All notable changes to Equaxis are documented here. Format follows [Keep a Chang
 
 ### Changed
 - README: removed the Default Provider section (provider configuration lives in .pi/settings.json, .pi/extensions/provider.ts and docs/PROVIDER.md).
+- Subagent budgets now default to a 60s timeout and 1 retry (subagents.budgets); a timeout is terminal and is never auto-retried, retries are reserved for transient executor failures.
+- Subagent result schema validation now uses TypeBox (typebox/value) instead of the flat type/required checks — nested objects, arrays (items), enums and unions are validated with readable errors.
+- Web approvals are event-driven: the harness watches the decisions directory (fs.watch) and wakes immediately on a decision, with bounded polling only as a fallback.
+- New /equaxis-mission command: tracks the current objective, status, turns and last outcome across turns and forks (persisted with the session; secret-like prompts are never recorded).
+- Harness now reports and drops tool calls that never delivered a tool_result before turn end (tool_pending_dropped), instead of leaking them in the pending map.
 
 ## [0.3.0] - 2026-08-13
 
