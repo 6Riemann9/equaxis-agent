@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="619" height="255" viewBox="0 0 619 255" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="619" height="205" viewBox="0 0 619 205" role="img" aria-labelledby="title desc">
   <title id="title">Equaxis pink terminal logo</title>
-  <desc id="desc">A dark terminal style Equaxis wordmark inspired by pixel neon UI, with pink and purple block lettering and a Windows project path underneath.</desc>
+  <desc id="desc">A dark terminal style Equaxis wordmark inspired by pixel neon UI, with pink and purple block lettering.</desc>
   <defs>
     <linearGradient id="pinkStripes" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#ff4fa3"/>
@@ -33,8 +33,8 @@
     </pattern>
   </defs>
 
-  <rect width="619" height="255" fill="#1d1b2b"/>
-  <rect width="619" height="255" fill="url(#scanlines)" opacity="0.28"/>
+  <rect width="619" height="205" fill="#1d1b2b"/>
+  <rect width="619" height="205" fill="url(#scanlines)" opacity="0.28"/>
 
   <g font-family="Consolas, 'Cascadia Mono', 'SFMono-Regular', monospace" font-weight="900" font-size="70" letter-spacing="-7">
     <text x="82" y="128" fill="none" stroke="#2d8cff" stroke-width="2.4" opacity="0.95">EQUAXIS</text>
@@ -62,12 +62,4 @@
     <rect x="504" y="80" width="5" height="5" fill="#ff78bd"/>
     <rect x="462" y="143" width="7" height="7" fill="#d66bff"/>
   </g>
-
-  <text x="93" y="228"
-        font-family="Consolas, 'Cascadia Mono', 'SFMono-Regular', monospace"
-        font-size="23"
-        font-weight="800"
-        fill="#ff78bd">
-    D:\test\mianshi\<tspan fill="#2d8cff">equaxis-agent</tspan>
-  </text>
 </svg>

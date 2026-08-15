@@ -4,7 +4,13 @@
 
 # EQUAXIS · 衡枢
 
-**被治理的 Agent 运行时。内核是 Pi,其余全是护栏。**
+**被治理的 Agent 运行时 · The governed agent runtime**
+
+</div>
+
+> 🇨🇳 **衡枢 Equaxis** — 不重写 Pi:通过 Extension API 在 Pi 内核之上,加确定性护栏、受治理的记忆、代码知识图谱与诚实的评估闭环。
+>
+> 🇬🇧 **Equaxis** — doesn't rewrite [Pi](https://pi.dev/). It rides on `@earendil-works/pi-coding-agent` via the extension API, adding deterministic guardrails, governed memory, a code knowledge graph, and an honest evaluation loop.
 
 ![Node](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=node.js&logoColor=white)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB?logo=python&logoColor=white)
@@ -14,19 +20,20 @@
 
 </div>
 
-Equaxis 不重写 [Pi](https://pi.dev/)——它通过 Extension API 挂在 `@earendil-works/pi-coding-agent` 之上,补上真实工程环境需要的一切:**确定性护栏、受治理的记忆、代码知识图谱、诚实的评估闭环。**
-
-```mermaid
-flowchart LR
-    PI[Pi Kernel 0.83] -->|extension events| EQ[Equaxis Harness]
-    EQ --> POL[Policy · Audit · Approvals]
-    EQ --> MEM[Memory · Chroma + Knowledge Graph]
-    EQ --> CG[CodeGraph · Symbols / Calls / Impact]
-    EQ --> SA[Subagents · DAG · No-Replay Retries]
-    EQ --> EV[Eval Loop · Holdout Gates]
-    EQ --> SK[Skills · Refine Ledger]
-    EQ --> GS[Goal State · Quota · Auto-Wake]
-    EQ --> OB[Trace · Prefix Stability · Pi-Web]
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                        Pi Kernel 0.83                        │
+│               models · sessions · TUI · tools                │
+└──────────────────────────────┬───────────────────────────────┘
+                               │  extension events
+┌──────────────────────────────▼───────────────────────────────┐
+│                      Equaxis Harness                         │
+│            policy · audit · approvals · trace · validation   │
+└───┬───────┬─────────┬──────────┬─────────┬────────┬──────────┘
+    ▼       ▼         ▼          ▼         ▼        ▼
+ Memory  CodeGraph  Subagents    Eval     Skills  GoalState  Pi-Web
+ Chroma   symbols     DAG      holdout   SKILL.md   quota   dashboards
+  + KG    / calls   no-replay    gates   + refine  + wake    + traces
 ```
 
 ## 能力矩阵
