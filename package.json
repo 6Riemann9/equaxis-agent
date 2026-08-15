@@ -99,6 +99,7 @@
     "@earendil-works/pi-coding-agent": "0.83.0",
     "acorn": "^8.17.0",
     "effect": "^2.4.19",
+    "firecrawl": "^4.30.1",
     "typebox": "^1.1.38"
   },
   "devDependencies": {
