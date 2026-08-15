@@ -28,3 +28,24 @@ test("finds protocol advisor and reflection product tools", () => {
   assert.equal(defaultToolCatalog.search("advisor risk recommendation", { limit: 1 })[0].name, "advisor_consult");
   assert.equal(defaultToolCatalog.search("reflect lesson postmortem", { limit: 1 })[0].name, "reflect");
 });
+
+test("contextPreview splits common full descriptions from a name-only tail", () => {
+  const preview = defaultToolCatalog.contextPreview();
+  assert.ok(preview.common.length > 0, "common tools have full descriptions");
+  assert.ok(preview.common.some((tool) => tool.name === "read" && tool.summary.length > 0));
+  assert.ok(preview.tail.includes("dap_probe"), "long-tail tools are name-only");
+  assert.equal(preview.total, defaultToolCatalog.size);
+  // common and tail are disjoint and cover everything
+  const names = new Set([...preview.common.map((t) => t.name), ...preview.tail]);
+  assert.equal(names.size, preview.total);
+});
+
+test("custom catalogs respect the common list", () => {
+  const catalog = createToolCatalog([
+    { name: "read", namespace: "x", summary: "r", keywords: [] },
+    { name: "exotic", namespace: "y", summary: "e", keywords: [] }
+  ]);
+  const preview = catalog.contextPreview();
+  assert.deepEqual(preview.common.map((t) => t.name), ["read"]);
+  assert.deepEqual(preview.tail, ["exotic"]);
+});

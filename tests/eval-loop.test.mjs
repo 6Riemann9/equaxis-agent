@@ -265,3 +265,46 @@ test("decisionWithHoldout requires versionId", () => {
   const loop = new EvalLoop();
   assert.throws(() => loop.decisionWithHoldout({ trainCohort: "train", devCohort: "dev" }), /requires versionId/);
 });
+
+test("capabilityDeltaMatrix reports per-capability version deltas", () => {
+  const loop = new EvalLoop();
+  const record = (capability, version, outcome) => loop.record({
+    provider: "p", modelId: "m", toolName: "read", capability,
+    outcome, version: { kind: "policy", id: version }
+  });
+  // repo-inspect: improved by candidate (0.5 -> 0.9)
+  for (let i = 0; i < 5; i += 1) record("repo-inspect", "v1", "success");
+  for (let i = 0; i < 5; i += 1) record("repo-inspect", "v1", "failure");
+  for (let i = 0; i < 9; i += 1) record("repo-inspect", "v2", "success");
+  for (let i = 0; i < 1; i += 1) record("repo-inspect", "v2", "failure");
+  // edit-apply: regressed by candidate (0.8 -> 0.4)
+  for (let i = 0; i < 8; i += 1) record("edit-apply", "v1", "success");
+  for (let i = 0; i < 2; i += 1) record("edit-apply", "v1", "failure");
+  for (let i = 0; i < 4; i += 1) record("edit-apply", "v2", "success");
+  for (let i = 0; i < 6; i += 1) record("edit-apply", "v2", "failure");
+  // other-version events are ignored
+  record("repo-inspect", "v0", "failure");
+
+  const matrix = loop.capabilityDeltaMatrix({ baselineVersionId: "v1", candidateVersionId: "v2" });
+  assert.equal(matrix.rows.length, 2);
+  const repo = matrix.rows.find((row) => row.capability === "repo-inspect");
+  assert.equal(repo.delta, 0.4);
+  const edit = matrix.rows.find((row) => row.capability === "edit-apply");
+  assert.equal(edit.delta, -0.4);
+  assert.deepEqual(matrix.improved, ["repo-inspect"]);
+  assert.deepEqual(matrix.regressed, ["edit-apply"]);
+  assert.deepEqual(matrix.unchanged, []);
+});
+
+test("capabilityDeltaMatrix honors filters and tolerates empty data", () => {
+  const loop = new EvalLoop();
+  assert.deepEqual(loop.capabilityDeltaMatrix({ baselineVersionId: "a", candidateVersionId: "b" }).rows, []);
+  loop.record({ provider: "p", modelId: "m", toolName: "read", capability: "c", outcome: "success", version: { kind: "policy", id: "a" } });
+  loop.record({ provider: "p", modelId: "m", toolName: "read", capability: "c", outcome: "success", version: { kind: "policy", id: "b" } });
+  const filtered = loop.capabilityDeltaMatrix({ baselineVersionId: "a", candidateVersionId: "b", tool: "write" });
+  assert.equal(filtered.rows.length, 0, "tool filter excludes read events");
+  const full = loop.capabilityDeltaMatrix({ baselineVersionId: "a", candidateVersionId: "b" });
+  assert.equal(full.rows.length, 1);
+  assert.equal(full.rows[0].delta, 0);
+  assert.deepEqual(full.unchanged, ["c"]);
+});

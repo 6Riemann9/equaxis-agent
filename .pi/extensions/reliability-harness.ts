@@ -663,7 +663,8 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
             projectRoot: approvalProjectRoot(),
             id: checkpointIdFor(event.toolCallId),
             files: [target],
-            reason: `${event.toolName} on ${path.relative(approvalProjectRoot(), target)}`
+            reason: `${event.toolName} on ${path.relative(approvalProjectRoot(), target)}`,
+            summary: state.mission?.objective ? `goal: ${state.mission.objective.slice(0, 120)}` : ""
           });
           trace(ctx, "checkpoint_created", { toolCallId: event.toolCallId, file: path.relative(approvalProjectRoot(), target) });
         }
@@ -873,7 +874,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
           ctx.ui.notify("No checkpoints yet (write/edit calls create them).");
           return;
         }
-        const lines = items.map((item) => `${item.id}  ${item.createdAt.slice(0, 19)}  ${item.files.length} file(s)  ${item.reason}`);
+        const lines = items.map((item) => `${item.id}  ${item.createdAt.slice(0, 19)}  ${item.files.length} file(s)  ${item.reason}${item.summary ? `  [${item.summary}]` : ""}`);
         ctx.ui.notify(`Checkpoints (${items.length}):\n${lines.join("\n")}`);
         return;
       }

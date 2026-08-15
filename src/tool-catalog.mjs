@@ -34,11 +34,30 @@ function scoreTool(tool, queryTokens) {
   return score;
 }
 
+const COMMON_TOOL_NAMES = new Set([
+  "read", "write", "edit", "bash", "grep", "glob",
+  "recall", "retain", "memory_search", "learn", "reflect"
+]);
+
 export function createToolCatalog(entries = DEFAULT_TOOLS) {
   const tools = entries.map((entry) => ({ ...entry, keywords: [...entry.keywords] }));
+  const common = tools.filter((tool) => COMMON_TOOL_NAMES.has(tool.name));
+  const tail = tools.filter((tool) => !COMMON_TOOL_NAMES.has(tool.name));
   return Object.freeze({
     size: tools.length,
     namespaces: [...new Set(tools.map((tool) => tool.namespace))].sort(),
+    /**
+     * Progressive disclosure (DSH ToolSearch): context gets full descriptions
+     * for the common tools and a name-only tail, so long-tail tool schemas do
+     * not consume the whole prompt budget. The tail can be expanded via search.
+     */
+    contextPreview() {
+      return {
+        common: common.map((tool) => ({ name: tool.name, namespace: tool.namespace, summary: tool.summary })),
+        tail: tail.map((tool) => tool.name),
+        total: tools.length
+      };
+    },
     search(query, options = {}) {
       const limit = Math.min(10, Math.max(1, Number(options.limit ?? 5)));
       const namespace = options.namespace ? String(options.namespace).toLowerCase() : null;

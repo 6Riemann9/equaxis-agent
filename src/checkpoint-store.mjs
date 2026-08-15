@@ -37,7 +37,7 @@ function readJson(filePath) {
  * Snapshot the given absolute file paths (must exist) under a checkpoint id.
  * Returns { id, files, createdAt } with the files copied into the store.
  */
-export function createCheckpoint({ projectRoot, id, files, traceDir = ".pi/runtime", reason = "" }) {
+export function createCheckpoint({ projectRoot, id, files, traceDir = ".pi/runtime", reason = "", summary = "" }) {
   const root = checkpointRoot(projectRoot, traceDir);
   const target = checkpointDir(root, id);
   if (fs.existsSync(target)) throw new Error(`checkpoint already exists: ${id}`);
@@ -58,7 +58,7 @@ export function createCheckpoint({ projectRoot, id, files, traceDir = ".pi/runti
     fs.rmSync(target, { recursive: true, force: true });
     return { id, files: [], createdAt: new Date().toISOString(), skipped: true };
   }
-  const meta = { id, files: copied, reason, createdAt: new Date().toISOString() };
+  const meta = { id, files: copied, reason, summary: summary ?? "", createdAt: new Date().toISOString() };
   fs.writeFileSync(path.join(target, ".checkpoint.json"), JSON.stringify(meta, null, 2), "utf8");
   pruneCheckpoints(projectRoot, traceDir);
   return meta;
@@ -72,7 +72,7 @@ export function listCheckpoints(projectRoot, traceDir = ".pi/runtime", limit = 2
   for (const name of fs.readdirSync(root)) {
     const meta = readJson(path.join(root, name, ".checkpoint.json"));
     if (!meta?.id) continue;
-    entries.push({ id: meta.id, files: meta.files ?? [], reason: meta.reason ?? "", createdAt: meta.createdAt });
+    entries.push({ id: meta.id, files: meta.files ?? [], reason: meta.reason ?? "", summary: meta.summary ?? "", createdAt: meta.createdAt });
   }
   return entries
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))

@@ -350,8 +350,7 @@ export class EvalLoop {
    * improvement AND dev non-regression (compareCandidateWithHoldout). The decision
    * is persisted with the cohort/version metadata for audit.
    */
-  decisionWithHoldout(input = {}) {
-    const { trainCohort, devCohort, versionId, tool, capability, ...compareOpts } = input;
+  decisionWithHoldout(input = {}) {    const { trainCohort, devCohort, versionId, tool, capability, ...compareOpts } = input;
     if (!versionId) throw new Error("decisionWithHoldout requires versionId (the candidate version to compare)");
     const trainEvents = this.#eventsForCell(trainCohort, tool, capability);
     const devEvents = this.#eventsForCell(devCohort, tool, capability);
@@ -433,6 +432,54 @@ export class EvalLoop {
       candidates: [...this.candidates],
       decisions: [...this.decisions],
       matrix
+    };
+  }
+
+  /**
+   * Capability x version delta matrix (Intern-S2 arXiv 2608.13505 harness×task
+   * abstraction applied to evaluation): for every capability, compare success
+   * rates between a baseline version and a candidate version. Answers "this
+   * harness change improved which capabilities and regressed which" instead of
+   * one blended number.
+   */
+  capabilityDeltaMatrix(input = {}) {
+    const { baselineVersionId, candidateVersionId, ...filter } = input;
+    const byCapability = new Map();
+    const matches = (event) => {
+      if (filter.provider && event.model.provider !== filter.provider) return false;
+      if (filter.model && event.model.id !== filter.model) return false;
+      if (filter.tool && event.tool.name !== filter.tool) return false;
+      if (filter.cohort && event.cohort !== filter.cohort) return false;
+      return true;
+    };
+    for (const event of this.events) {
+      if (!matches(event)) continue;
+      const versionId = String(event.version?.id ?? "");
+      const isBaseline = versionId === String(baselineVersionId ?? "");
+      const isCandidate = versionId === String(candidateVersionId ?? "");
+      if (!isBaseline && !isCandidate) continue;
+      for (const capability of event.capabilities) {
+        if (!byCapability.has(capability)) byCapability.set(capability, { baseline: [], candidate: [] });
+        (isCandidate ? byCapability.get(capability).candidate : byCapability.get(capability).baseline).push(event);
+      }
+    }
+    const rate = (events) => {
+      const attempts = events.length;
+      const successes = events.filter((event) => event.outcome === "success").length;
+      return { attempts, successes, successRate: attempts ? rounded(successes / attempts) : 0 };
+    };
+    const rows = [...byCapability.entries()]
+      .map(([capability, groups]) => {
+        const baseline = rate(groups.baseline);
+        const candidate = rate(groups.candidate);
+        return { capability, baseline, candidate, delta: rounded(candidate.successRate - baseline.successRate, 4) };
+      })
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    return {
+      rows,
+      improved: rows.filter((row) => row.delta > 0.01).map((row) => row.capability),
+      regressed: rows.filter((row) => row.delta < -0.01).map((row) => row.capability),
+      unchanged: rows.filter((row) => Math.abs(row.delta) <= 0.01).map((row) => row.capability)
     };
   }
 }

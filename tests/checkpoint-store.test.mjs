@@ -59,3 +59,16 @@ test("checkpoint ids are stable per tool call and distinct across calls", () => 
   assert.notEqual(checkpointIdFor("call-1"), checkpointIdFor("call-2"));
   assert.match(checkpointIdFor("call-1"), /^[0-9a-f]{12}$/);
 });
+
+test("checkpoint carries a conversation summary for context", (t) => {
+  const root = workspace(t);
+  const file = path.join(root, "a.txt");
+  fs.writeFileSync(file, "v1", "utf8");
+  const created = createCheckpoint({ projectRoot: root, id: "cp-sum", files: [file], reason: "edit", summary: "goal: refactor auth" });
+  assert.equal(created.summary, "goal: refactor auth");
+  const listed = listCheckpoints(root, ".pi/runtime");
+  assert.equal(listed[0].summary, "goal: refactor auth");
+  // summary is optional
+  const plain = createCheckpoint({ projectRoot: root, id: "cp-plain", files: [file], reason: "edit" });
+  assert.equal(plain.summary, "");
+});
