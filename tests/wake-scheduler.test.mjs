@@ -49,8 +49,14 @@ test("scheduledTaskCommand builds a schtasks registration string", () => {
   const command = scheduledTaskCommand({ projectRoot: "C:/proj", intervalMinutes: 30, taskName: "EquaxisWake", nodeCmd: "C:/node.exe" });
   assert.match(command, /^schtasks \/Create \/TN "EquaxisWake"/);
   assert.match(command, /\/SC MINUTE \/MO 30/);
-  assert.match(command, /\/TR "C:\\node.exe" "C:\\proj\\scripts\\equaxis-wake\.mjs" --scheduled/);
+  assert.match(command, /--scheduled/);
   assert.match(command, /\/F$/);
+  // Both executables are quoted and backslash-normalized; the script path is
+  // derived from the same path.resolve the module uses, so the assertion is
+  // platform-neutral (POSIX embeds the drive-letter root differently).
+  const winPath = (value) => String(value).replaceAll("/", "\\");
+  const expectedScript = winPath(path.resolve("C:/proj", "scripts", "equaxis-wake.mjs"));
+  assert.ok(command.includes(`"${winPath("C:/node.exe")}" "${expectedScript}" --scheduled`), `command: ${command}`);
   const clamped = scheduledTaskCommand({ projectRoot: "C:/proj", intervalMinutes: 0 });
   assert.match(clamped, /\/MO 1/);
 });

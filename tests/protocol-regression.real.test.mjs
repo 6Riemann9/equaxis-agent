@@ -68,8 +68,12 @@ function lspRequest(transport, method, params) {
 }
 
 function dapAvailable() {
-  const probe = spawnSync("python", ["-m", "debugpy.adapter", "--version"], { encoding: "utf8", windowsHide: true, timeout: 15000 });
-  return probe.error === undefined;
+  // Import probe: `debugpy.adapter --version` is a usage error (exit 2) even
+  // when installed, and spawnSync.error is only set when the process cannot
+  // spawn — so a status-agnostic probe wrongly reports "available" when the
+  // module is missing. Importing the module is the reliable check.
+  const probe = spawnSync("python", ["-c", "import debugpy.adapter"], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+  return probe.status === 0;
 }
 
 test("real debugpy adapter (TCP) initializes and launches a fixture", { skip: dapAvailable() ? false : "debugpy not installed" }, async (t) => {
