@@ -11,6 +11,7 @@ import {
   writeSkillFile
 } from "../../src/skill-store.mjs";
 import { createSkillCandidate } from "../../src/skill-lifecycle.mjs";
+import { installSkillFromGithub } from "../../src/skill-install.mjs";
 import { reflectRun } from "../../src/reflection.mjs";
 
 interface SkillsConfig {
@@ -220,6 +221,41 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
       return {
         content: [{ type: "text", text: `Skill written: ${filePath}` }],
         details: { name: params.name, filePath, versionArtifact: candidate.path, versionSha: candidate.sha }
+      };
+    }
+  });
+
+  pi.registerTool({
+    name: "skill_install",
+    label: "Skill Install",
+    description:
+      "Install a skill from a GitHub repository (google/skills pattern): fetch SKILL.md from owner/repo/path/to/skill (or a github.com URL), normalize it, and deploy it through the versioned candidate lifecycle (delete-only review gate + rollback trail). The installed skill keeps source/evidence provenance and the new metadata (category/dontUse/related) when present.",
+    parameters: Type.Object({
+      ref: Type.String({
+        minLength: 1,
+        description: "Skill ref: owner/repo/path/to/skill-dir or https://github.com/owner/repo/tree/branch/path"
+      }),
+      branch: Type.Optional(Type.String({ description: "Branch (default main, falls back to master)" }))
+    }),
+    async execute(_toolCallId, params, signal) {
+      if (signal?.aborted) throw new Error("skill_install aborted");
+      const secret = containsSecretLikeInput({ ref: params.ref });
+      if (secret) throw new Error("skill ref may contain credential-like input; not installing");
+      const result = await installSkillFromGithub({
+        projectRoot: services.paths.workspace,
+        skillsDir: config.rootDir,
+        ref: params.ref,
+        branch: params.branch ?? "main"
+      });
+      services.trace.record({} as ExtensionContext, "skill_installed", { name: result.name, sourceUrl: result.sourceUrl, candidateId: result.candidateId });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Skill installed: ${result.name} (${result.status})\nSource: ${result.sourceUrl}\nPath: ${result.path}\nRollback: git revert is not needed — the candidate ledger (${result.candidateId}) can roll back this install.`
+          }
+        ],
+        details: { name: result.name, status: result.status, sourceUrl: result.sourceUrl, candidateId: result.candidateId, path: result.path }
       };
     }
   });

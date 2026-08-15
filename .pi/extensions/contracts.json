@@ -353,13 +353,14 @@
         "tool:skill_search",
         "tool:skill_list",
         "tool:skill_learn",
+        "tool:skill_install",
         "command:skills",
         "event:session_start",
         "event:before_agent_start"
       ],
       "promptImpact": {
         "systemPromptChars": "按需(0-3000 tokens)",
-        "tools": 3,
+        "tools": 4,
         "notes": "技能块按查询注入,selectRelevantSkills 预算控制"
       }
     },
