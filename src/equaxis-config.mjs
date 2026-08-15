@@ -77,7 +77,9 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     dream: {
       enabled: true,
       onShutdown: false,
-      maxEntries: 200
+      maxEntries: 200,
+      provider: "",
+      model: ""
     },
     segmentation: {
       enabled: true,
@@ -117,6 +119,9 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     persistence: {
       enabled: true,
       rootDir: ".pi/runtime/subagents"
+    },
+    evidence: {
+      enabled: true
     },
     isolation: {
       enabled: true,
@@ -255,7 +260,34 @@ export function migrateEquaxisConfig(raw, configPath = UNIFIED_CONFIG_FILE) {
   throw configError(configPath, "schemaVersion", `unsupported version ${version}; expected ${EQUAXIS_CONFIG_SCHEMA_VERSION}`);
 }
 
+function assertKnownKeys(value, field, baseValue, configPath) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  if (!baseValue || typeof baseValue !== "object" || Array.isArray(baseValue)) return;
+  const known = new Set(Object.keys(baseValue));
+  for (const key of Object.keys(value)) {
+    if (!known.has(key)) {
+      throw configError(configPath, `${field}.${key}`, `unknown key (known: ${[...known].sort().join(", ")})`);
+    }
+  }
+}
+
 function mergeConfig(base, custom) {
+  // DSH-style discipline: unknown keys in custom config are rejected so a
+  // typo surfaces at load time instead of being silently merged away.
+  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "evaluation", "subagents"];
+  const SUB_SECTIONS = [
+    ["runtime", "services"], ["runtime", "gates"],
+    ["reliability", "trace"], ["reliability", "approval"], ["reliability", "limits"], ["reliability", "toolRouting"], ["reliability", "eval"],
+    ["protocols", "lsp"], ["protocols", "dap"],
+    ["memory", "governance"], ["memory", "dream"], ["memory", "segmentation"],
+    ["subagents", "budgets"], ["subagents", "persistence"], ["subagents", "isolation"], ["subagents", "evidence"]
+  ];
+  for (const section of SECTIONS) {
+    if (custom[section]) assertKnownKeys(custom[section], `custom.${section}`, base[section], UNIFIED_CONFIG_FILE);
+  }
+  for (const [section, sub] of SUB_SECTIONS) {
+    if (custom[section]?.[sub]) assertKnownKeys(custom[section][sub], `custom.${section}.${sub}`, base[section]?.[sub], UNIFIED_CONFIG_FILE);
+  }
   return {
     ...structuredClone(base),
     ...custom,

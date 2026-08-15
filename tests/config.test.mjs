@@ -270,3 +270,31 @@ test("merges and validates protocol adapter configuration", (t) => {
   }));
   assert.throws(() => loadEquaxisConfig(root), /protocols\.lsp\.requestTimeoutMs/);
 });
+
+test("rejects unknown keys in built-in config sections (DSH discipline)", (t) => {
+  const root = workspace(t);
+  const cases = [
+    { schemaVersion: 1, reliability: { maxToolCallsPerTurnn: 5 } },
+    { schemaVersion: 1, memory: { dream: { maxEntriez: 3 } } },
+    { schemaVersion: 1, subagents: { budgetz: {} } },
+    { schemaVersion: 1, skills: { autoInjct: true } }
+  ];
+  for (const raw of cases) {
+    fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify(raw));
+    assert.throws(() => loadConfig(root), /unknown key/, JSON.stringify(raw));
+  }
+});
+
+test("known keys including recent additions still load", (t) => {
+  const root = workspace(t);
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    subagents: { evidence: { enabled: false } },
+    reliability: { eval: { cohort: "train", versionId: "v1" } },
+    memory: { segmentation: { enabled: true, threshold: 0.7, maxSegmentChars: 2000 } }
+  }));
+  const config = loadConfig(root);
+  assert.equal(config.unified.subagents.evidence.enabled, false);
+  assert.equal(config.unified.reliability.eval.cohort, "train");
+  assert.equal(config.unified.memory.segmentation.threshold, 0.7);
+});
