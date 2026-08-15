@@ -154,7 +154,7 @@ function assertInteger(value, configPath, field, min, max) {
 }
 
 function assertNumber(value, configPath, field, min, max) {
-  if (!Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
     throw configError(configPath, field, `must be a number between ${min} and ${max}`);
   }
 }
@@ -278,6 +278,7 @@ function mergeConfig(base, custom) {
   const SUB_SECTIONS = [
     ["runtime", "services"], ["runtime", "gates"],
     ["reliability", "trace"], ["reliability", "approval"], ["reliability", "limits"], ["reliability", "toolRouting"], ["reliability", "eval"],
+    ["reliability", "costBrake"], ["reliability", "commandAllowlist"],
     ["protocols", "lsp"], ["protocols", "dap"],
     ["memory", "governance"], ["memory", "dream"], ["memory", "segmentation"],
     ["subagents", "budgets"], ["subagents", "persistence"], ["subagents", "isolation"], ["subagents", "evidence"]
@@ -305,7 +306,9 @@ function mergeConfig(base, custom) {
       approval: { ...base.reliability.approval, ...(custom.reliability?.approval ?? {}) },
       limits: { ...base.reliability.limits, ...(custom.reliability?.limits ?? {}) },
       toolRouting: { ...base.reliability.toolRouting, ...(custom.reliability?.toolRouting ?? {}) },
-      eval: { ...base.reliability.eval, ...(custom.reliability?.eval ?? {}) }
+      eval: { ...base.reliability.eval, ...(custom.reliability?.eval ?? {}) },
+      costBrake: { ...base.reliability.costBrake, ...(custom.reliability?.costBrake ?? {}) },
+      commandAllowlist: { ...base.reliability.commandAllowlist, ...(custom.reliability?.commandAllowlist ?? {}) }
     },
     advisor: { ...base.advisor, ...(custom.advisor ?? {}) },
     protocols: {
@@ -320,7 +323,8 @@ function mergeConfig(base, custom) {
         ...(custom.memory?.governance ?? {}),
         retentionDays: { ...base.memory.governance.retentionDays, ...(custom.memory?.governance?.retentionDays ?? {}) }
       },
-      dream: { ...base.memory.dream, ...(custom.memory?.dream ?? {}) }
+      dream: { ...base.memory.dream, ...(custom.memory?.dream ?? {}) },
+      segmentation: { ...base.memory.segmentation, ...(custom.memory?.segmentation ?? {}) }
     },
     skills: { ...base.skills, ...(custom.skills ?? {}) },
     evaluation: { ...base.evaluation, ...(custom.evaluation ?? {}) },

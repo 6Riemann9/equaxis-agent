@@ -70,15 +70,33 @@ test("redacts governed memory content recursively", () => {
   assert.doesNotMatch(JSON.stringify(redacted), new RegExp(sample));
 });
 
-test("rejects concurrent memory governance writes while a lock is held", (t) => {
+test("rejects concurrent memory governance writes while a lock is held by a live process", (t) => {
   const root = workspace(t);
   const input = path.join(root, "memories.jsonl");
   const lockPath = `${input}.lock`;
-  fs.writeFileSync(input, `${JSON.stringify(record("keep"))}\n`, "utf8");
-  fs.writeFileSync(lockPath, "busy", "utf8");
+  fs.writeFileSync(input, `${JSON.stringify(record("keep", { createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" }))}\n`, "utf8");
+  fs.writeFileSync(lockPath, `${process.pid}\n`, "utf8");
 
   assert.throws(() => applyMemoryGovernance({ inputPath: input, apply: true, lockPath }), /memory governance lock already held/);
   assert.equal(fs.existsSync(lockPath), true);
+});
+
+test("reclaims stale locks (dead pid or corrupt content) instead of blocking forever", (t) => {
+  const root = workspace(t);
+  const input = path.join(root, "memories.jsonl");
+  const lockPath = `${input}.lock`;
+  fs.writeFileSync(input, `${JSON.stringify(record("keep", { createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" }))}\n`, "utf8");
+
+  // dead pid: reclaimed and applied; lock released on completion
+  fs.writeFileSync(lockPath, "99999999\n", "utf8");
+  const applied = applyMemoryGovernance({ inputPath: input, apply: true, lockPath });
+  assert.equal(applied.deletedRecords.length, 0);
+  assert.equal(fs.existsSync(lockPath), false, "lock is released after apply");
+
+  // corrupt content: reclaimed too
+  fs.writeFileSync(lockPath, "busy", "utf8");
+  const appliedAgain = applyMemoryGovernance({ inputPath: input, apply: true, lockPath });
+  assert.equal(appliedAgain.deletedRecords.length, 0);
 });
 
 test("summarizes high-volume memory governance runs", (t) => {

@@ -417,12 +417,36 @@ export class SubagentRuntime {
       timeoutMs: Math.max(10000, task.timeoutMs ?? 60000),
       isReview: true
     };
+    // The review runs under its own timeout (a hung reviewer must not hold
+    // the concurrency slot or block wait() forever) and honors cancellation.
+    const reviewTimeoutMs = reviewTask.timeoutMs;
+    let timeoutHandle = null;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error("review timed out")), reviewTimeoutMs);
+    });
     try {
-      const reviewResult = await this.executor(reviewTask, { signal: task.controller.signal });
-      const verdict = parseReviewVerdict(reviewResult);
-      return verdict;
+      const reviewResult = await Promise.race([
+        this.executor(reviewTask, { signal: task.controller.signal }),
+        timeoutPromise
+      ]);
+      // Production executor resolves the transport wrapper {ok, output, ...};
+      // unwrap the reviewer's stdout before parsing the verdict.
+      const payload = reviewResult && typeof reviewResult === "object" && "output" in reviewResult
+        ? (() => {
+            try {
+              return JSON.parse(String(reviewResult.output ?? ""));
+            } catch {
+              return reviewResult.output;
+            }
+          })()
+        : reviewResult;
+      if (task.controller.signal.aborted) throw abortError(task.controller.signal.reason);
+      return parseReviewVerdict(payload);
     } catch (error) {
+      if (task.controller.signal.aborted) throw abortError(task.controller.signal.reason);
       return { status: "error", verdict: null, issues: [`review failed: ${String(error?.message ?? error)}`] };
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
     }
   }
 

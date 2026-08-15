@@ -230,6 +230,20 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
 
   const approvalProjectRoot = () => services.paths.workspace;
 
+  function recordL1Blocked(ctx: ExtensionContext, event: { toolCallId: string; toolName: string }, classification: { risk: string; reason: string }, blockReason: string): void {
+    try {
+      persistL1Decision(approvalProjectRoot(), config.traceDir, {
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        risk: classification.risk,
+        reason: `blocked: ${blockReason.slice(0, 200)}`,
+        ruleVersion: policyRuleVersion(config)
+      });
+    } catch {
+      trace(ctx, "l1_audit_write_failed", { toolName: event.toolName });
+    }
+  }
+
   function writeApprovalRequest(cfg: HarnessConfig, requestId: string, toolName: string, summary: string, reason: string): string | null {
     const web = cfg.approval?.webQueue;
     if (!web?.enabled) return null;
@@ -524,6 +538,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     if (loopStopped && state.mode === "enforce") {
       state.blockedCalls += 1;
       trace(ctx, "loop_stop_triggered", { ...decision, repeats: consecutiveCalls.count, limit: config.limits.maxRepeatedCalls });
+      recordL1Blocked(ctx, event, classification, `loop stop (${consecutiveCalls.count}x)`);
       updateStatus(ctx);
       return { block: true, reason: `Reliability Harness: repeated identical ${event.toolName} call (${consecutiveCalls.count}x) suggests a loop; stop and reassess` };
     }
@@ -531,6 +546,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     if (limitReason && state.mode === "enforce") {
       state.blockedCalls += 1;
       trace(ctx, "tool_blocked", { ...decision, reason: limitReason });
+      recordL1Blocked(ctx, event, classification, limitReason);
       updateStatus(ctx);
       return { block: true, reason: `Reliability Harness: ${limitReason}` };
     }
@@ -539,6 +555,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     if (policyBlocked && (state.mode === "enforce" || containsSecret)) {
       state.blockedCalls += 1;
       trace(ctx, "tool_blocked", decision);
+      recordL1Blocked(ctx, event, classification, classification.reason);
       if (ctx.hasUI) ctx.ui.notify(`Harness blocked ${event.toolName}: ${classification.reason}`, "warning");
       updateStatus(ctx);
       return { block: true, reason: `Reliability Harness: ${classification.reason}` };
@@ -663,6 +680,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
             projectRoot: approvalProjectRoot(),
             id: checkpointIdFor(event.toolCallId),
             files: [target],
+            traceDir: config.traceDir,
             reason: `${event.toolName} on ${path.relative(approvalProjectRoot(), target)}`,
             summary: state.mission?.objective ? `goal: ${state.mission.objective.slice(0, 120)}` : ""
           });
@@ -885,7 +903,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
         return;
       }
       try {
-        const result = restoreCheckpoint({ projectRoot: approvalProjectRoot(), id: target });
+        const result = restoreCheckpoint({ projectRoot: approvalProjectRoot(), id: target, traceDir: config.traceDir });
         trace(ctx, "checkpoint_restored", { id: target, files: result.restored });
         ctx.ui.notify(`Restored checkpoint ${target}: ${result.restored.length} file(s) rewound.`);
       } catch (error) {

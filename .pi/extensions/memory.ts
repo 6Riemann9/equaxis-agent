@@ -398,12 +398,14 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
       // bridge stays dormant until a memory tool or /memory command is used.
       try {
         const memory = await ensureBridge(ctx);
+        // NOTE: the context action composes the full memory snapshot; the
+        // recallLimit config applies to recall/search tools, not to context
+        // building (maxContextChars caps the injected snapshot instead).
         const result = await memory.request("context", {
           session_id: sessionId,
           query: event.prompt,
           wing: undefined,
-          room: undefined,
-          limit: config.recallLimit
+          room: undefined
         }, { signal: ctx.signal });
         context = String(result.context ?? "").trim().slice(0, config.maxContextChars);
         const withheld = containsSecretLikeInput({ content: context });

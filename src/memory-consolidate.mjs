@@ -96,15 +96,24 @@ export function segmentEntriesBySimilarity(entries, options = {}) {
   return segments;
 }
 
+const MEMORY_SECTION_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+const HALL_RE = /^hall_[a-zA-Z0-9_-]{1,32}$/;
+
 function cleanMemory(value) {
   if (!isRecord(value)) return null;
   const content = typeof value.content === "string" ? value.content.trim() : "";
   if (!content) return null;
+  // Model-supplied wing/room/hall are untrusted: validate the charset the
+  // Python bridge enforces and fall back to defaults instead of letting one
+  // bad value fail the whole batch (and stall the dream cursor).
+  const wing = typeof value.wing === "string" && MEMORY_SECTION_RE.test(value.wing.trim()) ? value.wing.trim() : undefined;
+  const room = typeof value.room === "string" && MEMORY_SECTION_RE.test(value.room.trim()) ? value.room.trim() : undefined;
+  const hall = typeof value.hall === "string" && HALL_RE.test(value.hall.trim()) ? value.hall.trim() : undefined;
   return {
     content: content.slice(0, 4000),
-    wing: typeof value.wing === "string" && value.wing.trim() ? value.wing.trim() : undefined,
-    room: typeof value.room === "string" && value.room.trim() ? value.room.trim() : undefined,
-    hall: typeof value.hall === "string" && value.hall.trim() ? value.hall.trim() : undefined
+    wing,
+    room,
+    hall
   };
 }
 

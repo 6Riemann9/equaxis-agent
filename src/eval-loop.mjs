@@ -178,6 +178,24 @@ export function compareCandidateWithHoldout({ baseline, candidate, holdoutBaseli
       confidence: main.confidence
     };
   }
+  // Holdout samples below the minimum: the gate cannot certify dev
+  // non-regression, so the candidate must not deploy on train gain alone
+  // (documented acceptance gate: train improvement AND dev non-regression).
+  if (holdoutAttempts < minSamples && (main.decision === "deploy" || main.decision === "scoped")) {
+    return {
+      decision: "insufficient_data",
+      reason: `holdout (dev-set) sample count below minimum: ${holdoutAttempts} < ${minSamples}`,
+      holdout: "insufficient_data",
+      holdoutDelta,
+      holdoutAttempts,
+      mainDecision: main.decision,
+      mainReason: main.reason,
+      successDelta: main.successDelta,
+      latencyDeltaRatio: main.latencyDeltaRatio,
+      costDeltaRatio: main.costDeltaRatio,
+      confidence: main.confidence
+    };
+  }
   return { ...main, holdout: "pass", holdoutDelta, holdoutAttempts };
 }
 

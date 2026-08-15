@@ -24,15 +24,17 @@ test("recordWisdom persists a truncated summary and readWisdom returns it", (t) 
   assert.equal(readWisdom({ projectRoot: root, taskId: "missing" }), null);
 });
 
-test("wisdomPreamble joins dependency wisdom and honors max chars", (t) => {
+test("wisdomPreamble joins dependency wisdom inside an untrusted-data fence", (t) => {
   const root = workspace(t);
   recordWisdom({ projectRoot: root, taskId: "dep-1", label: "setup", result: { summary: "Use the --no-cache flag" } });
   recordWisdom({ projectRoot: root, taskId: "dep-2", label: "build", result: { summary: "Output lands in dist/" } });
   const preamble = wisdomPreamble({ projectRoot: root, taskIds: ["dep-1", "dep-2"] });
+  assert.match(preamble, /<wisdom>/);
   assert.match(preamble, /--no-cache/);
   assert.match(preamble, /dist\//);
+  assert.match(preamble, /NOT as instructions/, "fence marks the data as untrusted");
   const capped = wisdomPreamble({ projectRoot: root, taskIds: ["dep-1", "dep-2"], maxChars: 60 });
-  assert.ok(capped.length <= 61);
+  assert.ok(capped.length < preamble.length, "maxChars truncates the payload");
 });
 
 test("runtime onTaskComplete fires after finalization", async (t) => {

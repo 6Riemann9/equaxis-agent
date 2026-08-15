@@ -53,9 +53,17 @@ export class MemoryBridge {
       this.process = child;
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
+      // A dead bridge makes the next stdin.write() fail with EPIPE, which Node
+      // surfaces as an 'error' event on the socket. Without a listener that
+      // becomes an uncaughtException and kills the whole process. Route stream
+      // errors to rejectAll so in-flight requests fail cleanly instead.
+      child.stdin.on("error", (error) => this.rejectAll(error));
+      child.stdout.on("error", (error) => this.rejectAll(error));
+      child.stderr.on("error", (error) => this.rejectAll(error));
 
       const lines = readline.createInterface({ input: child.stdout });
       lines.on("line", (line) => this.handleLine(line));
+      lines.on("error", (error) => this.rejectAll(error));
       child.stderr.on("data", (chunk) => {
         const message = String(chunk).trim();
         if (message) this.onDiagnostic(message);
@@ -100,7 +108,8 @@ export class MemoryBridge {
 
   async request(action, payload = {}, options = {}) {
     if (!options.skipStart) await this.start();
-    if (!this.process || this.process.killed || !this.process.stdin.writable) {
+    const stdin = this.process?.stdin;
+    if (!this.process || this.process.killed || !stdin || !stdin.writable || stdin.destroyed) {
       throw new Error("Memory bridge is not running");
     }
 
@@ -109,6 +118,7 @@ export class MemoryBridge {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        options.signal?.removeEventListener("abort", abort);
         reject(new Error(`Memory request timed out: ${action}`));
       }, timeoutMs);
 
@@ -131,13 +141,23 @@ export class MemoryBridge {
           reject(error);
         }
       });
-
-      this.process.stdin.write(`${JSON.stringify({ id, action, payload })}\n`, "utf8", (error) => {
-        if (!error) return;
+      try {
+        stdin.write(`${JSON.stringify({ id, action, payload })}\n`, "utf8", (error) => {
+          if (error) {
+            const pending = this.pending.get(id);
+            if (pending) {
+              this.pending.delete(id);
+              pending.reject(error);
+            }
+          }
+        });
+      } catch (error) {
         const pending = this.pending.get(id);
-        this.pending.delete(id);
-        pending?.reject(error);
-      });
+        if (pending) {
+          this.pending.delete(id);
+          pending.reject(error);
+        }
+      }
     });
   }
 

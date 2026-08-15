@@ -81,7 +81,11 @@ class ShortTermMemoryStore:
         return self._read_int(self.config.dream_cursor_path)
 
     def set_last_dream_cursor(self, cursor: int) -> None:
-        self._write_int(self.config.dream_cursor_path, cursor)
+        # Monotonic advance: concurrent consolidators must never move the
+        # cursor backwards (a rollback re-processes entries, producing
+        # duplicate memories with non-deterministic LLM extraction).
+        current = self.get_last_dream_cursor()
+        self._write_int(self.config.dream_cursor_path, max(current, int(cursor)))
 
     def compact_history(self) -> None:
         entries = self.read_unprocessed_history(0)

@@ -77,8 +77,30 @@ export function applyMemoryGovernance(options = {}) {
         lockHandle = fs.openSync(lockPath, "wx");
         fs.writeFileSync(lockHandle, `${process.pid}\n`, "utf8");
       } catch (error) {
-        if (error?.code === "EEXIST") throw new Error(`memory governance lock already held: ${lockPath}`);
-        throw error;
+        if (error?.code === "EEXIST") {
+          // Stale-lock recovery: a dead holder's lock must not block all
+          // future runs forever. Reclaim when the recorded PID is gone.
+          let stale = true;
+          try {
+            const holderPid = Number.parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
+            if (Number.isInteger(holderPid) && holderPid > 0) {
+              try {
+                process.kill(holderPid, 0);
+                stale = false; // holder alive
+              } catch {
+                stale = true; // ESRCH/EPERM -> gone (EPERM: alive but foreign; treat as held)
+              }
+            }
+          } catch {
+            // unreadable lock file: treat as stale (no holder info)
+          }
+          if (!stale) throw new Error(`memory governance lock already held: ${lockPath}`);
+          fs.rmSync(lockPath, { force: true });
+          lockHandle = fs.openSync(lockPath, "wx");
+          fs.writeFileSync(lockHandle, `${process.pid}\n`, "utf8");
+        } else {
+          throw error;
+        }
       }
     }
 
@@ -94,7 +116,11 @@ export function applyMemoryGovernance(options = {}) {
     if (options.apply) {
       const content = kept.map((record) => JSON.stringify(record)).join("\n") + (kept.length ? "\n" : "");
       fs.mkdirSync(path.dirname(inputPath), { recursive: true });
-      fs.writeFileSync(inputPath, content, "utf8");
+      // Atomic replace: write a temp file then rename, so an interrupted
+      // write can never leave a truncated JSONL that breaks every later run.
+      const tmpPath = `${inputPath}.tmp-${process.pid}`;
+      fs.writeFileSync(tmpPath, content, "utf8");
+      fs.renameSync(tmpPath, inputPath);
     }
 
     return {
