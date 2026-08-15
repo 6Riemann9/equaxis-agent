@@ -212,16 +212,17 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "recall",
     label: "Recall Memory",
-    description: "Recall relevant Equaxis memory using the clearer Memory UX action name. Use this before answering when prior project facts or preferences may matter.",
+    description: "Recall relevant Equaxis memory using the clearer Memory UX action name. Use this before answering when prior project facts or preferences may matter. With associative=true, also expands along structural edges (same source/session, same wing) to piece together evidence scattered across memories (RippleMem-style recollection).",
     parameters: Type.Object({
       query: Type.String({ description: "Natural-language memory query" }),
       wing: Type.Optional(Type.String({ description: "Optional memory wing" })),
       room: Type.Optional(Type.String({ description: "Optional room inside the wing" })),
-      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 5 }))
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 5 })),
+      associative: Type.Optional(Type.Boolean({ description: "Expand along structural edges to recollect scattered evidence (default false)" }))
     }),
     async execute(_toolCallId, params, signal) {
       const memory = await ensureBridgeForTool();
-      const result = await memory.request("search", {
+      const result = await memory.request(params.associative ? "associative_search" : "search", {
         query: params.query,
         wing: params.wing,
         room: params.room,
@@ -230,7 +231,7 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
       const matches = (result.matches ?? []) as SearchMatch[];
       return {
         content: [{ type: "text", text: formatMatches(matches) }],
-        details: { action: "recall", query: params.query, matches }
+        details: { action: params.associative ? "associative_recall" : "recall", query: params.query, matches }
       };
     }
   });

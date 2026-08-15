@@ -115,6 +115,13 @@ class AgentMemory:
         logger.debug(f"Search returned {len(result.matches)} matches")
         return result
 
+    def associative_search(self, query: str, wing: str | None = None, room: str | None = None, limit: int = 5) -> QueryResult:
+        """联想式回忆(RippleMem arXiv 2608.13334):锚点 + 结构边有界扩展。"""
+        validate_content(query, "query", max_length=1000)
+        validate_wing_room(wing, room)
+        validate_limit(limit)
+        return self.manager.associative_search(query=query, wing=wing, room=room, limit=limit)
+
     def remember(
         self,
         wing: str,

@@ -23,6 +23,9 @@ class MemoryManager:
     def search(self, query: str, wing: str | None = None, room: str | None = None, limit: int = 5) -> QueryResult:
         return self.long_term.search(query=query, wing=wing, room=room, limit=limit)
 
+    def associative_search(self, query: str, wing: str | None = None, room: str | None = None, limit: int = 5) -> QueryResult:
+        return self.long_term.associative_search(query=query, wing=wing, room=room, limit=limit)
+
     def add_memory(
         self,
         wing: str,

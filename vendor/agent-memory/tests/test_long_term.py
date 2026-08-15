@@ -91,6 +91,41 @@ class TestLongTermMemoryStore:
         assert "room-1" in rooms
         assert "room-2" in rooms
 
+    def test_associative_search_expands_along_source_edges(self, store):
+        """RippleMem 结构通道:锚点记忆的同源邻居被联想召回(带一跳惩罚)。
+
+        场景构造:coffee 记忆不在锚点 top-k 内(被 3 条无关记忆挤到第 5 名),
+        它只可能通过扩展边出现——而它的 source 不在任何锚点的结构边上,
+        因此必须不被召回;nightly 记忆同样不在锚点内,但同源(ci.md)于
+        锚点,必须被联想召回(证据补全)。
+        """
+        store.add_drawer(wing="wing-proj", room="room-general", content="Deploy pipeline uses GitHub Actions", source_file="ci.md")
+        store.add_drawer(wing="wing-proj", room="room-general", content="The pipeline runs nightly at 3am", source_file="ci.md")
+        store.add_drawer(wing="wing-proj", room="room-general", content="Team prefers coffee over tea", source_file="unrelated.md")
+        for i in range(3):
+            store.add_drawer(wing="wing-proj", room="room-general", content=f"Unrelated topic {i} about weather", source_file=f"weather{i}.md")
+
+        # 锚点 top-k(limit=2, ×2)= 4 条:Deploy/nightly + 2 条 weather;coffee 排第 5 名,不在锚点内
+        anchors = store.search(query="deploy pipeline", limit=2)
+        assert "Deploy pipeline" in " ".join(m.content for m in anchors.matches)
+
+        assoc = store.associative_search(query="deploy pipeline", limit=2)
+        assoc_contents = " ".join(m.content for m in assoc.matches)
+        assert "Deploy pipeline" in assoc_contents
+        assert "nightly" in assoc_contents, "同源记忆应被联想召回(证据补全)"
+        assert "coffee" not in assoc_contents, "无关源记忆不应被联想召回"
+
+    def test_associative_search_keeps_anchor_priority(self, store):
+        """扩展项带一跳惩罚:锚点仍排在前,联想项补充其后。"""
+        store.add_drawer(wing="w", room="r", content="API rate limit is 100 per minute", source_file="api.md")
+        store.add_drawer(wing="w", room="r", content="Rate limit resets every hour", source_file="api.md")
+        store.add_drawer(wing="w", room="r", content="The sky looks blue today", source_file="sky.md")
+        result = store.associative_search(query="API rate limit", limit=3)
+        assert len(result.matches) >= 2
+        # 首个匹配应为锚点(原始距离,无惩罚)
+        assert "100 per minute" in result.matches[0].content
+
+
     def test_closet_add_and_search(self, store):
         d1 = store.add_drawer(wing="wing-xyz", room="room-main", content="Feature X ships in v2.0", source_file="roadmap.md")
         d2 = store.add_drawer(wing="wing-xyz", room="room-main", content="v2.0 includes GraphQL support", source_file="roadmap.md")

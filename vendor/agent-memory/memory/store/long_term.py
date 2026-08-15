@@ -128,6 +128,59 @@ class LongTermMemoryStore:
         except Exception as e:
             raise SearchError(f"Search failed: {e}") from e
 
+    def associative_search(
+        self,
+        query: str,
+        wing: str | None = None,
+        room: str | None = None,
+        limit: int = 5,
+        anchor_multiplier: int = 3,
+        expansion_penalty: float = 0.3,
+    ) -> QueryResult:
+        """联想式回忆(RippleMem, arXiv 2608.13334 结构通道)。
+
+        在向量检索锚点之上,沿结构边有界扩展,拼合分散在同源事件流
+        (同 source_file)中的证据。扩展项距离 = 锚点距离 + expansion_penalty
+        (一跳惩罚),保证锚点优先但同源记忆可被联想召回。只有 source_file
+        边参与扩展:wing/room 是顶层命名空间,同翼≠相关,用作扩展边会引入
+        噪声(测试验证)。这是读取侧的软增强:扩展错误只影响召回排序,
+        不产生硬门控(SimGates 原则)。
+        """
+        try:
+            where = self._build_where(wing=wing, room=room)
+            result = self.drawers.query(query_texts=[query], n_results=max(limit * anchor_multiplier, limit), where=where)
+            anchors = self._matches_from_query(result)
+            if not anchors:
+                return QueryResult(matches=[])
+            merged: dict[str, QueryMatch] = {}
+            for anchor in anchors:
+                merged[anchor.id] = anchor
+                source = str(anchor.metadata.get("source_file", ""))
+                if not source:
+                    continue
+                expanded = self.drawers.query(
+                    query_texts=[query],
+                    n_results=limit * anchor_multiplier,
+                    where={**(where or {}), "source_file": source},
+                )
+                expanded_rows = expanded.get("ids") or [[]]
+                expanded_ids = expanded_rows[0] if expanded_rows else []
+                for idx, match_id in enumerate(expanded_ids):
+                    if match_id in merged:
+                        continue
+                    metadata = ((expanded.get("metadatas") or [[]])[0][idx] or {}) if (expanded.get("metadatas") or [[]])[0] else {}
+                    distance = ((expanded.get("distances") or [[]])[0][idx]) if (expanded.get("distances") or [[]])[0] else 0.0
+                    merged[match_id] = QueryMatch(
+                        id=match_id,
+                        content=((expanded.get("documents") or [[]])[0][idx] if (expanded.get("documents") or [[]])[0] else ""),
+                        metadata=metadata,
+                        score=float(distance) + expansion_penalty,
+                    )
+            ranked = sorted(merged.values(), key=lambda item: item.score)[:limit]
+            return QueryResult(matches=ranked)
+        except Exception as e:
+            raise SearchError(f"Associative search failed: {e}") from e
+
     def get_drawer(self, drawer_id: str) -> DrawerRecord | None:
         payload = self.drawers.get(ids=[drawer_id])
         if not payload["ids"]:

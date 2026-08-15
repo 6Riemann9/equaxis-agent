@@ -264,6 +264,14 @@ def dispatch(memory: AgentMemory, action: str, payload: dict[str, Any]) -> Any:
             limit=int(payload.get("limit", 5)),
         )
         return {"matches": format_matches(result)}
+    if action == "associative_search":
+        result = memory.associative_search(
+            query=str(payload["query"]),
+            wing=payload.get("wing"),
+            room=payload.get("room"),
+            limit=int(payload.get("limit", 5)),
+        )
+        return {"matches": format_matches(result)}
     if action == "remember":
         hall = HallType(str(payload.get("hall", HallType.GENERAL.value)))
         record = memory.remember(
