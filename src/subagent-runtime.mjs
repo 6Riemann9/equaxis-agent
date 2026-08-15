@@ -74,6 +74,12 @@ export class SubagentRuntime {
     this.inboxes = new Map();
     this.active = 0;
     this.queue = [];
+    // Per-model concurrency buckets (oh-my-opencode inspiration): parallel
+    // DAG branches often exceed a single provider's quota; bucket limits let
+    // one model saturate its quota while another model's tasks keep running.
+    this.defaultModelKey = options.defaultModelKey ?? "default";
+    this.modelConcurrency = options.modelConcurrency ?? {};
+    this.activeByModel = new Map();
     this.#restoreSnapshots();
   }
 
@@ -172,6 +178,7 @@ export class SubagentRuntime {
       id,
       label: request.label ?? id,
       prompt: request.prompt,
+      modelKey: request.model ?? this.defaultModelKey,
       schema: request.schema ?? null,
       dependencies,
       traceId,
@@ -210,6 +217,7 @@ export class SubagentRuntime {
     return {
       id: task.id,
       label: task.label,
+      modelKey: task.modelKey ?? null,
       status: task.status,
       dependencies: [...(task.dependencies ?? [])],
       traceId: task.traceId,
@@ -284,6 +292,7 @@ export class SubagentRuntime {
         label: node.name,
         prompt: node.prompt,
         schema: node.schema,
+        model: node.model,
         timeoutMs: node.timeoutMs,
         maxRetries: node.maxRetries,
         traceId: node.traceId,
@@ -331,13 +340,28 @@ export class SubagentRuntime {
   #drain() {
     this.#releaseBlocked();
     while (this.active < this.maxConcurrent && this.queue.length) {
-      const task = this.queue.shift();
+      // Pick the first queued task whose model bucket has capacity; tasks
+      // behind a saturated bucket wait but never block other buckets.
+      let picked = -1;
+      for (let index = 0; index < this.queue.length; index += 1) {
+        const candidate = this.queue[index];
+        const bucketLimit = this.modelConcurrency[candidate.modelKey] ?? Infinity;
+        const bucketActive = this.activeByModel.get(candidate.modelKey) ?? 0;
+        if (bucketActive < bucketLimit) {
+          picked = index;
+          break;
+        }
+      }
+      if (picked === -1) break;
+      const [task] = this.queue.splice(picked, 1);
       this.#run(task);
     }
   }
 
   async #run(task) {
     this.active += 1;
+    const modelKey = task.modelKey ?? this.defaultModelKey;
+    this.activeByModel.set(modelKey, (this.activeByModel.get(modelKey) ?? 0) + 1);
     task.status = "running";
     task.startedAt = now();
     this.trace("subagent_started", { id: task.id, traceId: task.traceId, label: task.label });
@@ -395,6 +419,7 @@ export class SubagentRuntime {
       task.completedAt = now();
       this.#record(task.status, task);
       this.active -= 1;
+      this.activeByModel.set(modelKey, Math.max(0, (this.activeByModel.get(modelKey) ?? 1) - 1));
       task.resolve();
       this.#drain();
     }

@@ -18,6 +18,7 @@ import {
 } from "../../src/approval-queue.mjs";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { RISK, classifyToolCall, containsSecretLikeInput, policyRuleVersion, shouldBlockForLimits, validateToolInput } from "../../src/policy.mjs";
+import { createCheckpoint as persistCheckpoint, checkpointIdFor, listCheckpoints, restoreCheckpoint } from "../../src/checkpoint-store.mjs";
 import { createToolInvocation, createToolOutcome, riskMetadataFromPolicy } from "../../src/tool-contract.mjs";
 import { sweepRegisteredChildren } from "../../src/process-cleanup.mjs";
 import { validateEditFreshness } from "../../src/stale-edit.mjs";
@@ -651,6 +652,26 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       trace(ctx, "l1_audit_write_failed", { toolName: event.toolName });
     }
 
+    // Tool-level checkpoint (Claude Code / omp): snapshot mutating targets
+    // before execution so /equaxis-checkpoint restore can rewind a bad edit.
+    try {
+      if ((event.toolName === "write" || event.toolName === "edit") && (config as { checkpoints?: { enabled?: boolean } }).checkpoints?.enabled !== false) {
+        const rawPath = (event.input as Record<string, unknown>)?.path;
+        if (typeof rawPath === "string" && rawPath.trim()) {
+          const target = path.resolve(ctx.cwd, rawPath);
+          persistCheckpoint({
+            projectRoot: approvalProjectRoot(),
+            id: checkpointIdFor(event.toolCallId),
+            files: [target],
+            reason: `${event.toolName} on ${path.relative(approvalProjectRoot(), target)}`
+          });
+          trace(ctx, "checkpoint_created", { toolCallId: event.toolCallId, file: path.relative(approvalProjectRoot(), target) });
+        }
+      }
+    } catch {
+      trace(ctx, "checkpoint_failed", { toolName: event.toolName });
+    }
+
     state.toolCalls += 1;
     state.phase = "executing";
     pending.set(event.toolCallId, {
@@ -812,6 +833,37 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   pi.registerCommand("equaxis-trace", {
     description: "Show the JSONL audit trace path",
     handler: async (_args, ctx) => ctx.ui.notify(traceFile, "info")
+  });
+
+  pi.registerCommand("equaxis-checkpoint", {
+    description: "List or restore tool checkpoints: list | restore <id> | latest",
+    handler: async (args, ctx) => {
+      const tokens = args.trim().split(/\s+/).filter(Boolean);
+      const action = tokens[0] ?? "list";
+      if (action === "list") {
+        const items = listCheckpoints(approvalProjectRoot(), config.traceDir);
+        if (!items.length) {
+          ctx.ui.notify("No checkpoints yet (write/edit calls create them).");
+          return;
+        }
+        const lines = items.map((item) => `${item.id}  ${item.createdAt.slice(0, 19)}  ${item.files.length} file(s)  ${item.reason}`);
+        ctx.ui.notify(`Checkpoints (${items.length}):\n${lines.join("\n")}`);
+        return;
+      }
+      const id = tokens[1] ?? "latest";
+      const target = id === "latest" ? listCheckpoints(approvalProjectRoot(), config.traceDir)[0]?.id : id;
+      if (!target) {
+        ctx.ui.notify("No checkpoint to restore.");
+        return;
+      }
+      try {
+        const result = restoreCheckpoint({ projectRoot: approvalProjectRoot(), id: target });
+        trace(ctx, "checkpoint_restored", { id: target, files: result.restored });
+        ctx.ui.notify(`Restored checkpoint ${target}: ${result.restored.length} file(s) rewound.`);
+      } catch (error) {
+        ctx.ui.notify(`Restore failed: ${String((error as Error)?.message ?? error)}`, "error");
+      }
+    }
   });
 
   pi.registerCommand("equaxis-eval", {

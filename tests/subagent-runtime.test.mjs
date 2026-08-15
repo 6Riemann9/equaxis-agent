@@ -339,3 +339,33 @@ test("completion claims are evidence-checked without gating the run", async () =
   const plainResult = await plainRuntime.wait("ev-none");
   assert.equal(plainResult.evidence, null);
 });
+
+test("per-model concurrency buckets let other models run while one is saturated", async () => {
+  const runtime = new SubagentRuntime({
+    maxConcurrent: 4,
+    modelConcurrency: { "model-a": 1, "model-b": 1 },
+    executor: async (task) => { await sleep(60); return { ok: true, model: task.modelKey }; }
+  });
+  // 桶 a 限 1:三个 a 任务应串行;桶 b 限 1:一个 b 任务应与 a 并行
+  const t0 = Date.now();
+  runtime.spawn({ id: "a1", prompt: "a1", model: "model-a" });
+  runtime.spawn({ id: "a2", prompt: "a2", model: "model-a" });
+  runtime.spawn({ id: "a3", prompt: "a3", model: "model-a" });
+  runtime.spawn({ id: "b1", prompt: "b1", model: "model-b" });
+  const all = await runtime.waitAll(["a1", "a2", "a3", "b1"]);
+  const elapsed = Date.now() - t0;
+  // a 串行(3×60ms)+ b 并行 → 总耗时 < 4×60(全串行),> 60(全并行)
+  assert.ok(elapsed < 220, `expected near-parallel execution, took ${elapsed}ms`);
+  assert.ok(elapsed >= 160, `expected 3 serial a-runs to dominate, took ${elapsed}ms`);
+  assert.ok(all.every((s) => s.status === "completed"));
+  assert.equal(all.find((s) => s.id === "a1").modelKey, "model-a");
+});
+
+test("no modelConcurrency config keeps legacy behavior (single unbounded bucket)", async () => {
+  const runtime = new SubagentRuntime({ maxConcurrent: 2, executor: async () => { await sleep(40); return { ok: true }; } });
+  const t0 = Date.now();
+  runtime.spawn({ id: "x1", prompt: "x1" });
+  runtime.spawn({ id: "x2", prompt: "x2" });
+  await runtime.waitAll(["x1", "x2"]);
+  assert.ok(Date.now() - t0 < 70, "legacy: both run concurrently");
+});

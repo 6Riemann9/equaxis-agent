@@ -97,6 +97,7 @@ export default function subagentEngine(pi: ExtensionAPI): void {
         name: Type.String({ description: "Stable node name referenced by dependsOn" }),
         prompt: Type.String({ minLength: 1, description: "Self-contained subagent prompt" }),
         dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Node names this node waits for" })),
+        model: Type.Optional(Type.String({ description: "Model bucket key for per-model concurrency limits (optional)" })),
         timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 600000, description: "Per-node timeout in milliseconds" })),
         maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 5, description: "Per-node retry count after failures" })),
         traceId: Type.Optional(Type.String({ description: "Optional trace correlation id" })),
