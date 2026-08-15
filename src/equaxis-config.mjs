@@ -104,7 +104,8 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
   goalState: {
     enabled: true,
     rootDir: ".pi/runtime/goals",
-    defaultQuota: { tokenBudget: 200000, windowHours: 24 }
+    defaultQuota: { tokenBudget: 200000, windowHours: 24 },
+    autoWake: { enabled: false, intervalMinutes: 30, provider: "", model: "" }
   },
   refine: {
     enabled: true,
@@ -308,7 +309,7 @@ function mergeConfig(base, custom) {
     ["reliability", "costBrake"], ["reliability", "commandAllowlist"],
     ["protocols", "lsp"], ["protocols", "dap"],
     ["memory", "governance"], ["memory", "dream"], ["memory", "segmentation"],
-    ["goalState", "defaultQuota"],
+    ["goalState", "defaultQuota"], ["goalState", "autoWake"],
     ["subagents", "budgets"], ["subagents", "persistence"], ["subagents", "isolation"], ["subagents", "evidence"]
   ];
   for (const section of SECTIONS) {
@@ -359,7 +360,8 @@ function mergeConfig(base, custom) {
     goalState: {
       ...base.goalState,
       ...(custom.goalState ?? {}),
-      defaultQuota: { ...base.goalState.defaultQuota, ...(custom.goalState?.defaultQuota ?? {}) }
+      defaultQuota: { ...base.goalState.defaultQuota, ...(custom.goalState?.defaultQuota ?? {}) },
+      autoWake: { ...base.goalState.autoWake, ...(custom.goalState?.autoWake ?? {}) }
     },
     refine: { ...base.refine, ...(custom.refine ?? {}) },
     wiki: { ...base.wiki, ...(custom.wiki ?? {}) },
@@ -526,6 +528,14 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertRecord(config.goalState.defaultQuota, configPath, "goalState.defaultQuota");
   assertNumber(config.goalState.defaultQuota.tokenBudget, configPath, "goalState.defaultQuota.tokenBudget", 1, 1_000_000_000);
   assertNumber(config.goalState.defaultQuota.windowHours, configPath, "goalState.defaultQuota.windowHours", 1, 24 * 365);
+  assertRecord(config.goalState.autoWake, configPath, "goalState.autoWake");
+  assertBoolean(config.goalState.autoWake.enabled, configPath, "goalState.autoWake.enabled");
+  assertInteger(config.goalState.autoWake.intervalMinutes, configPath, "goalState.autoWake.intervalMinutes", 5, 1440);
+  for (const field of ["provider", "model"]) {
+    if (typeof config.goalState.autoWake[field] !== "string" || config.goalState.autoWake[field].includes("\0")) {
+      throw configError(configPath, `goalState.autoWake.${field}`, "must be a string");
+    }
+  }
 
   assertRecord(config.refine, configPath, "refine");
   assertBoolean(config.refine.enabled, configPath, "refine.enabled");

@@ -546,7 +546,8 @@
       "required": [
         "enabled",
         "rootDir",
-        "defaultQuota"
+        "defaultQuota",
+        "autoWake"
       ],
       "properties": {
         "enabled": {
@@ -571,6 +572,32 @@
             "windowHours": {
               "type": "integer",
               "minimum": 1
+            }
+          }
+        },
+        "autoWake": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "intervalMinutes",
+            "provider",
+            "model"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "intervalMinutes": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 1440
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
             }
           }
         }

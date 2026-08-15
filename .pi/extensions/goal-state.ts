@@ -2,11 +2,13 @@ import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-
 import { Type } from "typebox";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { createGoalStore } from "../../src/goal-state.mjs";
+import { buildWakePlan, scheduledTaskCommand } from "../../src/wake-scheduler.mjs";
 
 interface GoalStateConfig {
   enabled: boolean;
   rootDir: string;
   defaultQuota: { tokenBudget: number; windowHours: number };
+  autoWake: { enabled: boolean; intervalMinutes: number; provider: string; model: string };
 }
 
 interface GoalStatus {
@@ -125,7 +127,7 @@ export default function equaxisGoalState(pi: ExtensionAPI): void {
 
   pi.registerCommand("equaxis-goal", {
     description:
-      "Durable goal state: status | activate <id> <objective> | update <objective> | gate <name> <satisfy|block|open> [detail] | todo <text> | claim <todoId> | done <todoId> | evidence <kind> <detail> | spend <tokens> | should-run | handoff <to> [note] | complete [summary]",
+      "Durable goal state: status | activate <id> <objective> | update <objective> | gate <name> <satisfy|block|open> [detail] | todo <text> | claim <todoId> | done <todoId> | evidence <kind> <detail> | spend <tokens> | should-run | wake | schedule | handoff <to> [note] | complete [summary]",
     handler: async (args, ctx) => {
       if (!config.enabled) {
         ctx.ui.notify("Goal state is disabled (.pi/equaxis.json goalState.enabled)", "info");
@@ -251,6 +253,24 @@ export default function equaxisGoalState(pi: ExtensionAPI): void {
             if (!result.ok) throw new Error(`cannot complete: open gates ${(result.openGates ?? []).join(", ")}`);
             trace(ctx, "goal_completed", { goalId: goal.id, summary });
             ctx.ui.notify("Goal completed", "info");
+            return;
+          }
+          case "wake": {
+            const goal = current.activeGoal();
+            const plan = buildWakePlan({ goal, config });
+            const detail = plan.eligible
+              ? `eligible (${plan.spent}/${plan.budget} spent)${plan.nextAction ? `\nNext action: ${plan.nextAction}` : ""}${plan.wouldRun ? "\nAuto-wake: ENABLED — scheduled probe will launch a session" : "\nAuto-wake: disabled (goalState.autoWake.enabled=false) or no nextAction"}`
+              : plan.reason === "gate_open"
+                ? `blocked by gate ${plan.gate} (non-dependent lanes may continue)`
+                : plan.reason === "quota_exhausted"
+                  ? `quota exhausted (${plan.spent}/${plan.budget}); next eligible ${plan.nextEligibleAt ?? "unknown"}`
+                  : plan.reason;
+            ctx.ui.notify(plan.eligible ? `Wake: should run — ${detail}` : `Wake: should not run — ${detail}`, plan.eligible ? "info" : "warning");
+            return;
+          }
+          case "schedule": {
+            const command = scheduledTaskCommand({ projectRoot: services.paths.workspace, intervalMinutes: config.autoWake?.intervalMinutes ?? 30 });
+            ctx.ui.notify(`Register the wake cadence in an admin shell:\n\n${command}\n\nRemove with:\nschtasks /Delete /TN "EquaxisWake" /F`, "info");
             return;
           }
           default:
