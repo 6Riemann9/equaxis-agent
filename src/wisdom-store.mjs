@@ -90,7 +90,7 @@ export function pruneWisdom({ projectRoot, keep = 200, rootDir = ".pi/runtime/su
         return { name, recordedAt: "" };
       }
     })
-    .sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt)));
+    .sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt)) || b.name.localeCompare(a.name));
   const removed = [];
   for (const entry of entries.slice(keep)) {
     try {
