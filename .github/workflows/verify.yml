@@ -31,6 +31,9 @@ jobs:
       - name: Install Python memory core
         run: python -m pip install -e ./vendor/agent-memory
 
+      - name: Install debugpy (real DAP regression tests)
+        run: python -m pip install debugpy
+
       - name: Type check
         run: npm run check
 
