@@ -99,7 +99,7 @@ export class SubagentRuntime {
     // Terminal-task retention: keep the newest N settled tasks so long
     // sessions do not grow this.tasks (and their AbortControllers, and any
     // abort listeners hanging off them) without bound.
-    this.terminalRetention = Math.max(10, Number(options.terminalRetention ?? 200));
+    this.terminalRetention = Math.max(1, Number(options.terminalRetention ?? 200));
     this.activeByModel = new Map();
     this.#restoreSnapshots();
   }
