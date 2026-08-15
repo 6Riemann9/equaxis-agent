@@ -655,6 +655,14 @@ ${context || "No relevant stored memory was retrieved."}
         const filePath = requested
           ? path.resolve(ctx.cwd, requested)
           : path.join(defaultDir, `equaxis-memory-${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}.json`);
+        // Containment: exports must stay inside the workspace (relative check,
+        // same rule as every other write path).
+        const relative = path.relative(ctx.cwd, filePath);
+        if (relative.startsWith("..") || path.isAbsolute(relative)) {
+          ctx.ui.notify("Memory export path must stay inside the workspace.", "error");
+          return;
+        }
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
         trace(ctx, "memory_exported", { file: filePath, drawers: data.drawers?.length ?? 0, facts: data.facts?.length ?? 0, history: data.history?.length ?? 0 });
         ctx.ui.notify(`Memory exported: ${filePath} (${data.drawers?.length ?? 0} drawers, ${data.facts?.length ?? 0} facts, ${data.history?.length ?? 0} history)`, "info");

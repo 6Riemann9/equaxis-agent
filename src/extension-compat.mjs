@@ -315,6 +315,10 @@ export function diffExtensionCapabilities(before = {}, after = {}) {
 export function inspectLoadedExtensions(loaded, manifestReport) {
   const errors = [...(manifestReport.errors ?? [])];
   const warnings = [...(manifestReport.warnings ?? [])];
+  // Notes are informational only: extensions loaded from the Pi ecosystem
+  // (auto-discovered or installed via settings.json packages / pi install)
+  // have no Equaxis contract and are deliberately NOT treated as warnings.
+  const notes = [];
   const contracts = manifestReport.contracts ?? [];
   const registrations = [
     ...(loaded?.runtime?.pendingProviderRegistrations ?? []),
@@ -328,7 +332,10 @@ export function inspectLoadedExtensions(loaded, manifestReport) {
   const capabilities = new Set();
 
   for (const contract of contracts) {
-    const extension = loadedByEntry.get(contract.entry);
+    // Match by resolved basename first, then by the raw entry string: Pi's
+    // loader resolves directory entries (e.g. 'plugins/foo' -> index.ts), so
+    // the loaded path's basename may differ from the contract entry.
+    const extension = loadedByEntry.get(path.basename(contract.entry)) ?? loadedByEntry.get(contract.entry);
     if (!extension) {
       const loadError = (loaded?.errors ?? []).find((item) => path.basename(item.path) === contract.entry);
       const message = loadError?.error ?? `extension was not loaded: ${contract.entry}`;
@@ -359,14 +366,18 @@ export function inspectLoadedExtensions(loaded, manifestReport) {
     }
   }
 
+  // Third-party Pi extensions (no Equaxis contract) are first-class citizens:
+  // they load through Pi's own discovery/install mechanism and are never
+  // treated as contract failures. Contracts only govern Equaxis' own bundled
+  // extensions.
   for (const extension of loaded?.extensions ?? []) {
     if (!contractEntries.has(path.basename(extension.path))) {
-      warnings.push(issue("warning", `loaded extension has no contract: ${path.basename(extension.path)}`));
+      notes.push(issue("note", `loaded extension has no Equaxis contract (Pi ecosystem, not governed): ${path.basename(extension.path)}`));
     }
   }
   for (const loadError of loaded?.errors ?? []) {
     if (!contractEntries.has(path.basename(loadError.path))) {
-      warnings.push(issue("warning", `uncontracted extension failed to load: ${loadError.path}`));
+      notes.push(issue("note", `uncontracted extension failed to load: ${loadError.path}`));
     }
   }
 
@@ -387,16 +398,20 @@ export function inspectLoadedExtensions(loaded, manifestReport) {
     ok: errors.length === 0,
     errors,
     warnings,
+    notes,
     capabilities: [...capabilities].sort(),
     snapshot: extensionCapabilitySnapshot(loaded, registrations),
     loadedExtensions: (loaded?.extensions ?? []).map((extension) => path.basename(extension.path))
   };
 }
 
-export function formatExtensionContractReport(report) {
+export function formatExtensionContractReport(report, options = {}) {
   const lines = [`Pi: ${report.piVersion ?? "not installed"}`];
   for (const item of report.errors ?? []) lines.push(`FAIL  ${item.message}`);
   for (const item of report.warnings ?? []) lines.push(`WARN  ${item.message}`);
+  if (options.showNotes) {
+    for (const item of report.notes ?? []) lines.push(`NOTE  ${item.message}`);
+  }
   if (report.ok && !(report.warnings ?? []).length) lines.push("PASS  Extension contracts are compatible");
   return lines.join("\n");
 }

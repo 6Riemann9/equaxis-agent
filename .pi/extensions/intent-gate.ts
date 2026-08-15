@@ -41,6 +41,9 @@ export default function equaxisIntentGate(pi: ExtensionAPI): void {
   const config = services.config.intentGate as IntentGateConfig | undefined;
   const compiled = (config?.patterns ?? DEFAULT_PATTERNS)
     .filter((pattern) => config?.enabled !== false && pattern?.regex && pattern?.inject)
+    // Bounded: regex length cap plus prompt-length cap keep pathological
+    // user patterns (catastrophic backtracking) from stalling a turn.
+    .filter((pattern) => pattern.regex.length <= 512 && pattern.inject.length <= 2000)
     .map((pattern) => {
       try {
         return { regex: new RegExp(pattern.regex, "i"), inject: pattern.inject };
@@ -56,11 +59,11 @@ export default function equaxisIntentGate(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event, ctx) => {
     if (!compiled.length) return;
-    const prompt = String(event.prompt ?? "");
+    const prompt = String(event.prompt ?? "").slice(0, 20000); // bound regex work
     const hits = compiled.filter(({ regex }) => regex.test(prompt));
     if (!hits.length) return;
     const blocks = hits.map(({ inject }) => inject).join("\n");
-    trace(ctx, "intent_gate_injected", { hits: hits.length, patterns: compiled.map((_, i) => i).filter((i) => compiled[i].regex.test(prompt)).length });
+    trace(ctx, "intent_gate_injected", { hits: hits.length, promptChars: prompt.length });
     return { systemPrompt: `${event.systemPrompt}\n\n${blocks}` };
   });
 }

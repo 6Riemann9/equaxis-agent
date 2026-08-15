@@ -10,7 +10,9 @@ function assertInside(root, target, label) {
 }
 
 function safeName(value) {
-  return String(value || "skill").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "skill";
+  const cleaned = String(value || "skill").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "skill";
+  // Reject dot-only names: "." and ".." would resolve outside the skills dir.
+  return cleaned.replace(/^\.+$/, "skill") || "skill";
 }
 
 function hashText(text) {
