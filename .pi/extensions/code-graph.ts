@@ -5,11 +5,13 @@ import { createExtensionRuntimeServices } from "../../src/extension-runtime-serv
 import {
   buildCodeIndex,
   codeIndexPath,
+  collectEditedFilesFromCheckpoints,
   deadCodeReport,
   findSymbols,
   impactClosure,
   isIndexFresh,
   loadCodeIndex,
+  overlayTraceEdits,
   queryCallees,
   queryCallers,
   queryExports,
@@ -52,7 +54,7 @@ interface CodeGraphIndex {
   stats: { files: number; symbols: number; importEdges: number; callEdges: number; externalImports: number };
 }
 
-const QUERY_KINDS = ["callers", "callees", "importers", "exports", "find", "impact", "dead_code"] as const;
+const QUERY_KINDS = ["callers", "callees", "importers", "exports", "find", "impact", "dead_code", "edit_overlay"] as const;
 type QueryKind = (typeof QUERY_KINDS)[number];
 
 interface CodeGraphStats {
@@ -154,6 +156,10 @@ export default function equaxisCodeGraph(pi: ExtensionAPI): void {
       case "dead_code": {
         return deadCodeReport(index, { entryRoots });
       }
+      case "edit_overlay": {
+        const edits = collectEditedFilesFromCheckpoints(services.paths.workspace);
+        return { overlay: overlayTraceEdits(index, edits) };
+      }
       default:
         throw new Error(`unknown query kind: ${kind}`);
     }
@@ -168,7 +174,7 @@ export default function equaxisCodeGraph(pi: ExtensionAPI): void {
     name: "code_graph_query",
     label: "Code Graph Query",
     description:
-      "Query the workspace code knowledge graph. Kinds: callers/callees of a symbol (by name or file::Name id), importers/exports of a file, find symbols by name, impact closure (what transitively depends on a symbol or file), dead_code report from entry roots. Rebuilds the index when stale.",
+      "Query the workspace code knowledge graph. Kinds: callers/callees of a symbol (by name or file::Name id), importers/exports of a file, find symbols by name, impact closure (what transitively depends on a symbol or file), dead_code report from entry roots, edit_overlay (recently edited files from checkpoints with symbols that have no static callers). Rebuilds the index when stale.",
     promptSnippet: "Query the code graph",
     promptGuidelines: [
       "Use code_graph_query before refactoring a symbol to learn what depends on it (kind=impact).",

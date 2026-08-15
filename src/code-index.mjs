@@ -22,6 +22,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { listCheckpoints } from "./checkpoint-store.mjs";
 
 export const CODE_INDEX_SCHEMA_VERSION = 1;
 
@@ -524,4 +525,64 @@ export function isIndexFresh(index, { maxAgeMs = 6 * 3600 * 1000, now = Date.now
   const built = Date.parse(index.builtAt);
   if (!Number.isFinite(built)) return false;
   return now() - built <= maxAgeMs;
+}
+
+/**
+ * Dynamic-edit overlay (code-graph-rag "cgr trace" minimal slice): merge
+ * files edited by recent runs into the static index and flag edited symbols
+ * that no static caller (and no file importer) references — the analog of
+ * cgr's static_missed flag for dynamically-dispatched callsites. A freshly
+ * edited symbol with zero static references is the highest-risk edit: either
+ * dead code, or a break the static graph cannot see.
+ *
+ * @param {object} index
+ * @param {Array<{file: string, at?: string|null}>} edits workspace-relative
+ *   edited file paths (newest first)
+ */
+export function overlayTraceEdits(index, edits = []) {
+  const fileSet = new Set(index.files.map((file) => file.path));
+  const touched = [];
+  const editedWithoutCallers = [];
+  const editedFileUnreferenced = [];
+  const seenFiles = new Set();
+  for (const edit of edits) {
+    const file = String(edit.file ?? "").replaceAll("\\", "/");
+    if (!fileSet.has(file) || seenFiles.has(file)) continue;
+    seenFiles.add(file);
+    const symbols = index.symbols.filter((symbol) => symbol.file === file);
+    for (const symbol of symbols) {
+      const hasCallers = index.calls.some((call) => call.resolved.includes(symbol.id));
+      if (!hasCallers) {
+        editedWithoutCallers.push({ id: symbol.id, name: symbol.name, kind: symbol.kind, file });
+      }
+    }
+    const fileImported = index.files.some((entry) => entry.imports.some((imp) => imp.target === file && !imp.external));
+    if (!fileImported) {
+      editedFileUnreferenced.push({ file });
+    }
+    touched.push({ file, at: edit.at ?? null, symbols: symbols.map((symbol) => symbol.id) });
+  }
+  const dynamicEdges = touched.flatMap((entry) => entry.symbols.map((id) => ({ file: entry.file, symbol: id })));
+  return { touched, editedWithoutCallers, editedFileUnreferenced, dynamicEdges };
+}
+
+/**
+ * Collect files edited by recent write/edit runs from the tool-level
+ * checkpoint store (newest first, deduplicated). Checkpoints snapshot the
+ * targets of every mutating tool call, so they are a deterministic,
+ * trace-schema-free record of "what the agent has been touching".
+ */
+export function collectEditedFilesFromCheckpoints(projectRoot, { traceDir = ".pi/runtime", limit = 20 } = {}) {
+  const checkpoints = listCheckpoints(path.resolve(projectRoot), traceDir, limit);
+  const edits = [];
+  const seen = new Set();
+  for (const checkpoint of checkpoints) {
+    for (const file of checkpoint.files ?? []) {
+      const normalized = String(file).replaceAll("\\", "/");
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      edits.push({ file: normalized, at: checkpoint.createdAt ?? null, checkpointId: checkpoint.id });
+    }
+  }
+  return edits;
 }

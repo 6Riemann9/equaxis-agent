@@ -10,6 +10,8 @@ import {
   impactClosure,
   isIndexFresh,
   loadCodeIndex,
+  overlayTraceEdits,
+  collectEditedFilesFromCheckpoints,
   queryCallees,
   queryCallers,
   queryExports,
@@ -17,6 +19,7 @@ import {
   resolveRelativeImport,
   saveCodeIndex
 } from "../src/code-index.mjs";
+import { createCheckpoint } from "../src/checkpoint-store.mjs";
 
 function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "code-index-test-"));
@@ -241,3 +244,49 @@ test("empty workspace builds an empty index without throwing", (t) => {
   assert.equal(index.stats.symbols, 0);
   assert.deepEqual(deadCodeReport(index).reachableFiles, []);
 });
+
+test("overlayTraceEdits flags edited symbols with no static callers", (t) => {
+  const root = workspace(t);
+  writeFixture(root);
+  const index = buildCodeIndex({ cwd: root });
+
+  // helper has a caller (main); unused has none; Service.run has a caller; d.ts standalone has none
+  const overlay = overlayTraceEdits(index, [
+    { file: "src/b.ts", at: "2026-08-15T00:00:00.000Z" },
+    { file: "src/d.ts", at: "2026-08-15T00:01:00.000Z" },
+    { file: "src/not-indexed.ts", at: "2026-08-15T00:02:00.000Z" }
+  ]);
+  assert.deepEqual(
+    overlay.touched.map((entry) => entry.file),
+    ["src/b.ts", "src/d.ts"]
+  );
+  assert.deepEqual(
+    overlay.editedWithoutCallers.map((entry) => entry.id).sort(),
+    ["src/b.ts::unused", "src/d.ts::standalone"]
+  );
+  // helper is called by main, so it must NOT be flagged
+  assert.ok(!overlay.editedWithoutCallers.some((entry) => entry.id === "src/b.ts::helper"));
+  // file-level signal: b.ts is imported by a.ts, d.ts is not
+  assert.deepEqual(overlay.editedFileUnreferenced, [{ file: "src/d.ts" }]);
+  assert.equal(overlay.dynamicEdges.length, 4); // b.ts symbols + d.ts symbol
+});
+
+test("collectEditedFilesFromCheckpoints reads recent edits newest-first", (t) => {
+  const root = workspace(t);
+  const target = path.join(root, "src", "a.ts");
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(target, "export const a = 1;\n");
+  fs.writeFileSync(path.join(root, "src", "b.ts"), "export const b = 2;\n");
+  createCheckpoint({ projectRoot: root, id: "cp-1", files: [target], reason: "edit a" });
+  createCheckpoint({ projectRoot: root, id: "cp-2", files: [target, path.join(root, "src", "b.ts")], reason: "edit a+b" });
+
+  const edits = collectEditedFilesFromCheckpoints(root);
+  assert.equal(edits.length, 2);
+  assert.equal(edits[0].checkpointId, "cp-2", "newest checkpoint first");
+  assert.equal(edits[1].checkpointId, "cp-2");
+  assert.equal(edits[1].file, "src/b.ts");
+  assert.ok(edits[0].at);
+
+  assert.deepEqual(collectEditedFilesFromCheckpoints(path.join(root, "nope")), []);
+});
+
