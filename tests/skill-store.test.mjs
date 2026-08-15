@@ -145,3 +145,36 @@ test("returns null for an empty or lesson-free run", () => {
   assert.equal(deriveSkillFromRun({ goal: "read" }), null);
   assert.equal(deriveSkillFromRun(undefined), null);
 });
+
+test("serialize/parse round-trips provenance (evidence, source, retired)", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-skill-provenance-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const filePath = writeSkillFile(root, {
+    name: "traceable-skill",
+    description: "desc",
+    triggers: ["go"],
+    body: "Do the thing.",
+    evidence: ["e1", "e2"],
+    source: "failed run: deploy pipeline"
+  });
+  const reloaded = loadSkillsFromDirectory(root);
+  assert.equal(reloaded.length, 1);
+  assert.deepEqual(reloaded[0].evidence, ["e1", "e2"]);
+  assert.match(reloaded[0].source, /deploy pipeline/);
+  assert.equal(reloaded[0].retired, false);
+  assert.ok(reloaded[0].created, "created timestamp must be auto-added for evidence-backed skills");
+});
+
+test("retired skills are excluded from selection but stay on disk", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-skill-retired-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writeSkillFile(root, { name: "safe-skill", description: "safe one", triggers: ["safe"], body: "ok" });
+  writeSkillFile(root, { name: "risky-skill", description: "risky one", triggers: ["risky"], body: "not ok", retired: true, retiredReason: "no benign reuse" });
+
+  const all = loadSkillsFromDirectory(root);
+  assert.equal(all.length, 2);
+  const { selected } = selectRelevantSkills(all, "risky");
+  assert.ok(!selected.some((s) => s.name === "risky-skill"), "retired skill must not be injected");
+  const { selected: safe } = selectRelevantSkills(all, "safe");
+  assert.equal(safe.length, 1);
+});

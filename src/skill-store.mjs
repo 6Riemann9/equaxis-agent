@@ -34,8 +34,10 @@ export function parseSkillFile(content, filePath = "") {
     if (sep === -1) continue;
     const key = line.slice(0, sep).trim().toLowerCase();
     const value = line.slice(sep + 1).trim();
-    if (key === "triggers") {
-      meta.triggers = value.replace(/^\[|\]$/g, "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (key === "triggers" || key === "evidence") {
+      meta[key] = value.replace(/^\[|\]$/g, "").split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (key === "retired") {
+      meta[key] = value.toLowerCase() === "true";
     } else {
       meta[key] = value;
     }
@@ -44,6 +46,11 @@ export function parseSkillFile(content, filePath = "") {
     name: meta.name || path.basename(path.dirname(filePath)) || "untitled",
     description: meta.description ?? "",
     triggers: meta.triggers ?? [],
+    evidence: meta.evidence ?? [],
+    source: meta.source ?? "",
+    created: meta.created ?? "",
+    retired: meta.retired ?? false,
+    retiredReason: meta.retiredreason ?? "",
     body,
     filePath,
     baseDir: path.dirname(filePath)
@@ -108,7 +115,10 @@ export function scoreSkill(skill, queryTokens) {
 export function selectRelevantSkills(skills, query, options = {}) {
   const maxTokens = Math.max(1, Math.floor(Number(options.maxTokens ?? 3000)));
   const queryTokens = queryTokensFor(query);
-  const scored = skills
+  // Retired skills are excluded from injection: they failed evidence-driven
+  // retirement (PracticeUnsafe 2608.12851) and must not resurface in context.
+  const active = skills.filter((skill) => skill.retired !== true);
+  const scored = active
     .map((skill) => ({ skill, score: scoreSkill(skill, queryTokens) }))
     .filter(({ score }) => score > 0 || queryTokens.length === 0)
     .sort((left, right) => right.score - left.score || left.skill.name.localeCompare(right.skill.name));
@@ -180,6 +190,18 @@ export function serializeSkill(skill) {
   const frontmatter = ["---", `name: ${skill.name}`];
   if (skill.description) frontmatter.push(`description: ${skill.description}`);
   if (skill.triggers?.length) frontmatter.push(`triggers: [${skill.triggers.join(", ")}]`);
+  // Provenance (血缘): evidence-backed skills stay auditable after deploy.
+  // PracticeUnsafe (2608.12851) shows unsafe successes harden into skills and
+  // get reused across sessions; persisting source+evidence makes every skill
+  // traceable to the run that produced it.
+  if (skill.evidence?.length) frontmatter.push(`evidence: [${skill.evidence.join(", ")}]`);
+  if (skill.source) frontmatter.push(`source: ${String(skill.source).replace(/\n/g, " ")}`);
+  if (!skill.created && (skill.evidence?.length || skill.source)) frontmatter.push(`created: ${new Date().toISOString()}`);
+  if (skill.created) frontmatter.push(`created: ${skill.created}`);
+  if (skill.retired === true) {
+    frontmatter.push("retired: true");
+    if (skill.retiredReason) frontmatter.push(`retiredReason: ${String(skill.retiredReason).replace(/\n/g, " ")}`);
+  }
   frontmatter.push("---");
   return `${frontmatter.join("\n")}\n\n${String(skill.body ?? "").trim()}\n`;
 }

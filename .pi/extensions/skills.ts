@@ -118,7 +118,9 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
       name: draft.name,
       description: draft.description,
       triggers: draft.triggers,
-      body: draft.body
+      body: draft.body,
+      evidence: draft.evidence,
+      source: draft.sourceRun
     });
     services.trace.record(ctx, "skill_auto_extracted", {
       name: draft.name,
@@ -154,7 +156,14 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
         ],
         details: {
           query: params.query,
-          matches: selected.map((s: SkillView) => ({ name: s.name, description: s.description, estimatedTokens: s.estimatedTokens })),
+          matches: selected.map((s: SkillView) => ({
+            name: s.name,
+            description: s.description,
+            estimatedTokens: s.estimatedTokens,
+            source: (s as { source?: string }).source ?? "",
+            evidence: (s as { evidence?: string[] }).evidence ?? [],
+            retired: (s as { retired?: boolean }).retired === true
+          })),
           omitted: omitted.map((s) => s.name)
         }
       };

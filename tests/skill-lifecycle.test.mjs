@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadSkillsFromDirectory } from "../src/skill-store.mjs";
+import { loadSkillsFromDirectory, selectRelevantSkills } from "../src/skill-store.mjs";
 import { VersionStore } from "../src/version-store.mjs";
-import { applySkillCandidate, createSkillCandidate, rollbackSkillCandidate } from "../src/skill-lifecycle.mjs";
+import { applySkillCandidate, applySkillCandidateGuarded, createSkillCandidate, retireSkill, reviewSkillCandidate, rollbackSkillCandidate } from "../src/skill-lifecycle.mjs";
 
 function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-skill-lifecycle-"));
@@ -53,4 +53,53 @@ test("rollback restores the previous skill content", (t) => {
 
   const restored = fs.readFileSync(path.join(root, ".pi", "skills", "review-flow", "SKILL.md"), "utf8");
   assert.match(restored, /Old body/);
+});
+
+test("review gate passes create-only candidates", (t) => {
+  const root = workspace(t);
+  createSkillCandidate({ projectRoot: root, skillsDir: ".pi/skills", skill: SKILL, id: "review-create" });
+  const review = reviewSkillCandidate({ projectRoot: root, skillsDir: ".pi/skills", id: "review-create" });
+  assert.equal(review.verdict, "pass");
+});
+
+test("review gate blocks updates that add lines without evidence", (t) => {
+  const root = workspace(t);
+  fs.mkdirSync(path.join(root, ".pi", "skills", "review-flow"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".pi", "skills", "review-flow", "SKILL.md"), "---\nname: review-flow\ndescription: old\n---\n\nOld body\n", "utf8");
+  createSkillCandidate({ projectRoot: root, skillsDir: ".pi/skills", skill: SKILL, id: "review-update" });
+  const review = reviewSkillCandidate({ projectRoot: root, skillsDir: ".pi/skills", id: "review-update" });
+  assert.equal(review.verdict, "needs_review");
+  assert.ok(review.addedLines.length > 0);
+  assert.throws(
+    () => applySkillCandidateGuarded({ projectRoot: root, skillsDir: ".pi/skills", id: "review-update" }),
+    (err) => err.code === "SKILL_REVIEW_BLOCKED"
+  );
+});
+
+test("review gate passes updates when evidence is supplied", (t) => {
+  const root = workspace(t);
+  fs.mkdirSync(path.join(root, ".pi", "skills", "review-flow"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".pi", "skills", "review-flow", "SKILL.md"), "---\nname: review-flow\ndescription: old\n---\n\nOld body\n", "utf8");
+  createSkillCandidate({ projectRoot: root, skillsDir: ".pi/skills", skill: SKILL, id: "review-evidenced", evidence: ["s1", "s2"] });
+  const review = reviewSkillCandidate({ projectRoot: root, skillsDir: ".pi/skills", id: "review-evidenced", evidence: ["s1", "s2"] });
+  assert.equal(review.verdict, "pass");
+  const applied = applySkillCandidateGuarded({ projectRoot: root, skillsDir: ".pi/skills", id: "review-evidenced" });
+  assert.equal(applied.status, "deployed");
+});
+
+test("retireSkill flips frontmatter and keeps content for audit", (t) => {
+  const root = workspace(t);
+  createSkillCandidate({ projectRoot: root, skillsDir: ".pi/skills", skill: SKILL, id: "retire-me" });
+  applySkillCandidate({ projectRoot: root, skillsDir: ".pi/skills", id: "retire-me" });
+  const retired = retireSkill({ projectRoot: root, skillsDir: ".pi/skills", name: "review-flow", reason: "no benign reuse in 30 days" });
+  assert.equal(retired.status, "retired");
+  const file = fs.readFileSync(path.join(root, ".pi", "skills", "review-flow", "SKILL.md"), "utf8");
+  assert.match(file, /retired: true/);
+  assert.match(file, /no benign reuse/);
+  assert.match(file, /Check correctness/);
+  const loaded = loadSkillsFromDirectory(path.join(root, ".pi", "skills"));
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].retired, true);
+  const { selected } = selectRelevantSkills(loaded, "review");
+  assert.equal(selected.length, 0, "retired skill must not be selected for injection");
 });
