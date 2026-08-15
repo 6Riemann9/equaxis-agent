@@ -30,6 +30,11 @@ class LongTermConfig:
     closet_collection_name: str = "agent_memory_closets"
     embedding_model: str = "all-MiniLM-L6-v2"
     chroma_subdir: str = "palace"
+    # Closet 加分门控的 embedding 距离阈值(L2 距离,越小越相似)。
+    # SimGates (arXiv 2608.10216) 证明 embedding 距离阈值在措辞变化/否定翻转下
+    # 不可靠,因此不作为硬过滤,只控制加分强度,且采用分段衰减避免硬边界。
+    closet_boost_cutoff: float = 1.5  # 距离超过该值:不加分(原行为,现可配置)
+    closet_boost_full: float = 0.8  # 距离低于该值:全额加分;介于 full 与 cutoff 之间:半额加分
 
 
 @dataclass(slots=True)

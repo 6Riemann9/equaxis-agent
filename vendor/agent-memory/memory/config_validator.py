@@ -67,6 +67,16 @@ def validate_config(config: MemoryConfig) -> list[str]:
     if not config.long_term.embedding_model:
         warnings.append("long_term.embedding_model cannot be empty")
 
+    # Validate closet boost distance thresholds
+    if config.long_term.closet_boost_cutoff <= 0:
+        warnings.append("long_term.closet_boost_cutoff must be > 0")
+
+    if config.long_term.closet_boost_full <= 0:
+        warnings.append("long_term.closet_boost_full must be > 0")
+
+    if config.long_term.closet_boost_full >= config.long_term.closet_boost_cutoff:
+        warnings.append("long_term.closet_boost_full must be < closet_boost_cutoff")
+
     if not config.knowledge_graph.sqlite_filename:
         warnings.append("knowledge_graph.sqlite_filename cannot be empty")
 

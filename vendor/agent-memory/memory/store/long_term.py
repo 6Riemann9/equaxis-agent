@@ -218,11 +218,18 @@ class LongTermMemoryStore:
         result = self.closets.query(query_texts=[query], n_results=5, where=self._build_where(wing=wing, room=room))
         boosts: dict[str, float] = {}
         distances = result.get("distances") or [[]]
+        cutoff = float(self.config.long_term.closet_boost_cutoff)
+        full = float(self.config.long_term.closet_boost_full)
         for index, metadata in enumerate((result.get("metadatas") or [[]])[0]):
             rank_boost = [0.40, 0.25, 0.15, 0.08, 0.04][index] if index < 5 else 0.0
             distance = distances[0][index] if distances and distances[0] else 0.0
-            if distance > 1.5:
+            if distance > cutoff:
                 continue
+            # 分段衰减:full 以内全额,full~cutoff 半额。
+            # embedding 距离在措辞变化/否定翻转时不可靠(SimGates 2608.10216),
+            # 硬边界会让"边缘相关"的记忆在 0.01 距离差上从满分变成零分。
+            if distance > full:
+                rank_boost *= 0.5
             source = metadata.get("source_file")
             if source:
                 boosts[source] = max(boosts.get(source, 0.0), rank_boost)

@@ -108,6 +108,32 @@ class TestLongTermMemoryStore:
         store.close()
         store.close()
 
+    def test_closet_boosts_staged_decay(self, store, monkeypatch):
+        """分段衰减:full 内全额、full~cutoff 半额、cutoff 外零分。
+
+        对应 SimGates (arXiv 2608.10216) 的教训:embedding 距离阈值
+        在措辞变化下不可靠,硬边界会让边缘相关记忆在微小距离差上
+        从满分跳到零分。这里验证加分是渐变的,而非二值。
+        """
+
+        def fake_query(query_texts, n_results, where):
+            return {
+                "ids": [["c1", "c2", "c3"]],
+                "metadatas": [[{"source_file": "a.md"}, {"source_file": "b.md"}, {"source_file": "c.md"}]],
+                "distances": [[0.5, 1.0, 1.6]],
+            }
+
+        monkeypatch.setattr(store.closets, "query", fake_query)
+        boosts = store._closet_boosts(query="anything", wing="w", room="r")
+        # rank0 全额 0.40;rank1 半额 0.125;rank2 超 cutoff 无加分
+        assert boosts == {"a.md": 0.40, "b.md": 0.125}
+
+    def test_closet_boosts_configurable_thresholds(self, store, monkeypatch):
+        """cutoff/full 可从配置调整,默认 full=0.8、cutoff=1.5。"""
+        cfg = store.config.long_term
+        assert cfg.closet_boost_cutoff == 1.5
+        assert cfg.closet_boost_full == 0.8
+
     def test_close_does_not_break_basic_lifecycle(self, store):
         record = store.add_drawer(
             wing="wing-close",
