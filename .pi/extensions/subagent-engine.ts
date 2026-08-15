@@ -7,6 +7,7 @@ import { SubagentRuntime } from "../../src/subagent-runtime.mjs";
 import { createPiJsonExecutor } from "../../src/subagent-executor.mjs";
 import { SubagentStateStore } from "../../src/subagent-state-store.mjs";
 import { createFileEvidenceVerifier } from "../../src/subagent-evidence.mjs";
+import { recordWisdom, wisdomPreamble } from "../../src/wisdom-store.mjs";
 
 interface SubagentEngineConfig {
   enabled: boolean;
@@ -64,6 +65,15 @@ export default function subagentEngine(pi: ExtensionAPI): void {
     defaultMaxRetries: config?.budgets?.maxRetries ?? 0,
     stateStore,
     verifyEvidence: config?.evidence?.enabled === false ? null : createFileEvidenceVerifier({ projectRoot }),
+    onTaskComplete: (task: { id: string; label: string; status: string; result?: unknown }) => {
+      // Wisdom accumulation: persist a compact summary so later DAG batches
+      // (and later sessions) reuse what this node learned.
+      try {
+        recordWisdom({ projectRoot, taskId: task.id, label: task.label, status: task.status, result: task.result });
+      } catch {
+        // best effort
+      }
+    },
     executor: createPiJsonExecutor({
       piEntry: config?.piEntry || defaultPiEntry,
       args: config?.jsonArgs ?? [],
@@ -105,7 +115,7 @@ export default function subagentEngine(pi: ExtensionAPI): void {
       }))
     }),
     async execute(_toolCallId, params) {
-      const spawned = runtime.schedule(params.nodes).map((status) => status!);
+      const spawned = runtime.schedule(params.nodes, { wisdomRoot: projectRoot }).map((status) => status!);
       trace({} as ExtensionContext, "subagent_schedule", { count: spawned.length });
       return {
         content: [{ type: "text", text: JSON.stringify(spawned, null, 2) }],

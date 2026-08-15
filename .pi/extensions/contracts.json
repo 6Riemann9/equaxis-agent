@@ -57,7 +57,12 @@
         "core:approval",
         "core:policy",
         "core:trace"
-      ]
+      ],
+      "promptImpact": {
+        "systemPromptChars": 380,
+        "tools": 0,
+        "notes": "RELIABILITY_PROMPT 固定注入;每工具调用记录 L1 审计+checkpoint"
+      }
     },
     {
       "id": "harness-panel",
@@ -140,7 +145,12 @@
         "command:memory-search",
         "event:session_start",
         "event:before_agent_start"
-      ]
+      ],
+      "promptImpact": {
+        "systemPromptChars": 300,
+        "tools": 8,
+        "notes": "记忆指令固定注入;recall 等工具按需调用"
+      }
     },
     {
       "id": "web-crawler",
@@ -346,7 +356,12 @@
         "command:skills",
         "event:session_start",
         "event:before_agent_start"
-      ]
+      ],
+      "promptImpact": {
+        "systemPromptChars": "按需(0-3000 tokens)",
+        "tools": 3,
+        "notes": "技能块按查询注入,selectRelevantSkills 预算控制"
+      }
     },
     {
       "id": "subagent-engine",
@@ -370,7 +385,12 @@
         "tool:subagent_cancel",
         "tool:subagent_message",
         "tool:subagent_messages"
-      ]
+      ],
+      "promptImpact": {
+        "systemPromptChars": 0,
+        "tools": 1,
+        "notes": "subagent_schedule 工具;子代理为独立进程,不占主上下文"
+      }
     },
     {
       "id": "ast-tools",
@@ -407,7 +427,33 @@
         "event:before_agent_start",
         "command:equaxis-prefix",
         "observability:prefix-stability"
-      ]
+      ],
+      "promptImpact": {
+        "systemPromptChars": 0,
+        "tools": 0,
+        "notes": "只读观测,零注入;prompt 指纹/稳定比 trace"
+      }
+    },
+    {
+      "id": "intent-gate",
+      "entry": "intent-gate.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "trace"
+      ],
+      "requires": [],
+      "provides": [
+        "event:before_agent_start",
+        "mode:intent-gate"
+      ],
+      "promptImpact": {
+        "systemPromptChars": "按命中(0-400)",
+        "tools": 0,
+        "notes": "regex 命中才注入模式指令,零模型成本"
+      }
     }
   ]
 }

@@ -835,6 +835,33 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => ctx.ui.notify(traceFile, "info")
   });
 
+  pi.registerCommand("equaxis-config", {
+    description: "Dump the merged runtime configuration as JSON (DSH --dump-config style audit)",
+    handler: async (args, ctx) => {
+      const asJson = args.trim() === "--json";
+      const redacted = JSON.parse(JSON.stringify(config));
+      const redact = (obj: Record<string, unknown>): void => {
+        for (const key of Object.keys(obj)) {
+          const value = obj[key];
+          if (/key|secret|token|password|apiKey/i.test(key) && typeof value === "string") {
+            obj[key] = value ? "***" : "";
+          } else if (value && typeof value === "object") {
+            redact(value as Record<string, unknown>);
+          }
+        }
+      };
+      redact(redacted);
+      const text = JSON.stringify(redacted, null, 2);
+      if (asJson) {
+        trace(ctx, "config_dumped", { bytes: text.length });
+        ctx.ui.notify(`<json>${text}</json>`);
+        return;
+      }
+      const lines = text.split("\n").slice(0, 120);
+      ctx.ui.notify(lines.join("\n") + (lines.length < text.split("\n").length ? "\n… (truncated; use --json for full)" : ""));
+    }
+  });
+
   pi.registerCommand("equaxis-checkpoint", {
     description: "List or restore tool checkpoints: list | restore <id> | latest",
     handler: async (args, ctx) => {
@@ -883,6 +910,39 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
         `Mission: ${mission.objective}\nstatus=${mission.status}; turns=${mission.turns}; lastOutcome=${mission.lastOutcome}; startedAt=${mission.startedAt}`,
         "info"
       );
+    }
+  });
+
+  pi.registerCommand("goal", {
+    description: "Set or show the session goal: /goal <text> | /goal status | /goal clear (persists across restarts)",
+    handler: async (args, ctx) => {
+      const text = args.trim();
+      if (text === "status" || text === "") {
+        const mission = state.mission;
+        if (!mission?.objective) {
+          ctx.ui.notify("No goal set. Use /goal <text> to set one.", "info");
+          return;
+        }
+        ctx.ui.notify(`Goal: ${mission.objective}\nstatus=${mission.status}; turns=${mission.turns}; startedAt=${mission.startedAt}`, "info");
+        return;
+      }
+      if (text === "clear") {
+        state.mission = { objective: "", startedAt: "", turns: 0, lastOutcome: "none", status: "idle" };
+        saveState();
+        trace(ctx, "goal_cleared", {});
+        ctx.ui.notify("Goal cleared.", "info");
+        return;
+      }
+      if (containsSecretLikeInput({ content: text })) {
+        ctx.ui.notify("Goal looks like it contains a secret; not setting it.", "warning");
+        return;
+      }
+      state.mission.objective = text.slice(0, 160);
+      state.mission.startedAt = new Date().toISOString();
+      state.mission.status = "active";
+      saveState();
+      trace(ctx, "goal_set", { objective: state.mission.objective });
+      ctx.ui.notify(`Goal set: ${state.mission.objective}`, "info");
     }
   });
 

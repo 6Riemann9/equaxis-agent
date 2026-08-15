@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { Value } from "typebox/value";
+import { wisdomPreamble } from "./wisdom-store.mjs";
 
 function now() {
   return new Date().toISOString();
@@ -65,6 +66,7 @@ export class SubagentRuntime {
   constructor(options = {}) {
     this.executor = options.executor ?? (async () => ({ ok: true }));
     this.verifyEvidence = options.verifyEvidence ?? null;
+    this.onTaskComplete = options.onTaskComplete ?? null;
     this.maxConcurrent = options.maxConcurrent ?? 2;
     this.trace = options.trace ?? (() => {});
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? 60000;
@@ -170,6 +172,18 @@ export class SubagentRuntime {
     for (const dep of dependencies) {
       if (!this.tasks.has(dep)) throw new Error(`unknown dependency: ${dep}`);
     }
+    // Wisdom accumulation (oh-my-opencode): when this task depends on
+    // already-finished tasks and a wisdom root is given, prepend their
+    // persisted summaries so serial batches reuse lessons. Best-effort.
+    let prompt = request.prompt;
+    if (request.wisdomRoot && dependencies.length) {
+      try {
+        const preamble = wisdomPreamble({ projectRoot: request.wisdomRoot, taskIds: dependencies });
+        if (preamble) prompt = `${preamble}\n\n${prompt}`;
+      } catch {
+        // best effort
+      }
+    }
     const controller = new AbortController();
     const timeoutMs = boundedInteger(request.timeoutMs, this.defaultTimeoutMs, { min: 100, max: 600_000, field: "subagent timeoutMs" });
     const maxRetries = boundedInteger(request.maxRetries, this.defaultMaxRetries, { min: 0, max: 5, field: "subagent maxRetries" });
@@ -177,7 +191,7 @@ export class SubagentRuntime {
     const task = {
       id,
       label: request.label ?? id,
-      prompt: request.prompt,
+      prompt,
       modelKey: request.model ?? this.defaultModelKey,
       schema: request.schema ?? null,
       dependencies,
@@ -273,7 +287,7 @@ export class SubagentRuntime {
    * dependencies are not yet spawned are spawned as blocked and released when
    * their dependencies complete. Returns the spawned statuses in node order.
    */
-  schedule(nodes) {
+  schedule(nodes, options = {}) {
     if (!Array.isArray(nodes)) throw new Error("schedule requires a node array");
     const ids = new Map();
     for (const node of nodes) {
@@ -287,10 +301,22 @@ export class SubagentRuntime {
         if (!ids.has(dep)) throw new Error(`schedule node ${node.name} depends on unknown ${dep}`);
         return ids.get(dep);
       });
+      // Wisdom accumulation (oh-my-opencode): prepend the wisdom of finished
+      // dependencies so serial batches reuse lessons instead of re-tripping
+      // the same pitfalls. Best-effort; missing wisdom adds nothing.
+      let prompt = node.prompt;
+      if (options.wisdomRoot && dependencies.length) {
+        try {
+          const preamble = wisdomPreamble({ projectRoot: options.wisdomRoot, taskIds: dependencies });
+          if (preamble) prompt = `${preamble}\n\n${prompt}`;
+        } catch {
+          // best effort
+        }
+      }
       spawned.push(this.spawn({
         id,
         label: node.name,
-        prompt: node.prompt,
+        prompt,
         schema: node.schema,
         model: node.model,
         timeoutMs: node.timeoutMs,
@@ -299,7 +325,7 @@ export class SubagentRuntime {
         dependencies
       }));
     }
-    return spawned;
+    return spawned.map((status) => status);
   }
 
   /** Wait for every listed subagent and return their statuses. */
@@ -420,6 +446,13 @@ export class SubagentRuntime {
       this.#record(task.status, task);
       this.active -= 1;
       this.activeByModel.set(modelKey, Math.max(0, (this.activeByModel.get(modelKey) ?? 1) - 1));
+      if (this.onTaskComplete) {
+        try {
+          this.onTaskComplete(task);
+        } catch {
+          // Wisdom/notifications must never break task finalization.
+        }
+      }
       task.resolve();
       this.#drain();
     }
