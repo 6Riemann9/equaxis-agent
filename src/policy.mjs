@@ -90,15 +90,31 @@ function protectedShellReference(command, patterns) {
   return matchesProtectedPath(pathLike, patterns);
 }
 
+const PORTABLE_ABSOLUTE_RE = /^([A-Za-z]:[\\/]|[\\/]{2})/;
+
+/** Drive-letter / UNC paths are absolute on Windows; treat them the same on
+ * POSIX so workspace guards behave identically across platforms (matches the
+ * config layer's isPortableAbsolute convention). */
+function isPortableAbsolute(value) {
+  return typeof value === "string" && PORTABLE_ABSOLUTE_RE.test(value);
+}
+
+function resolvePortable(base, target) {
+  // path.resolve(cwd, "D:/x") embeds the drive-letter path on POSIX instead
+  // of treating it as absolute; resolve it standalone so both platforms land
+  // on the same virtual absolute prefix and relative comparisons agree.
+  return path.resolve(isPortableAbsolute(target) ? target : path.resolve(base, target));
+}
+
 export function isOutsideWorkspace(targetPath, cwd) {
   const workspace = realPathWithExistingParent(path.resolve(cwd));
-  const resolved = realPathWithExistingParent(path.resolve(cwd, targetPath));
+  const resolved = realPathWithExistingParent(resolvePortable(cwd, targetPath));
   const relative = path.relative(workspace, resolved);
   return relative.startsWith("..") || path.isAbsolute(relative);
 }
 
 export function isWithinConfiguredRoot(targetPath, cwd, roots = []) {
-  const resolvedTarget = realPathWithExistingParent(path.resolve(cwd, targetPath));
+  const resolvedTarget = realPathWithExistingParent(resolvePortable(cwd, targetPath));
   return roots.some((root) => {
     // "<workspace>" is a portable token that resolves to the current project
     // root, so configs stay machine-independent.
