@@ -308,3 +308,145 @@ test("capabilityDeltaMatrix honors filters and tolerates empty data", () => {
   assert.equal(full.rows[0].delta, 0);
   assert.deepEqual(full.unchanged, ["c"]);
 });
+
+test("decision records carry provenance: decisionId, causal links, scenario, evidence", () => {
+  const loop = new EvalLoop();
+  const parent = loop.decision({
+    baseline: { attempts: 10, successes: 8, successRate: 0.8, averageLatencyMs: 100, averageCostUsd: 0.01 },
+    candidate: { attempts: 10, successes: 9, successRate: 0.9, averageLatencyMs: 90, averageCostUsd: 0.01 },
+    decisionId: "dec-1",
+    scenario: "policy v2 rollout",
+    reasoning: "win rate improved",
+    confidence: 0.95,
+    evidence: ["trace-9"]
+  });
+  assert.equal(parent.decisionId, "dec-1");
+  assert.equal(parent.parentDecisionId, null);
+  assert.equal(parent.causalType, null);
+  assert.equal(parent.scenario, "policy v2 rollout");
+  assert.equal(parent.confidence, 0.95);
+  assert.deepEqual(parent.evidence, ["trace-9"]);
+
+  const child = loop.decision({
+    baseline: { attempts: 10, successes: 8, successRate: 0.8, averageLatencyMs: 100, averageCostUsd: 0.01 },
+    candidate: { attempts: 10, successes: 9, successRate: 0.9, averageLatencyMs: 90, averageCostUsd: 0.01 },
+    decisionId: "dec-2",
+    parentDecisionId: "dec-1",
+    causalType: "CAUSED",
+    scenario: "policy v2 follow-up",
+    reasoning: "latency target kept"
+  });
+  assert.equal(child.causalType, "CAUSED");
+  assert.equal(child.parentDecisionId, "dec-1");
+
+  // auto-generated decisionId when absent
+  const auto = loop.decision({
+    baseline: { attempts: 5, successes: 5, successRate: 1, averageLatencyMs: 100, averageCostUsd: 0.01 },
+    candidate: { attempts: 5, successes: 5, successRate: 1, averageLatencyMs: 90, averageCostUsd: 0.01 }
+  });
+  assert.match(auto.decisionId, /^[0-9a-f-]{36}$/);
+
+  // invalid causal types are rejected, not silently accepted
+  assert.throws(
+    () => loop.decision({
+      baseline: { attempts: 5, successes: 5, successRate: 1, averageLatencyMs: 100, averageCostUsd: 0.01 },
+      candidate: { attempts: 5, successes: 5, successRate: 1, averageLatencyMs: 90, averageCostUsd: 0.01 },
+      causalType: "BECAUSE_OF"
+    }),
+    /invalid causalType/
+  );
+  // lowercase input normalizes
+  const normalized = loop.decision({
+    baseline: { attempts: 5, successes: 5, successRate: 1, averageLatencyMs: 100, averageCostUsd: 0.01 },
+    candidate: { attempts: 5, successes: 5, successRate: 1, averageLatencyMs: 90, averageCostUsd: 0.01 },
+    causalType: "precedent_for"
+  });
+  assert.equal(normalized.causalType, "PRECEDENT_FOR");
+});
+
+test("traceDecisionChain walks upstream parents and downstream children with depth", () => {
+  const loop = new EvalLoop();
+  const base = { attempts: 10, successes: 8, successRate: 0.8, averageLatencyMs: 100, averageCostUsd: 0.01 };
+  const better = { attempts: 10, successes: 9, successRate: 0.9, averageLatencyMs: 90, averageCostUsd: 0.01 };
+  loop.decision({ baseline: base, candidate: better, decisionId: "dec-a", scenario: "root" });
+  loop.decision({ baseline: base, candidate: better, decisionId: "dec-b", parentDecisionId: "dec-a", causalType: "CAUSED", scenario: "middle" });
+  loop.decision({ baseline: base, candidate: better, decisionId: "dec-c", parentDecisionId: "dec-b", causalType: "INFLUENCED", scenario: "leaf" });
+
+  const upstream = loop.traceDecisionChain("dec-c");
+  assert.equal(upstream.found, true);
+  assert.deepEqual(upstream.chain.map((node) => node.decisionId), ["dec-c", "dec-b", "dec-a"]);
+  assert.deepEqual(upstream.chain.map((node) => node.depth), [0, 1, 2]);
+  assert.equal(upstream.chain[1].causalType, "CAUSED");
+
+  const downstream = loop.traceDecisionChain("dec-a", { direction: "downstream" });
+  assert.deepEqual(downstream.chain.map((node) => node.decisionId), ["dec-a", "dec-b", "dec-c"]);
+  assert.deepEqual(downstream.chain.map((node) => node.depth), [0, 1, 2]);
+
+  const missing = loop.traceDecisionChain("dec-z");
+  assert.equal(missing.found, false);
+  assert.deepEqual(missing.chain, []);
+});
+
+test("decisionImpact aggregates downstream decisions, tools and capabilities", () => {
+  const loop = new EvalLoop();
+  const base = { attempts: 10, successes: 8, successRate: 0.8, averageLatencyMs: 100, averageCostUsd: 0.01 };
+  const better = { attempts: 10, successes: 9, successRate: 0.9, averageLatencyMs: 90, averageCostUsd: 0.01 };
+  loop.decision({ baseline: base, candidate: better, decisionId: "dec-1", scenario: "root" });
+  loop.decisionWithHoldout({ trainCohort: "train", devCohort: "dev", versionId: "v2", tool: "edit", capability: "edit-apply", decisionId: "dec-2", parentDecisionId: "dec-1", causalType: "CAUSED", scenario: "child edit" });
+  loop.decisionWithHoldout({ trainCohort: "train", devCohort: "dev", versionId: "v2", tool: "read", capability: "repo-inspect", decisionId: "dec-3", parentDecisionId: "dec-2", causalType: "INFLUENCED", scenario: "grandchild read" });
+
+  const impact = loop.decisionImpact("dec-1");
+  assert.equal(impact.found, true);
+  assert.equal(impact.count, 3);
+  assert.deepEqual(impact.tools, ["edit", "read"]);
+  assert.deepEqual(impact.capabilities, ["edit-apply", "repo-inspect"]);
+  assert.equal(impact.chain[2].decisionId, "dec-3");
+});
+
+test("findPrecedents ranks decisions by scenario overlap deterministically", () => {
+  const loop = new EvalLoop();
+  const base = { attempts: 10, successes: 8, successRate: 0.8, averageLatencyMs: 100, averageCostUsd: 0.01 };
+  const better = { attempts: 10, successes: 9, successRate: 0.9, averageLatencyMs: 90, averageCostUsd: 0.01 };
+  loop.decision({ baseline: base, candidate: better, decisionId: "dec-x", scenario: "provider migration to deepseek", reasoning: "cost dropped" });
+  loop.decision({ baseline: base, candidate: better, decisionId: "dec-y", scenario: "provider migration to openai", reasoning: "latency dropped" });
+  loop.decision({ baseline: base, candidate: better, decisionId: "dec-z", scenario: "unrelated skill refactor", reasoning: "none" });
+
+  const precedents = loop.findPrecedents({ scenario: "provider migration deepseek", limit: 2 });
+  assert.equal(precedents.length, 2);
+  assert.equal(precedents[0].decisionId, "dec-x");
+  assert.ok(precedents[0].score >= precedents[1].score);
+  assert.ok(["deploy", "scoped"].includes(precedents[0].decision));
+
+  assert.deepEqual(loop.findPrecedents({ scenario: "" }), []);
+  assert.deepEqual(loop.findPrecedents({ scenario: "zzz qqq" }), []);
+});
+
+test("provenance fields survive persistence round-trip", (t) => {
+  const root = workspace(t);
+  const loop = new EvalLoop({ persist: true, projectRoot: root });
+  const base = { attempts: 5, successes: 5, successRate: 1, averageLatencyMs: 100, averageCostUsd: 0.01 };
+  const better = { attempts: 5, successes: 5, successRate: 1, averageLatencyMs: 90, averageCostUsd: 0.01 };
+  loop.decision({ baseline: base, candidate: better, decisionId: "dec-root", scenario: "root scenario" });
+  loop.decision({
+    baseline: base,
+    candidate: better,
+    decisionId: "dec-persist",
+    parentDecisionId: "dec-root",
+    causalType: "CAUSED",
+    scenario: "persisted scenario",
+    evidence: ["trace-1", "trace-2"]
+  });
+
+  const restored = new EvalLoop({ persist: true, projectRoot: root });
+  assert.equal(restored.decisions.length, 2);
+  const record = restored.decisions.find((entry) => entry.decisionId === "dec-persist");
+  assert.equal(record.decisionId, "dec-persist");
+  assert.equal(record.parentDecisionId, "dec-root");
+  assert.equal(record.causalType, "CAUSED");
+  assert.equal(record.scenario, "persisted scenario");
+  assert.deepEqual(record.evidence, ["trace-1", "trace-2"]);
+
+  // chain trace works on restored records too
+  const chain = restored.traceDecisionChain("dec-persist");
+  assert.deepEqual(chain.chain.map((node) => node.decisionId), ["dec-persist", "dec-root"]);
+});

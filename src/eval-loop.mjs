@@ -1,5 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+
+/** Decision provenance (semantica Decision Intelligence, minimal slice). */
+export const CAUSAL_TYPES = Object.freeze(["CAUSED", "INFLUENCED", "PRECEDENT_FOR"]);
+
+function normalizeCausalType(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = String(value).toUpperCase();
+  if (!CAUSAL_TYPES.includes(normalized)) {
+    throw new Error(`invalid causalType: ${value}; expected ${CAUSAL_TYPES.join(", ")}`);
+  }
+  return normalized;
+}
+
+function tokens(text) {
+  return new Set(String(text ?? "").toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean));
+}
 
 function rounded(value, digits = 4) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return null;
@@ -327,7 +344,22 @@ export class EvalLoop {
 
   decision(input = {}) {
     const result = compareCandidate(input);
-    const record = { ...result, decidedAt: new Date().toISOString(), baseline: input.baseline ?? null, candidate: input.candidate ?? null, candidateChange: input.candidateChange ?? null };
+    const record = {
+      ...result,
+      // Decision provenance (semantica): every decision is a first-class,
+      // queryable node with causal links to its parent decision.
+      decisionId: input.decisionId ?? randomUUID(),
+      parentDecisionId: input.parentDecisionId ?? null,
+      causalType: normalizeCausalType(input.causalType),
+      scenario: String(input.scenario ?? ""),
+      reasoning: String(input.reasoning ?? ""),
+      confidence: input.confidence ?? result.confidence ?? null,
+      evidence: array(input.evidence),
+      decidedAt: new Date().toISOString(),
+      baseline: input.baseline ?? null,
+      candidate: input.candidate ?? null,
+      candidateChange: input.candidateChange ?? null
+    };
     this.decisions.push(record);
     this.#append({ type: "eval_decision", recordedAt: record.decidedAt, decision: record });
     this.trace("eval_decision_recorded", record);
@@ -383,6 +415,14 @@ export class EvalLoop {
     });
     const record = {
       ...result,
+      // Decision provenance (semantica): causal link to the parent decision.
+      decisionId: input.decisionId ?? randomUUID(),
+      parentDecisionId: input.parentDecisionId ?? null,
+      causalType: normalizeCausalType(input.causalType),
+      scenario: String(input.scenario ?? ""),
+      reasoning: String(input.reasoning ?? ""),
+      confidence: input.confidence ?? result.confidence ?? null,
+      evidence: array(input.evidence),
       decidedAt: new Date().toISOString(),
       trainCohort: trainCohort ?? null,
       devCohort: devCohort ?? null,
@@ -499,5 +539,106 @@ export class EvalLoop {
       regressed: rows.filter((row) => row.delta < -0.01).map((row) => row.capability),
       unchanged: rows.filter((row) => Math.abs(row.delta) <= 0.01).map((row) => row.capability)
     };
+  }
+
+  /** Decision node key: decisionId when present, else decidedAt (legacy records). */
+  #decisionKey(record) {
+    return record.decisionId ?? record.decidedAt;
+  }
+
+  #decisionNode(record, depth) {
+    return {
+      decisionId: this.#decisionKey(record),
+      decidedAt: record.decidedAt ?? null,
+      decision: record.decision ?? null,
+      scenario: record.scenario ?? "",
+      reasoning: record.reasoning ?? "",
+      causalType: record.causalType ?? null,
+      parentDecisionId: record.parentDecisionId ?? null,
+      depth
+    };
+  }
+
+  /**
+   * Semantica-style causal chain trace: follow parentDecisionId edges
+   * upstream (root cause) or children downstream (consequences), each node
+   * annotated with depth. Legacy records without decisionId are keyed by
+   * decidedAt so persisted chains stay traceable.
+   */
+  traceDecisionChain(id, { direction = "upstream", maxDepth = 50 } = {}) {
+    const byKey = new Map(this.decisions.map((record) => [this.#decisionKey(record), record]));
+    const root = byKey.get(id) ?? null;
+    if (!root) return { found: false, direction, chain: [] };
+    const chain = [];
+    if (direction === "upstream") {
+      let node = root;
+      let depth = 0;
+      while (node && depth < maxDepth) {
+        chain.push(this.#decisionNode(node, depth));
+        if (!node.parentDecisionId) break;
+        node = byKey.get(node.parentDecisionId) ?? null;
+        depth += 1;
+      }
+    } else {
+      const queue = [{ node: root, depth: 0 }];
+      const seen = new Set();
+      while (queue.length) {
+        const { node, depth } = queue.shift();
+        if (depth > maxDepth || seen.has(this.#decisionKey(node))) continue;
+        seen.add(this.#decisionKey(node));
+        chain.push(this.#decisionNode(node, depth));
+        const key = this.#decisionKey(node);
+        for (const child of this.decisions) {
+          if (child.parentDecisionId === key) queue.push({ node: child, depth: depth + 1 });
+        }
+      }
+    }
+    return { found: true, direction, chain };
+  }
+
+  /** Downstream impact of a decision: transitive causal children + affected tools/capabilities. */
+  decisionImpact(id) {
+    const trace = this.traceDecisionChain(id, { direction: "downstream" });
+    const tools = new Set();
+    const capabilities = new Set();
+    for (const node of trace.chain) {
+      const record = this.decisions.find((entry) => this.#decisionKey(entry) === node.decisionId);
+      if (!record) continue;
+      if (record.tool) tools.add(String(record.tool));
+      if (record.capability) capabilities.add(String(record.capability));
+    }
+    return { found: trace.found, count: trace.chain.length, tools: [...tools].sort(), capabilities: [...capabilities].sort(), chain: trace.chain };
+  }
+
+  /**
+   * Precedent search over recorded decisions (semantica find_similar_decisions,
+   * deterministic token-overlap component — no embedding dependency):
+   * ranks decisions by how much of the query scenario overlaps their
+   * scenario + reasoning + tool + capability text.
+   */
+  findPrecedents({ scenario = "", limit = 5 } = {}) {
+    const queryTokens = tokens(scenario);
+    if (!queryTokens.size) return [];
+    const scored = this.decisions
+      .map((record) => {
+        const haystack = `${record.scenario ?? ""} ${record.reasoning ?? ""} ${record.tool ?? ""} ${record.capability ?? ""}`;
+        const textTokens = tokens(haystack);
+        let overlap = 0;
+        for (const token of queryTokens) {
+          if (textTokens.has(token)) overlap += 1;
+        }
+        return {
+          decisionId: this.#decisionKey(record),
+          score: overlap,
+          decidedAt: record.decidedAt ?? null,
+          scenario: record.scenario ?? "",
+          decision: record.decision ?? null,
+          causalType: record.causalType ?? null
+        };
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score || String(b.decidedAt ?? "").localeCompare(String(a.decidedAt ?? "")))
+      .slice(0, limit);
+    return scored;
   }
 }
