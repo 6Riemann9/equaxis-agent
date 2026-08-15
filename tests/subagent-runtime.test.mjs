@@ -453,6 +453,7 @@ test("terminal tasks are pruned beyond the retention window", async () => {
     await runtime.wait(`p-${i}`);
   }
   assert.equal(runtime.status("p-0"), null, "oldest terminal task pruned");
+  assert.equal(runtime.status("p-1"), null, "second-oldest pruned too");
+  assert.ok(runtime.status("p-2"), "retention window (3) keeps the newest three");
   assert.ok(runtime.status("p-4"), "newest task retained");
-  assert.equal(runtime.status("p-3"), null, "only retention window kept");
 });
