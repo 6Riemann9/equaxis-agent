@@ -13,9 +13,27 @@ const READ_COMMANDS = new Set([
 ]);
 
 const SAFE_GIT_SUBCOMMANDS = new Set([
-  "status", "log", "diff", "show", "branch", "remote", "rev-parse", "ls-files",
-  "ls-tree", "tag", "describe", "shortlog", "blame", "grep", "config"
+  "status", "log", "diff", "show", "rev-parse", "ls-files",
+  "ls-tree", "describe", "shortlog", "blame", "grep"
 ]);
+
+/**
+ * Read-only forms of git subcommands that also have mutating variants:
+ * branch/tag without -d/-D, remote without add/remove/set-url/rename,
+ * config limited to --list/--get/--get-all.
+ */
+function isReadOnlyGit(command) {
+  const parts = String(command ?? "").trim().split(/\s+/);
+  const sub = (parts[1] ?? "").replace(/^["']|["']$/g, "").toLowerCase();
+  const rest = parts.slice(2);
+  const joined = rest.join(" ");
+  if (sub === "branch" || sub === "tag") return !/-[a-zA-Z]*d/i.test(joined);
+  if (sub === "remote") return !rest.some((part) => /^(add|remove|rm|set-url|rename)$/i.test(part));
+  if (sub === "config") {
+    return rest.length <= 1 || rest.some((part) => part === "--list" || part === "--get" || part === "--get-all");
+  }
+  return false;
+}
 
 /**
  * Extract the leading executable token, normalized to a bare command name.
@@ -46,8 +64,10 @@ export function isAllowlistedCommand(command, extraCommands = []) {
     const parts = String(command ?? "").trim().split(/\s+/);
     const sub = (parts[1] ?? "").replace(/^["']|["']$/g, "").toLowerCase();
     // bare `git` prints help; only read-only subcommands are safe (`git stash` alone
-    // mutates and is therefore not allowlisted).
+    // mutates and is therefore not allowlisted; branch -D / tag -d / remote remove /
+    // config writes fall through to MEDIUM and are audited).
     if (!sub || SAFE_GIT_SUBCOMMANDS.has(sub)) return true;
+    if (isReadOnlyGit(command)) return true;
   }
   return false;
 }

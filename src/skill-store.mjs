@@ -187,8 +187,11 @@ export function deriveSkillFromRun(run) {
 
 /** Serialize a skill back to SKILL.md so learn/manage can persist it. */
 export function serializeSkill(skill) {
-  const frontmatter = ["---", `name: ${skill.name}`];
-  if (skill.description) frontmatter.push(`description: ${skill.description}`);
+  // Sanitize frontmatter values: newlines would forge metadata lines and
+  // colons would truncate the key (parseSkillFile splits at the first ':').
+  const oneLine = (value) => String(value ?? "").replace(/[\r\n:]+/g, " ").trim();
+  const frontmatter = ["---", `name: ${oneLine(skill.name)}`];
+  if (skill.description) frontmatter.push(`description: ${oneLine(skill.description)}`);
   if (skill.triggers?.length) frontmatter.push(`triggers: [${skill.triggers.join(", ")}]`);
   // Provenance (血缘): evidence-backed skills stay auditable after deploy.
   // PracticeUnsafe (2608.12851) shows unsafe successes harden into skills and

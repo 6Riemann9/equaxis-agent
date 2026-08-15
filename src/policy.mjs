@@ -21,8 +21,8 @@ export function policyRuleVersion(config) {
       approval: config.approval ?? null,
       limits: config.limits ?? null,
       policy: config.policy ?? null,
-      allowlist: config.allowlist ?? null,
-      protectedPaths: config.protectedPaths ?? null
+      allowlist: config.allowlist ?? config.commandAllowlist ?? null,
+      protectedPaths: config.protectedPaths ?? config.protectPaths ?? null
     };
     return createHash("sha256").update(JSON.stringify(subset)).digest("hex").slice(0, 16);
   } catch {
@@ -31,7 +31,7 @@ export function policyRuleVersion(config) {
 }
 
 const HIGH_RISK_BASH = [
-  { pattern: /\b(?:rm|del)\b[^\r\n]*(?:-r(?:f)?\b|--recursive\b|\/s\b|\/q\b)/i, reason: "recursive deletion" },
+  { pattern: /(?:^|[^\w])(?:rm|del)\b[^\r\n]*(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|--recursive\b|--force\b|\/s\b|\/q\b)/i, reason: "recursive deletion" },
   { pattern: /\bRemove-Item\b[^\r\n]*-Recurse\b/i, reason: "recursive deletion" },
   { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+(?:-[a-z]*f|--force)|git\s+(?:checkout|restore)\s+(?:--\s+)?[.*])/i, reason: "destructive git operation" },
   { pattern: /\b(format|mkfs|diskpart)\b/i, reason: "disk modification" },
@@ -82,7 +82,7 @@ export function matchesProtectedPath(targetPath, patterns) {
 }
 
 function shellMayWrite(command) {
-  return /(?:^|[;&|]\s*|\b)(?:echo\b[^\r\n]*>|(?:Set|Add)-Content\b|Out-File\b|tee\b|(?:cp|mv|copy|move)\b|(?:New-Item|ni)\b)/i.test(command);
+  return /(?:^|[;&|]\s*|\b)(?:echo\b[^\r\n]*>|(?:Set|Add)-Content\b|Out-File\b|tee\b|(?:cp|mv|copy|move)\b|(?:New-Item|ni)\b|printf\b[^\r\n]*>|cat\b[^\r\n]*>|sed\b[^\r\n]*\s-i\b|find\b[^\r\n]*-delete\b)/i.test(command);
 }
 
 function protectedShellReference(command, patterns) {

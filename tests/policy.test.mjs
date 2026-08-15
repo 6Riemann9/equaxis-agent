@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   RISK,
   classifyBash,
@@ -180,4 +183,25 @@ test("policyRuleVersion fingerprints decision-relevant config", () => {
   assert.notEqual(policyRuleVersion(base), policyRuleVersion(changed));
   assert.match(policyRuleVersion(base), /^[0-9a-f]{16}$/);
   assert.equal(policyRuleVersion(undefined), "unversioned");
+});
+
+test("rm combination flags trigger HIGH recursive-deletion classification", () => {
+  for (const command of ["rm -fr ./out", "rm -rfv ./out", "rm -rvf ./out", "rm -rf ./out", "rm --recursive ./out"]) {
+    const result = classifyBash(command, {});
+    assert.equal(result.risk, RISK.HIGH, command);
+    assert.match(result.reason, /recursive deletion/);
+  }
+  assert.notEqual(classifyBash("rm file.txt", {}).risk, RISK.HIGH, "plain rm is not recursive");
+});
+
+test("write-shaped commands that touch protected paths are blocked", (t) => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-policy-write-"));
+  t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  const config = { approval: { highRiskBash: true }, protectPaths: [".env"], toolRouting: {} };
+  for (const command of ['printf "x" > .env', "sed -i s/a/b/ .env", "find . -name '.env' -delete"]) {
+    const result = classifyToolCall("bash", { command }, config, workspace);
+    assert.equal(result.risk, RISK.BLOCKED, command);
+  }
+  const safe = classifyToolCall("bash", { command: "cat .env" }, config, workspace);
+  assert.notEqual(safe.risk, RISK.BLOCKED);
 });

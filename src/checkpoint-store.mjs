@@ -46,9 +46,9 @@ export function createCheckpoint({ projectRoot, id, files, traceDir = ".pi/runti
   const copied = [];
   for (const filePath of files) {
     const absolute = path.resolve(filePath);
-    if (!absolute.startsWith(projectRootResolved)) continue; // never snapshot outside the workspace
-    if (!fs.existsSync(absolute)) continue;
     const relative = path.relative(projectRootResolved, absolute);
+    if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) continue; // never snapshot outside the workspace
+    if (!fs.existsSync(absolute)) continue;
     const dest = path.join(target, relative);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(absolute, dest);
@@ -90,7 +90,8 @@ export function restoreCheckpoint({ projectRoot, id, traceDir = ".pi/runtime" })
   for (const relative of meta.files) {
     const srcFile = path.join(source, relative);
     const destFile = path.resolve(projectRootResolved, relative);
-    if (!destFile.startsWith(projectRootResolved)) continue;
+    const check = path.relative(projectRootResolved, destFile);
+    if (check === "" || check.startsWith("..") || path.isAbsolute(check)) continue;
     fs.mkdirSync(path.dirname(destFile), { recursive: true });
     fs.copyFileSync(srcFile, destFile);
     restored.push(relative);
