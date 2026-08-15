@@ -75,7 +75,7 @@ export function listCheckpoints(projectRoot, traceDir = ".pi/runtime", limit = 2
     entries.push({ id: meta.id, files: meta.files ?? [], reason: meta.reason ?? "", summary: meta.summary ?? "", createdAt: meta.createdAt });
   }
   return entries
-    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) || String(b.id).localeCompare(String(a.id)))
     .slice(0, limit);
 }
 
