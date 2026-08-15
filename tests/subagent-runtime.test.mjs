@@ -442,3 +442,17 @@ test("reviewer crash or bad verdict degrades to review error", async () => {
   assert.equal(junk.review.status, "error");
   assert.match(junk.review.issues[0], /no OKAY\/REJECT/);
 });
+
+test("terminal tasks are pruned beyond the retention window", async () => {
+  const runtime = new SubagentRuntime({
+    executor: async () => ({ ok: true }),
+    terminalRetention: 3
+  });
+  for (let i = 0; i < 5; i += 1) {
+    runtime.spawn({ id: `p-${i}`, prompt: `x${i}` });
+    await runtime.wait(`p-${i}`);
+  }
+  assert.equal(runtime.status("p-0"), null, "oldest terminal task pruned");
+  assert.ok(runtime.status("p-4"), "newest task retained");
+  assert.equal(runtime.status("p-3"), null, "only retention window kept");
+});

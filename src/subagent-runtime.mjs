@@ -96,6 +96,10 @@ export class SubagentRuntime {
     // category ("deep"/"quick"/...) instead of a model; the harness maps the
     // category to a model key via this table. Explicit request.model wins.
     this.categoryRoutes = options.categoryRoutes ?? {};
+    // Terminal-task retention: keep the newest N settled tasks so long
+    // sessions do not grow this.tasks (and their AbortControllers, and any
+    // abort listeners hanging off them) without bound.
+    this.terminalRetention = Math.max(10, Number(options.terminalRetention ?? 200));
     this.activeByModel = new Map();
     this.#restoreSnapshots();
   }
@@ -133,6 +137,17 @@ export class SubagentRuntime {
       task.promise = Promise.resolve();
       task.resolve = () => {};
       this.tasks.set(task.id, task);
+      if (!terminal) {
+        // Persist the interrupted-by-restart failure so the snapshot no
+        // longer claims the task is running/queued on every restart.
+        task.failurePhase = "execution";
+        task.failureKind = "interrupted";
+        try {
+          this.stateStore?.record?.("failed", task);
+        } catch {
+          // persistence is best-effort
+        }
+      }
     }
   }
 
@@ -410,9 +425,27 @@ export class SubagentRuntime {
     }
   }
 
+  /** Keep the newest terminal tasks; drop the oldest settled ones. */
+  #pruneTerminal() {
+    if (this.tasks.size <= this.terminalRetention) return;
+    const terminal = [...this.tasks.entries()]
+      .filter(([, task]) => ["completed", "failed", "cancelled"].includes(task.status))
+      .sort((a, b) => {
+        const byTime = String(a[1].completedAt ?? "").localeCompare(String(b[1].completedAt ?? ""));
+        return byTime !== 0 ? byTime : a[0].localeCompare(b[0]);
+      });
+    const excess = this.tasks.size - this.terminalRetention;
+    for (let index = 0; index < Math.min(excess, terminal.length); index += 1) {
+      const [id] = terminal[index];
+      // Never drop tasks other tasks still depend on (dependencies are
+      // settled before dependents run, so this is a safety net only).
+      const dependedOn = [...this.tasks.values()].some((task) => (task.dependencies ?? []).includes(id));
+      if (!dependedOn) this.tasks.delete(id);
+    }
+  }
+
   /** Independent reviewer pass (oh-my-opencode dual-review gate). */
-  async #runReview(task, result) {
-    const reviewTask = {
+  async #runReview(task, result) {    const reviewTask = {
       id: `review-${task.id}`,
       label: `review:${task.label}`,
       prompt: `${task.reviewPrompt}\n\n--- result to review ---\n${String(typeof result === "string" ? result : JSON.stringify(result)).slice(0, 12000)}`,
@@ -535,6 +568,7 @@ export class SubagentRuntime {
         }
       }
       task.resolve();
+      this.#pruneTerminal();
       this.#drain();
     }
   }

@@ -89,10 +89,14 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
   },
   skills: {
     enabled: true,
-    rootDir: ".equaxis/skills",
+    rootDir: ".pi/skills",
     autoInject: true,
     maxContextTokens: 3000,
     requiredNames: []
+  },
+  intentGate: {
+    enabled: true,
+    patterns: []
   },
   protocols: {
     lsp: { command: "", args: [], cwd: "", requestTimeoutMs: 15_000, allowCommandOverride: false },
@@ -274,7 +278,7 @@ function assertKnownKeys(value, field, baseValue, configPath) {
 function mergeConfig(base, custom) {
   // DSH-style discipline: unknown keys in custom config are rejected so a
   // typo surfaces at load time instead of being silently merged away.
-  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "evaluation", "subagents"];
+  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "evaluation", "subagents", "intentGate"];
   const SUB_SECTIONS = [
     ["runtime", "services"], ["runtime", "gates"],
     ["reliability", "trace"], ["reliability", "approval"], ["reliability", "limits"], ["reliability", "toolRouting"], ["reliability", "eval"],

@@ -15,7 +15,11 @@ function readState(filePath: string): { sample?: string } | null {
 function writeState(filePath: string, state: { sample: string; at: string }): void {
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(state), "utf8");
+    // Atomic replace: concurrent writers (subagent processes share the file)
+    // must never observe a half-written sample.
+    const tmpPath = `${filePath}.tmp-${process.pid}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(state), "utf8");
+    fs.renameSync(tmpPath, filePath);
   } catch {
     // Observability only.
   }
