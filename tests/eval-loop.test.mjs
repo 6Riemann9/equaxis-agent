@@ -198,3 +198,70 @@ test("createEvalLoopFromTrace with persist disabled keeps trace-only facts", (t)
   assert.equal(snapshot.matrix[0].tool, "read");
   assert.deepEqual(snapshot.matrix[0].errorCodes, { TOOL_ERROR: 1 });
 });
+
+test("decisionWithHoldout deploys on train gain + dev non-regression over cohort events", (t) => {
+  const root = workspace(t);
+  const loop = new EvalLoop({ persist: true, projectRoot: root });
+  const event = (cohort, version, outcome) => loop.record({
+    provider: "p", modelId: "m", toolName: "read", capability: "repo-inspect",
+    outcome, cohort, version: { kind: "policy", id: version }
+  });
+  // train cohort: baseline 100 attempts @70% + candidate 100 attempts @90%
+  for (let i = 0; i < 70; i += 1) event("train", "base-v1", "success");
+  for (let i = 0; i < 30; i += 1) event("train", "base-v1", "failure");
+  for (let i = 0; i < 90; i += 1) event("train", "cand-v2", "success");
+  for (let i = 0; i < 10; i += 1) event("train", "cand-v2", "failure");
+  // dev cohort: baseline 50 @70% + candidate 50 @72% (flat, within tolerance)
+  for (let i = 0; i < 35; i += 1) event("dev", "base-v1", "success");
+  for (let i = 0; i < 15; i += 1) event("dev", "base-v1", "failure");
+  for (let i = 0; i < 36; i += 1) event("dev", "cand-v2", "success");
+  for (let i = 0; i < 14; i += 1) event("dev", "cand-v2", "failure");
+
+  const decision = loop.decisionWithHoldout({ trainCohort: "train", devCohort: "dev", versionId: "cand-v2", tool: "read", capability: "repo-inspect" });
+  assert.equal(decision.decision, "deploy");
+  assert.equal(decision.holdout, "pass");
+  assert.equal(decision.versionId, "cand-v2");
+});
+
+test("decisionWithHoldout rejects when dev cohort regresses despite train gain", (t) => {
+  const loop = new EvalLoop();
+  const event = (cohort, version, outcome) => loop.record({
+    provider: "p", modelId: "m", toolName: "read", capability: "repo-inspect",
+    outcome, cohort, version: { kind: "policy", id: version }
+  });
+  for (let i = 0; i < 70; i += 1) event("train", "base-v1", "success");
+  for (let i = 0; i < 30; i += 1) event("train", "base-v1", "failure");
+  for (let i = 0; i < 90; i += 1) event("train", "cand-v2", "success");
+  for (let i = 0; i < 10; i += 1) event("train", "cand-v2", "failure");
+  // dev regression: candidate 60% vs baseline 70%
+  for (let i = 0; i < 35; i += 1) event("dev", "base-v1", "success");
+  for (let i = 0; i < 15; i += 1) event("dev", "base-v1", "failure");
+  for (let i = 0; i < 30; i += 1) event("dev", "cand-v2", "success");
+  for (let i = 0; i < 20; i += 1) event("dev", "cand-v2", "failure");
+
+  const decision = loop.decisionWithHoldout({ trainCohort: "train", devCohort: "dev", versionId: "cand-v2", tool: "read", capability: "repo-inspect" });
+  assert.equal(decision.decision, "reject");
+  assert.equal(decision.holdout, "regressed");
+  assert.equal(decision.mainDecision, "deploy");
+});
+
+test("decisionWithHoldout persists and restores holdout metadata", (t) => {
+  const root = workspace(t);
+  const loop = new EvalLoop({ persist: true, projectRoot: root });
+  loop.record({ provider: "p", modelId: "m", toolName: "read", capability: "c", outcome: "success", cohort: "train", version: { kind: "policy", id: "v0" } });
+  loop.record({ provider: "p", modelId: "m", toolName: "read", capability: "c", outcome: "success", cohort: "train", version: { kind: "policy", id: "v1" } });
+  loop.record({ provider: "p", modelId: "m", toolName: "read", capability: "c", outcome: "success", cohort: "dev", version: { kind: "policy", id: "v0" } });
+  loop.record({ provider: "p", modelId: "m", toolName: "read", capability: "c", outcome: "success", cohort: "dev", version: { kind: "policy", id: "v1" } });
+  loop.decisionWithHoldout({ trainCohort: "train", devCohort: "dev", versionId: "v1", tool: "read", capability: "c", minSamples: 1 });
+
+  const restored = new EvalLoop({ persist: true, projectRoot: root });
+  assert.equal(restored.decisions.length, 1);
+  assert.equal(restored.decisions[0].trainCohort, "train");
+  assert.equal(restored.decisions[0].devCohort, "dev");
+  assert.ok("holdout" in restored.decisions[0]);
+});
+
+test("decisionWithHoldout requires versionId", () => {
+  const loop = new EvalLoop();
+  assert.throws(() => loop.decisionWithHoldout({ trainCohort: "train", devCohort: "dev" }), /requires versionId/);
+});

@@ -316,6 +316,69 @@ export class EvalLoop {
     return record;
   }
 
+  /** Aggregate a cell (tool/capability) from a filtered event list, mirroring snapshot's cell shape. */
+  #statsFor(events) {
+    const successes = events.filter((event) => event.outcome === "success").length;
+    const failures = events.filter((event) => event.outcome === "failure").length;
+    const attempts = events.length;
+    return {
+      attempts,
+      successes,
+      failures,
+      unknowns: attempts - successes - failures,
+      successRate: attempts ? rounded(successes / attempts) : 0,
+      averageLatencyMs: mean(events.map((event) => event.latencyMs), 2),
+      averageCostUsd: mean(events.map((event) => event.costUsd), 6)
+    };
+  }
+
+  #eventsForCell(cohort, tool, capability) {
+    return this.events.filter((event) => {
+      if (cohort && event.cohort !== cohort) return false;
+      if (tool && event.tool.name !== tool) return false;
+      if (capability && !event.capabilities.includes(capability)) return false;
+      return true;
+    });
+  }
+
+  /**
+   * Train/dev acceptance gate over cohort-tagged events (AutoDesign arXiv 2608.13560).
+   *
+   * Events in `trainCohort` form the main A/B comparison (baseline = events whose
+   * version differs from `versionId`, candidate = events matching `versionId`);
+   * events in `devCohort` form the holdout comparison. Deployment requires train
+   * improvement AND dev non-regression (compareCandidateWithHoldout). The decision
+   * is persisted with the cohort/version metadata for audit.
+   */
+  decisionWithHoldout(input = {}) {
+    const { trainCohort, devCohort, versionId, tool, capability, ...compareOpts } = input;
+    if (!versionId) throw new Error("decisionWithHoldout requires versionId (the candidate version to compare)");
+    const trainEvents = this.#eventsForCell(trainCohort, tool, capability);
+    const devEvents = this.#eventsForCell(devCohort, tool, capability);
+    const versioned = (events) => events.filter((event) => String(event.version?.id ?? "") === String(versionId ?? ""));
+    const baseStats = (events) => this.#statsFor(events.filter((event) => String(event.version?.id ?? "") !== String(versionId ?? "")));
+    const result = compareCandidateWithHoldout({
+      baseline: baseStats(trainEvents),
+      candidate: this.#statsFor(versioned(trainEvents)),
+      holdoutBaseline: baseStats(devEvents),
+      holdoutCandidate: this.#statsFor(versioned(devEvents)),
+      ...compareOpts
+    });
+    const record = {
+      ...result,
+      decidedAt: new Date().toISOString(),
+      trainCohort: trainCohort ?? null,
+      devCohort: devCohort ?? null,
+      versionId: versionId ?? null,
+      tool: tool ?? null,
+      capability: capability ?? null
+    };
+    this.decisions.push(record);
+    this.#append({ type: "eval_decision", recordedAt: record.decidedAt, decision: record });
+    this.trace("eval_decision_recorded", record);
+    return record;
+  }
+
   snapshot(filter = {}) {
     const events = this.events.filter((event) => {
       if (filter.provider && event.model.provider !== filter.provider) return false;
