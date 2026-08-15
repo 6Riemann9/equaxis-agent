@@ -391,6 +391,23 @@
         "tool:ast_inspect",
         "tool:ast_rename"
       ]
+    },
+    {
+      "id": "prefix-stability",
+      "entry": "prefix-stability.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "trace",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "event:before_agent_start",
+        "command:equaxis-prefix",
+        "observability:prefix-stability"
+      ]
     }
   ]
 }
