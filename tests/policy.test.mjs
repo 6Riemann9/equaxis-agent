@@ -8,6 +8,7 @@ import {
   isOutsideWorkspace,
   isWithinConfiguredRoot,
   matchesProtectedPath,
+  policyRuleVersion,
   shouldBlockForLimits,
   validateToolInput
 } from "../src/policy.mjs";
@@ -169,4 +170,14 @@ test("governs durable memory mutations", () => {
     ).risk,
     RISK.BLOCKED
   );
+});
+
+test("policyRuleVersion fingerprints decision-relevant config", () => {
+  const base = { approval: { highRiskBash: true }, limits: { maxRepeatedCalls: 3 }, policy: { mode: "enforce" } };
+  const same = { approval: { highRiskBash: true }, limits: { maxRepeatedCalls: 3 }, policy: { mode: "enforce" } };
+  const changed = { approval: { highRiskBash: false }, limits: { maxRepeatedCalls: 3 }, policy: { mode: "enforce" } };
+  assert.equal(policyRuleVersion(base), policyRuleVersion(same));
+  assert.notEqual(policyRuleVersion(base), policyRuleVersion(changed));
+  assert.match(policyRuleVersion(base), /^[0-9a-f]{16}$/);
+  assert.equal(policyRuleVersion(undefined), "unversioned");
 });

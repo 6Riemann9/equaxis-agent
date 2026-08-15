@@ -12,11 +12,12 @@ import {
   approvalRoot,
   cleanupApprovals,
   readApprovalDecision,
+  recordL1Decision as persistL1Decision,
   writeApprovalDecision as persistApprovalDecision,
   writeApprovalRequest as persistApprovalRequest
 } from "../../src/approval-queue.mjs";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
-import { RISK, classifyToolCall, containsSecretLikeInput, shouldBlockForLimits, validateToolInput } from "../../src/policy.mjs";
+import { RISK, classifyToolCall, containsSecretLikeInput, policyRuleVersion, shouldBlockForLimits, validateToolInput } from "../../src/policy.mjs";
 import { createToolInvocation, createToolOutcome, riskMetadataFromPolicy } from "../../src/tool-contract.mjs";
 import { sweepRegisteredChildren } from "../../src/process-cleanup.mjs";
 import { validateEditFreshness } from "../../src/stale-edit.mjs";
@@ -632,6 +633,22 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       }
       state.approvedCalls += 1;
       trace(ctx, "approval_granted", { ...decision, batch: batchApproved });
+    }
+
+    // L1 gate audit: automatic (approval-free) pass-throughs are recorded
+    // with the rule version that produced them (GUIDE arXiv 2608.12133:
+    // L1 automatic validation + L2 human escalation, both with provenance).
+    // Best-effort: audit storage must never block tool execution.
+    try {
+      persistL1Decision(approvalProjectRoot(), config.traceDir, {
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        risk: classification.risk,
+        reason: classification.reason,
+        ruleVersion: policyRuleVersion(config)
+      });
+    } catch {
+      trace(ctx, "l1_audit_write_failed", { toolName: event.toolName });
     }
 
     state.toolCalls += 1;

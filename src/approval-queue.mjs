@@ -121,3 +121,48 @@ export function cleanupApprovals(projectRoot, traceDir = ".pi/runtime", maxAgeMs
   }
   return removed;
 }
+
+/**
+ * L1 gate audit — automatic (approval-free) policy decisions, recorded with
+ * the rule version that produced them.
+ *
+ * GUIDE (arXiv 2608.12133) separates L1 (automatic rule validation) from L2
+ * (human escalation) and keeps provenance for both. The harness records every
+ * automatic pass-through here so the full decision chain — including the rule
+ * fingerprint (policyRuleVersion) — is auditable after rule changes.
+ * Append-only JSONL under approvals/l1-decisions.jsonl.
+ */
+export function recordL1Decision(projectRoot, traceDir, entry) {
+  const root = approvalRoot(projectRoot, traceDir);
+  fs.mkdirSync(root, { recursive: true });
+  const filePath = path.join(root, "l1-decisions.jsonl");
+  const line = JSON.stringify({
+    toolCallId: entry.toolCallId ?? "",
+    toolName: entry.toolName ?? "",
+    risk: entry.risk ?? "unknown",
+    reason: entry.reason ?? "",
+    ruleVersion: entry.ruleVersion ?? "unversioned",
+    decidedAt: new Date().toISOString()
+  });
+  fs.appendFileSync(filePath, `${line}\n`, "utf8");
+  return filePath;
+}
+
+/** Read L1 audit trail, newest first. */
+export function listL1Decisions(projectRoot, traceDir = ".pi/runtime", limit = 50) {
+  const root = approvalRoot(projectRoot, traceDir);
+  const filePath = path.join(root, "l1-decisions.jsonl");
+  if (!fs.existsSync(filePath)) return [];
+  const lines = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean);
+  return lines
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .reverse()
+    .slice(0, limit);
+}

@@ -1,8 +1,34 @@
 import path from "node:path";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import { isAllowlistedCommand } from "./shell-allowlist.mjs";
 
 export const RISK = Object.freeze({ LOW: "low", MEDIUM: "medium", HIGH: "high", BLOCKED: "blocked" });
+
+/**
+ * Stable fingerprint of the decision-relevant policy configuration.
+ *
+ * GUIDE (arXiv 2608.12133) keeps a versioned rule store so every validation
+ * decision is traceable to the exact rule set that produced it. Policy
+ * decisions recorded by the harness carry this fingerprint; when rules
+ * change, old audit entries remain attributable to the rule version in force
+ * at decision time. Unserializable config degrades to a constant marker.
+ */
+export function policyRuleVersion(config) {
+  if (!config || typeof config !== "object") return "unversioned";
+  try {
+    const subset = {
+      approval: config.approval ?? null,
+      limits: config.limits ?? null,
+      policy: config.policy ?? null,
+      allowlist: config.allowlist ?? null,
+      protectedPaths: config.protectedPaths ?? null
+    };
+    return createHash("sha256").update(JSON.stringify(subset)).digest("hex").slice(0, 16);
+  } catch {
+    return "unversioned";
+  }
+}
 
 const HIGH_RISK_BASH = [
   { pattern: /\b(?:rm|del)\b[^\r\n]*(?:-r(?:f)?\b|--recursive\b|\/s\b|\/q\b)/i, reason: "recursive deletion" },
