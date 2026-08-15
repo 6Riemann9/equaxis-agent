@@ -13,6 +13,7 @@
     "skills",
     "codeGraph",
     "goalState",
+    "refine",
     "evaluation",
     "subagents",
     "protocols"
@@ -571,6 +572,23 @@
               "minimum": 1
             }
           }
+        }
+      }
+    },
+    "refine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "rootDir"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rootDir": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

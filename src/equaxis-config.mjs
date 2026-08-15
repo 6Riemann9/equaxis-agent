@@ -106,6 +106,10 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     rootDir: ".pi/runtime/goals",
     defaultQuota: { tokenBudget: 200000, windowHours: 24 }
   },
+  refine: {
+    enabled: true,
+    rootDir: ".pi/runtime/refine"
+  },
   intentGate: {
     enabled: true,
     patterns: []
@@ -290,7 +294,7 @@ function assertKnownKeys(value, field, baseValue, configPath) {
 function mergeConfig(base, custom) {
   // DSH-style discipline: unknown keys in custom config are rejected so a
   // typo surfaces at load time instead of being silently merged away.
-  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "goalState", "evaluation", "subagents", "intentGate"];
+  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "goalState", "refine", "evaluation", "subagents", "intentGate"];
   const SUB_SECTIONS = [
     ["runtime", "services"], ["runtime", "gates"],
     ["reliability", "trace"], ["reliability", "approval"], ["reliability", "limits"], ["reliability", "toolRouting"], ["reliability", "eval"],
@@ -350,6 +354,7 @@ function mergeConfig(base, custom) {
       ...(custom.goalState ?? {}),
       defaultQuota: { ...base.goalState.defaultQuota, ...(custom.goalState?.defaultQuota ?? {}) }
     },
+    refine: { ...base.refine, ...(custom.refine ?? {}) },
     evaluation: { ...base.evaluation, ...(custom.evaluation ?? {}) },
     subagents: {
       ...base.subagents,
@@ -513,6 +518,10 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertRecord(config.goalState.defaultQuota, configPath, "goalState.defaultQuota");
   assertNumber(config.goalState.defaultQuota.tokenBudget, configPath, "goalState.defaultQuota.tokenBudget", 1, 1_000_000_000);
   assertNumber(config.goalState.defaultQuota.windowHours, configPath, "goalState.defaultQuota.windowHours", 1, 24 * 365);
+
+  assertRecord(config.refine, configPath, "refine");
+  assertBoolean(config.refine.enabled, configPath, "refine.enabled");
+  assertLocalPath(config.refine.rootDir, configPath, "refine.rootDir");
 
   assertRecord(config.evaluation, configPath, "evaluation");
   assertBoolean(config.evaluation.enabled, configPath, "evaluation.enabled");
