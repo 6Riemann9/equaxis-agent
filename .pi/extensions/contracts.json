@@ -528,6 +528,32 @@
         "tools": 0,
         "notes": "refine 账本按命令读写,零注入;prime-agent /refine 模式"
       }
+    },
+    {
+      "id": "doc-wiki",
+      "entry": "doc-wiki.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "trace",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "tool:wiki_search",
+        "tool:wiki_graph",
+        "tool:wiki_ingest",
+        "command:equaxis-wiki",
+        "event:session_start",
+        "wiki:index"
+      ],
+      "promptImpact": {
+        "systemPromptChars": 0,
+        "tools": 3,
+        "notes": "文档索引按需构建/查询,零注入;TencentDB llm_wiki 确定性切片"
+      }
     }
   ]
 }

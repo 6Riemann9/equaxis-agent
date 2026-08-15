@@ -14,6 +14,7 @@
     "codeGraph",
     "goalState",
     "refine",
+    "wiki",
     "evaluation",
     "subagents",
     "protocols"
@@ -589,6 +590,45 @@
         "rootDir": {
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "wiki": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "rootDir",
+        "includeDirs",
+        "extensions",
+        "maxFiles"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rootDir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "includeDirs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "maxFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
         }
       }
     },

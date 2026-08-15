@@ -110,6 +110,13 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     enabled: true,
     rootDir: ".pi/runtime/refine"
   },
+  wiki: {
+    enabled: true,
+    rootDir: ".pi/runtime/wiki",
+    includeDirs: ["docs"],
+    extensions: [".md", ".markdown", ".mdx"],
+    maxFiles: 2000
+  },
   intentGate: {
     enabled: true,
     patterns: []
@@ -294,7 +301,7 @@ function assertKnownKeys(value, field, baseValue, configPath) {
 function mergeConfig(base, custom) {
   // DSH-style discipline: unknown keys in custom config are rejected so a
   // typo surfaces at load time instead of being silently merged away.
-  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "goalState", "refine", "evaluation", "subagents", "intentGate"];
+  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "goalState", "refine", "wiki", "evaluation", "subagents", "intentGate"];
   const SUB_SECTIONS = [
     ["runtime", "services"], ["runtime", "gates"],
     ["reliability", "trace"], ["reliability", "approval"], ["reliability", "limits"], ["reliability", "toolRouting"], ["reliability", "eval"],
@@ -355,6 +362,7 @@ function mergeConfig(base, custom) {
       defaultQuota: { ...base.goalState.defaultQuota, ...(custom.goalState?.defaultQuota ?? {}) }
     },
     refine: { ...base.refine, ...(custom.refine ?? {}) },
+    wiki: { ...base.wiki, ...(custom.wiki ?? {}) },
     evaluation: { ...base.evaluation, ...(custom.evaluation ?? {}) },
     subagents: {
       ...base.subagents,
@@ -522,6 +530,17 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   assertRecord(config.refine, configPath, "refine");
   assertBoolean(config.refine.enabled, configPath, "refine.enabled");
   assertLocalPath(config.refine.rootDir, configPath, "refine.rootDir");
+
+  assertRecord(config.wiki, configPath, "wiki");
+  assertBoolean(config.wiki.enabled, configPath, "wiki.enabled");
+  assertLocalPath(config.wiki.rootDir, configPath, "wiki.rootDir");
+  if (!Array.isArray(config.wiki.includeDirs) || config.wiki.includeDirs.some((item) => typeof item !== "string" || !item.trim())) {
+    throw configError(configPath, "wiki.includeDirs", "must be an array of non-empty strings");
+  }
+  if (!Array.isArray(config.wiki.extensions) || config.wiki.extensions.some((item) => typeof item !== "string" || !item.trim())) {
+    throw configError(configPath, "wiki.extensions", "must be an array of non-empty strings");
+  }
+  assertInteger(config.wiki.maxFiles, configPath, "wiki.maxFiles", 1, 100000);
 
   assertRecord(config.evaluation, configPath, "evaluation");
   assertBoolean(config.evaluation.enabled, configPath, "evaluation.enabled");
