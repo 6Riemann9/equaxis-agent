@@ -34,7 +34,7 @@ export function parseSkillFile(content, filePath = "") {
     if (sep === -1) continue;
     const key = line.slice(0, sep).trim().toLowerCase();
     const value = line.slice(sep + 1).trim();
-    if (key === "triggers" || key === "evidence") {
+    if (key === "triggers" || key === "evidence" || key === "related") {
       meta[key] = value.replace(/^\[|\]$/g, "").split(",").map((s) => s.trim()).filter(Boolean);
     } else if (key === "retired") {
       meta[key] = value.toLowerCase() === "true";
@@ -47,6 +47,12 @@ export function parseSkillFile(content, filePath = "") {
     description: meta.description ?? "",
     triggers: meta.triggers ?? [],
     evidence: meta.evidence ?? [],
+    // Google Agent Skills metadata: category for registry-style filtering,
+    // dontUse for explicit negative space ("DON'T use this skill for X"),
+    // related for cross-links to sibling skills (agentskills.io standard).
+    category: meta.category ?? "",
+    dontUse: meta.dontuse ?? "",
+    related: meta.related ?? [],
     source: meta.source ?? "",
     created: meta.created ?? "",
     retired: meta.retired ?? false,
@@ -109,6 +115,15 @@ export function scoreSkill(skill, queryTokens) {
 }
 
 /**
+ * Negative-space tokens (Google Agent Skills "DON'T use for X"): skills
+ * whose dontUse text matches the query are excluded from injection so
+ * wrong-skill context never surfaces.
+ */
+export function negativeSpaceTokens(skill) {
+  return new Set(tokenize(skill.dontUse));
+}
+
+/**
  * Select the most relevant skills under a token budget.
  * Returns selected (with estimatedTokens) and omitted lists.
  */
@@ -118,20 +133,54 @@ export function selectRelevantSkills(skills, query, options = {}) {
   // Retired skills are excluded from injection: they failed evidence-driven
   // retirement (PracticeUnsafe 2608.12851) and must not resurface in context.
   const active = skills.filter((skill) => skill.retired !== true);
-  const scored = active
-    .map((skill) => ({ skill, score: scoreSkill(skill, queryTokens) }))
-    .filter(({ score }) => score > 0 || queryTokens.length === 0)
-    .sort((left, right) => right.score - left.score || left.skill.name.localeCompare(right.skill.name));
+  const scored = [];
+  const omitted = [];
+  for (const skill of active) {
+    const score = scoreSkill(skill, queryTokens);
+    if (score <= 0 && queryTokens.length > 0) continue;
+    const negativeTokens = negativeSpaceTokens(skill);
+    const negativeHit = queryTokens.some((token) => negativeTokens.has(token));
+    if (negativeHit) {
+      omitted.push({ name: skill.name, reason: "negative_space", estimatedTokens: 0 });
+      continue;
+    }
+    scored.push({ skill, score });
+  }
+  scored.sort((left, right) => right.score - left.score || left.skill.name.localeCompare(right.skill.name));
   const items = scored.map(({ skill, score }) => ({
     name: skill.name,
     score,
     content: `${skill.description ? `${skill.description}\n` : ""}${skill.body}`,
     skill
   }));
-  const { selected, omitted, usedTokens } = selectWithinBudget(items, { maxTokens, requiredNames: options.requiredNames });
+  // Related-skill expansion (agentskills.io "Related Skills"): a selected
+  // skill's declared related skills are pulled in at the anchor's score so
+  // composite workflows reuse atomic skills without separate queries.
+  if (options.followRelated !== false) {
+    const byName = new Map(active.map((skill) => [skill.name, skill]));
+    const selectedNames = new Set(items.map((item) => item.name));
+    const relatedItems = [];
+    for (const item of items) {
+      for (const relatedName of item.skill.related ?? []) {
+        const related = byName.get(relatedName);
+        if (!related || selectedNames.has(relatedName)) continue;
+        selectedNames.add(relatedName);
+        const relatedScore = Math.max(item.score, scoreSkill(related, queryTokens));
+        relatedItems.push({
+          name: related.name,
+          score: relatedScore,
+          content: `${related.description ? `${related.description}\n` : ""}${related.body}`,
+          skill: related,
+          viaRelated: item.name
+        });
+      }
+    }
+    items.push(...relatedItems);
+  }
+  const { selected, omitted: budgetOmitted, usedTokens } = selectWithinBudget(items, { maxTokens, requiredNames: options.requiredNames });
   return {
-    selected: selected.map((item) => ({ ...item.skill, score: item.score, estimatedTokens: item.estimatedTokens })),
-    omitted: omitted.map((item) => ({ name: item.name, reason: item.reason, estimatedTokens: item.estimatedTokens })),
+    selected: selected.map((item) => ({ ...item.skill, score: item.score, estimatedTokens: item.estimatedTokens, viaRelated: item.viaRelated ?? null })),
+    omitted: [...omitted, ...budgetOmitted.map((item) => ({ name: item.name, reason: item.reason, estimatedTokens: item.estimatedTokens }))],
     usedTokens,
     maxTokens
   };
@@ -193,6 +242,9 @@ export function serializeSkill(skill) {
   const frontmatter = ["---", `name: ${oneLine(skill.name)}`];
   if (skill.description) frontmatter.push(`description: ${oneLine(skill.description)}`);
   if (skill.triggers?.length) frontmatter.push(`triggers: [${skill.triggers.join(", ")}]`);
+  if (skill.category) frontmatter.push(`category: ${oneLine(skill.category)}`);
+  if (skill.dontUse) frontmatter.push(`dontUse: ${oneLine(skill.dontUse)}`);
+  if (skill.related?.length) frontmatter.push(`related: [${skill.related.join(", ")}]`);
   // Provenance (血缘): evidence-backed skills stay auditable after deploy.
   // PracticeUnsafe (2608.12851) shows unsafe successes harden into skills and
   // get reused across sessions; persisting source+evidence makes every skill

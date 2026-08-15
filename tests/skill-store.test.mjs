@@ -10,6 +10,7 @@ import {
   scoreSkill,
   selectRelevantSkills,
   renderSkillBlock,
+  serializeSkill,
   writeSkillFile
 } from "../src/skill-store.mjs";
 
@@ -178,3 +179,71 @@ test("retired skills are excluded from selection but stay on disk", (t) => {
   const { selected: safe } = selectRelevantSkills(all, "safe");
   assert.equal(safe.length, 1);
 });
+
+test("parses Google Agent Skills metadata: category, dontUse, related", () => {
+  const skill = parseSkillFile(`---
+name: bigquery-basics
+description: Query BigQuery datasets
+category: data
+dontUse: Use this skill for fully-managed RAG or SaaS search
+related: [bigquery-ai-ml, spanner-basics]
+---
+
+# Body
+`, "bigquery-basics/SKILL.md");
+  assert.equal(skill.category, "data");
+  assert.equal(skill.dontUse, "Use this skill for fully-managed RAG or SaaS search");
+  assert.deepEqual(skill.related, ["bigquery-ai-ml", "spanner-basics"]);
+});
+
+test("negative space excludes wrong-skill injection with a reason", () => {
+  const skills = [
+    parseSkillFile("---\nname: rag-search\n---\n# RAG\n\nSemantic search.", "rag/SKILL.md"),
+    parseSkillFile("---\nname: saas-search\n---\n# SaaS\n\nManaged search.", "saas/SKILL.md")
+  ];
+  skills[0].dontUse = "fully-managed RAG or SaaS search";
+  const { selected, omitted } = selectRelevantSkills(skills, "saas search", { maxTokens: 4000 });
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].name, "saas-search");
+  assert.ok(omitted.some((entry) => entry.name === "rag-search" && entry.reason === "negative_space"));
+
+  // a query that matches both the positive space and the negative space is excluded
+  const onlyNegative = selectRelevantSkills(skills, "rag", { maxTokens: 4000 });
+  assert.equal(onlyNegative.selected.length, 0);
+  assert.ok(onlyNegative.omitted.some((entry) => entry.name === "rag-search"));
+});
+
+test("related skills are pulled in at the anchor's score and marked viaRelated", () => {
+  const skills = [
+    parseSkillFile("---\nname: alpha-task\nrelated: [beta-help]\n---\n# Alpha\n\nRun the alpha pipeline.", "alpha-task/SKILL.md"),
+    parseSkillFile("---\nname: beta-help\n---\n# Beta\n\nUnrelated content.", "beta-help/SKILL.md")
+  ];
+  const { selected } = selectRelevantSkills(skills, "alpha pipeline", { maxTokens: 4000 });
+  const anchor = selected.find((s) => s.name === "alpha-task");
+  const related = selected.find((s) => s.name === "beta-help");
+  assert.ok(anchor, "anchor must be selected");
+  assert.ok(related, "related skill must be pulled in");
+  assert.equal(related.viaRelated, "alpha-task");
+  assert.equal(related.score, anchor.score);
+});
+
+test("related expansion respects the token budget and skips missing skills", () => {
+  const skills = [
+    parseSkillFile("---\nname: alpha-task\nrelated: [missing, beta-help]\n---\n# Alpha\n\n" + "x".repeat(2000), "alpha-task/SKILL.md"),
+    parseSkillFile("---\nname: beta-help\n---\n# Beta\n\n" + "y".repeat(2000), "beta-help/SKILL.md")
+  ];
+  const { selected } = selectRelevantSkills(skills, "alpha", { maxTokens: 800 });
+  assert.equal(selected.length, 1, "budget fits the anchor but not the related pull-in");
+  const { selected: generous } = selectRelevantSkills(skills, "alpha", { maxTokens: 2000 });
+  assert.deepEqual(generous.map((s) => s.name).sort(), ["alpha-task", "beta-help"]);
+  assert.ok(!generous.some((s) => s.name === "missing"));
+});
+
+test("serialize/parse round-trips category, dontUse and related", () => {
+  const md = serializeSkill({ name: "demo", description: "d", category: "cloud", dontUse: "Do not use for local ad-hoc queries", related: ["bigquery-ai-ml"], body: "b" });
+  const parsed = parseSkillFile(md, "x/SKILL.md");
+  assert.equal(parsed.category, "cloud");
+  assert.equal(parsed.dontUse, "Do not use for local ad-hoc queries");
+  assert.deepEqual(parsed.related, ["bigquery-ai-ml"]);
+});
+
