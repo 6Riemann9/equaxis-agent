@@ -30,7 +30,8 @@ function publicStatus(task) {
     error: task.error,
     errorCode: task.errorCode ?? null,
     failurePhase: task.failurePhase ?? null,
-    failureKind: task.failureKind ?? null
+    failureKind: task.failureKind ?? null,
+    evidence: task.evidence ?? null
   };
 }
 

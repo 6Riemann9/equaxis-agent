@@ -299,3 +299,43 @@ test("dependency failures attribute to scheduling stage", async () => {
   assert.equal(result.failurePhase, "scheduling");
   assert.equal(result.failureKind, "dependency");
 });
+
+test("completion claims are evidence-checked without gating the run", async () => {
+  // verifier confirms the claimed artifact exists
+  const okRuntime = new SubagentRuntime({
+    executor: async () => ({ ok: true, artifact: "build/report.md" }),
+    verifyEvidence: async (_task, result) => ({ ok: result.artifact === "build/report.md" })
+  });
+  okRuntime.spawn({ id: "ev-ok", prompt: "x" });
+  const okResult = await okRuntime.wait("ev-ok");
+  assert.equal(okResult.status, "completed");
+  assert.deepEqual(okResult.evidence, { status: "verified", issues: [] });
+
+  // verifier rejects the claim: run still completes, claim flagged
+  const badRuntime = new SubagentRuntime({
+    executor: async () => ({ ok: true, artifact: "missing.pdf" }),
+    verifyEvidence: async () => ({ ok: false, issues: ["artifact missing.pdf does not exist"] })
+  });
+  badRuntime.spawn({ id: "ev-bad", prompt: "x" });
+  const badResult = await badRuntime.wait("ev-bad");
+  assert.equal(badResult.status, "completed");
+  assert.equal(badResult.evidence.status, "unverified");
+  assert.deepEqual(badResult.evidence.issues, ["artifact missing.pdf does not exist"]);
+
+  // verifier crash: claim flagged, run unaffected
+  const crashRuntime = new SubagentRuntime({
+    executor: async () => ({ ok: true }),
+    verifyEvidence: async () => { throw new Error("verifier down"); }
+  });
+  crashRuntime.spawn({ id: "ev-crash", prompt: "x" });
+  const crashResult = await crashRuntime.wait("ev-crash");
+  assert.equal(crashResult.status, "completed");
+  assert.equal(crashResult.evidence.status, "unverified");
+  assert.match(crashResult.evidence.issues[0], /verifier error/);
+
+  // no verifier configured: no evidence field, legacy behavior
+  const plainRuntime = new SubagentRuntime({ executor: async () => ({ ok: true }) });
+  plainRuntime.spawn({ id: "ev-none", prompt: "x" });
+  const plainResult = await plainRuntime.wait("ev-none");
+  assert.equal(plainResult.evidence, null);
+});

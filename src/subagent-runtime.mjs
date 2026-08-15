@@ -64,6 +64,7 @@ export function classifyFailure(task) {
 export class SubagentRuntime {
   constructor(options = {}) {
     this.executor = options.executor ?? (async () => ({ ok: true }));
+    this.verifyEvidence = options.verifyEvidence ?? null;
     this.maxConcurrent = options.maxConcurrent ?? 2;
     this.trace = options.trace ?? (() => {});
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? 60000;
@@ -222,7 +223,8 @@ export class SubagentRuntime {
       error: task.error,
       errorCode: task.errorCode ?? null,
       failurePhase: task.failurePhase ?? null,
-      failureKind: task.failureKind ?? null
+      failureKind: task.failureKind ?? null,
+      evidence: task.evidence ?? null
     };
   }
 
@@ -351,6 +353,22 @@ export class SubagentRuntime {
             const error = new Error(schemaError);
             error.code = "SCHEMA";
             throw error;
+          }
+          // Vero (arXiv 2608.13522) audit principle: completion claims must be
+          // machine-checkable. When a verifier is configured, the subagent's
+          // claimed evidence (files, artifacts) is checked and the outcome is
+          // recorded on the task — audit, not a gate: a failed verification
+          // flags the claim without failing the run.
+          if (this.verifyEvidence) {
+            try {
+              const verdict = await this.verifyEvidence(task, result);
+              task.evidence = verdict?.ok === false
+                ? { status: "unverified", issues: Array.isArray(verdict.issues) ? verdict.issues : [String(verdict.reason ?? "evidence check failed")] }
+                : { status: "verified", issues: [] };
+            } catch (error) {
+              task.evidence = { status: "unverified", issues: [`evidence verifier error: ${String(error?.message ?? error)}`] };
+            }
+            this.trace(task.evidence.status === "verified" ? "subagent_evidence_verified" : "subagent_evidence_unverified", { id: task.id, traceId: task.traceId, issues: task.evidence.issues });
           }
           task.status = "completed";
           task.result = result;
