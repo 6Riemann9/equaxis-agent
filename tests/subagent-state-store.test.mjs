@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SubagentRuntime } from "../src/subagent-runtime.mjs";
-import { SubagentStateStore } from "../src/subagent-state-store.mjs";
+import { SubagentStateStore, attributeFailures } from "../src/subagent-state-store.mjs";
 
 function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-subagent-store-"));
@@ -62,3 +62,27 @@ test("rejects subagent state paths outside the workspace", (t) => {
   const root = workspace(t);
   assert.throws(() => new SubagentStateStore({ projectRoot: root, rootDir: "../outside" }), /must stay inside the workspace/);
 });
+
+test("attributeFailures aggregates by phase, kind and error code", () => {
+  const rows = [
+    { event: "failed", task: { id: "a", status: "failed", failurePhase: "execution", failureKind: "executor", errorCode: null } },
+    { event: "failed", task: { id: "b", status: "failed", failurePhase: "execution", failureKind: "timeout", errorCode: "TIMEOUT" } },
+    { event: "failed", task: { id: "c", status: "failed", failurePhase: "scheduling", failureKind: "dependency", errorCode: null } },
+    { event: "completed", task: { id: "d", status: "completed" } }
+  ];
+  const result = attributeFailures(rows);
+  assert.equal(result.total, 3);
+  assert.deepEqual(result.byPhase, { execution: 2, scheduling: 1 });
+  assert.deepEqual(result.byKind, { executor: 1, timeout: 1, dependency: 1 });
+  assert.equal(result.topPhase, "execution");
+  assert.equal(result.topKind, "executor");
+  assert.match(result.triage, /execution\/executor/);
+});
+
+test("attributeFailures handles empty and legacy rows", () => {
+  assert.deepEqual(attributeFailures([]), { total: 0, byPhase: {}, byKind: {}, byCode: {}, topPhase: null, topKind: null, triage: "no failures" });
+  const legacy = attributeFailures([{ event: "failed", task: { id: "x", status: "failed" } }]);
+  assert.equal(legacy.total, 1);
+  assert.equal(legacy.byPhase.unknown, 1);
+});
+

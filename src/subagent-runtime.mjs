@@ -41,6 +41,26 @@ function validateResultSchema(value, schema) {
   }
 }
 
+/**
+ * MARC v1 (arXiv 2608.13476) stage-level failure attribution: every failure
+ * is attributed to the execution stage it occurred in plus a failure kind,
+ * so pipelines can answer "which stage contributes the most failures"
+ * instead of treating a multi-agent run as one opaque failure.
+ *
+ * Stages: scheduling (dependency/queueing), execution (run/retry/timeout),
+ * finalization (result-schema validation).
+ */
+export function classifyFailure(task) {
+  const error = String(task?.error ?? "");
+  const code = task?.errorCode ?? null;
+  const status = task?.status;
+  if (status === "cancelled" || code === "ABORT_ERR") return { phase: "execution", kind: "cancelled" };
+  if (code === "TIMEOUT") return { phase: "execution", kind: "timeout" };
+  if (code === "SCHEMA") return { phase: "finalization", kind: "schema" };
+  if (error.startsWith("dependency did not complete")) return { phase: "scheduling", kind: "dependency" };
+  return { phase: "execution", kind: "executor" };
+}
+
 export class SubagentRuntime {
   constructor(options = {}) {
     this.executor = options.executor ?? (async () => ({ ok: true }));
@@ -94,6 +114,13 @@ export class SubagentRuntime {
 
   #record(event, task) {
     try {
+      if (event === "failed" || event === "cancelled") {
+        if (!task.failurePhase || !task.failureKind) {
+          const attribution = classifyFailure(task);
+          task.failurePhase = attribution.phase;
+          task.failureKind = attribution.kind;
+        }
+      }
       this.stateStore?.record?.(event, task);
     } catch (error) {
       this.trace("subagent_persistence_failed", { id: task.id, traceId: task.traceId, error: String(error?.message ?? error) });
@@ -192,7 +219,10 @@ export class SubagentRuntime {
       startedAt: task.startedAt,
       completedAt: task.completedAt,
       result: task.result,
-      error: task.error
+      error: task.error,
+      errorCode: task.errorCode ?? null,
+      failurePhase: task.failurePhase ?? null,
+      failureKind: task.failureKind ?? null
     };
   }
 
@@ -280,6 +310,8 @@ export class SubagentRuntime {
         task.status = "failed";
         task.completedAt = now();
         task.error = `dependency did not complete: ${failedDependency}`;
+        task.failurePhase = "scheduling";
+        task.failureKind = "dependency";
         task.resolve();
         this.trace("subagent_failed", { id: task.id, traceId: task.traceId, error: task.error });
         this.#record("failed", task);
@@ -315,7 +347,11 @@ export class SubagentRuntime {
           const result = await this.#executeAttempt(task);
           if (task.controller.signal.aborted) throw abortError(task.controller.signal.reason);
           const schemaError = validateResultSchema(result, task.schema);
-          if (schemaError) throw new Error(schemaError);
+          if (schemaError) {
+            const error = new Error(schemaError);
+            error.code = "SCHEMA";
+            throw error;
+          }
           task.status = "completed";
           task.result = result;
           this.trace("subagent_completed", { id: task.id, traceId: task.traceId, attempts: task.attempts });
@@ -335,7 +371,8 @@ export class SubagentRuntime {
       const cancelled = task.controller.signal.aborted || error?.code === "ABORT_ERR";
       task.status = cancelled ? "cancelled" : "failed";
       task.error = String(error?.message ?? error);
-      this.trace(cancelled ? "subagent_cancelled" : "subagent_failed", { id: task.id, traceId: task.traceId, attempts: task.attempts, error: task.error });
+      task.errorCode = error?.code ?? null;
+      this.trace(cancelled ? "subagent_cancelled" : "subagent_failed", { id: task.id, traceId: task.traceId, attempts: task.attempts, error: task.error, code: task.errorCode });
     } finally {
       task.completedAt = now();
       this.#record(task.status, task);

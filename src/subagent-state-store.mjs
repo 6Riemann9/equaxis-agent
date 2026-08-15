@@ -27,7 +27,10 @@ function publicStatus(task) {
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     result: task.result,
-    error: task.error
+    error: task.error,
+    errorCode: task.errorCode ?? null,
+    failurePhase: task.failurePhase ?? null,
+    failureKind: task.failureKind ?? null
   };
 }
 
@@ -71,4 +74,40 @@ export function describeSubagentPersistence(config) {
   const persistence = config?.subagents?.persistence;
   if (!persistence?.enabled) return { enabled: false, detail: "disabled" };
   return { enabled: true, detail: `snapshotDir=${persistence.rootDir}/snapshots` };
+}
+
+/**
+ * MARC v1 (arXiv 2608.13476) stage-level failure attribution over persisted
+ * subagent events. Input rows are state-store entries ({ event, task });
+ * failed/cancelled tasks are aggregated by (failurePhase, failureKind) and
+ * by errorCode, returning the dominant failure stage/kind for triage.
+ */
+export function attributeFailures(rows) {
+  const failed = rows.filter((row) => {
+    const task = row?.task ?? row;
+    return task && ["failed", "cancelled"].includes(task.status);
+  });
+  const byPhase = {};
+  const byKind = {};
+  const byCode = {};
+  for (const row of failed) {
+    const task = row?.task ?? row;
+    const phase = task.failurePhase ?? "unknown";
+    const kind = task.failureKind ?? "unknown";
+    const code = task.errorCode ?? null;
+    byPhase[phase] = (byPhase[phase] ?? 0) + 1;
+    byKind[kind] = (byKind[kind] ?? 0) + 1;
+    if (code) byCode[code] = (byCode[code] ?? 0) + 1;
+  }
+  const topPhase = Object.entries(byPhase).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  const topKind = Object.entries(byKind).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  return {
+    total: failed.length,
+    byPhase,
+    byKind,
+    byCode,
+    topPhase,
+    topKind,
+    triage: topPhase && topKind ? `dominant failure: ${topPhase}/${topKind}` : "no failures"
+  };
 }

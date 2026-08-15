@@ -253,3 +253,49 @@ test("timeout is terminal even with a retry budget", async () => {
 });
   assert.equal((await runtime.wait("running")).status, "cancelled");
 });
+
+test("failed tasks carry MARC-style failure attribution (phase + kind)", async () => {
+  // schema failure -> finalization/schema
+  const schemaRuntime = new SubagentRuntime({ executor: async () => ({ ok: true }) });
+  schemaRuntime.spawn({ id: "s1", prompt: "x", schema: { type: "object", required: ["score"], properties: { score: { type: "number" } } } });
+  const schemaResult = await schemaRuntime.wait("s1");
+  assert.equal(schemaResult.failurePhase, "finalization");
+  assert.equal(schemaResult.failureKind, "schema");
+  assert.equal(schemaResult.errorCode, "SCHEMA");
+
+  // executor failure -> execution/executor
+  const execRuntime = new SubagentRuntime({ executor: async () => { throw new Error("boom"); } });
+  execRuntime.spawn({ id: "e1", prompt: "x" });
+  const execResult = await execRuntime.wait("e1");
+  assert.equal(execResult.failurePhase, "execution");
+  assert.equal(execResult.failureKind, "executor");
+
+  // timeout -> execution/timeout
+  const slowRuntime = new SubagentRuntime({
+    executor: async (_task, { signal }) => {
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("aborted by timeout")), { once: true });
+      });
+    },
+    defaultTimeoutMs: 50
+  });
+  slowRuntime.spawn({ id: "t1", prompt: "x" });
+  const timeoutResult = await slowRuntime.wait("t1");
+  assert.equal(timeoutResult.failurePhase, "execution");
+  assert.equal(timeoutResult.failureKind, "timeout");
+  assert.equal(timeoutResult.errorCode, "TIMEOUT");
+});
+
+test("dependency failures attribute to scheduling stage", async () => {
+  const runtime = new SubagentRuntime({ executor: async (task) => {
+    if (task.id === "dep-fail") throw new Error("executor failure");
+    return { ok: true };
+  } });
+  runtime.spawn({ id: "dep-fail", prompt: "fail" });
+  await runtime.wait("dep-fail");
+  runtime.spawn({ id: "dependent", prompt: "wait", dependencies: ["dep-fail"] });
+  const result = await runtime.wait("dependent");
+  assert.equal(result.status, "failed");
+  assert.equal(result.failurePhase, "scheduling");
+  assert.equal(result.failureKind, "dependency");
+});
