@@ -124,10 +124,6 @@ function jsDocFor(node) {
   }
 }
 
-function stringLiteralValue(node) {
-  return node?.kind === ts.SyntaxKind.StringLiteral ? node.text : null;
-}
-
 /**
  * Build a fresh code index over the workspace.
  *
