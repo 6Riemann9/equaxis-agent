@@ -68,6 +68,19 @@ class AgentMemory:
         validate_content(message, "message")
         self.context_builder.record_user_message(session_id, message)
 
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Vectorize texts with the configured long-term embedding function.
+
+        Used by dream consolidation (LycheeMemory V2, arXiv 2608.12990) to
+        detect semantic segment boundaries in conversation history before
+        per-segment extraction. Boundary mis-detection is a soft decision
+        (segment granularity only), never a hard gate.
+        """
+        if not texts:
+            return []
+        ef = self.manager.long_term._embedding_function()
+        return ef(texts)
+
     def on_assistant_message(self, session_id: str, message: str) -> None:
         validate_session_id(session_id)
         validate_content(message, "message")

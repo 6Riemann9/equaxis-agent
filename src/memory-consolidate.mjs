@@ -40,6 +40,62 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Cosine similarity between two equal-length numeric vectors. */
+export function cosineSimilarity(a, b) {
+  const len = Math.min(a?.length ?? 0, b?.length ?? 0);
+  if (len === 0) return 0;
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < len; i += 1) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+/**
+ * Segment conversation entries by semantic boundary (LycheeMemory V2,
+ * arXiv 2608.12990: segment-level consolidation packs multi-turn dialogue
+ * into segments, each encoded once).
+ *
+ * Two split triggers: (1) adjacent-entry embedding cosine below `threshold`
+ * (topic switch), (2) hard size cap `maxSegmentChars` so a single segment can
+ * never exceed the extraction prompt budget (fixes the old 8000-char truncation
+ * that silently dropped early history).
+ *
+ * SimGates (2608.10216) lesson: embedding thresholds are unreliable, so this
+ * split is a SOFT decision — a wrong split only changes extraction granularity,
+ * every entry still lands in exactly one segment, nothing is dropped.
+ */
+export function segmentEntriesBySimilarity(entries, options = {}) {
+  const threshold = Number(options.threshold ?? 0.75);
+  const maxSegmentChars = Number(options.maxSegmentChars ?? 3000);
+  const vectors = options.vectors ?? [];
+  const segments = [];
+  let current = [];
+  let currentChars = 0;
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    const entryChars = String(entry?.content ?? "").length;
+    let shouldSplit = current.length > 0 && currentChars + entryChars > maxSegmentChars;
+    if (!shouldSplit && current.length > 0 && vectors.length === entries.length && i > 0) {
+      shouldSplit = cosineSimilarity(vectors[i - 1], vectors[i]) < threshold;
+    }
+    if (shouldSplit) {
+      segments.push(current);
+      current = [];
+      currentChars = 0;
+    }
+    current.push(entry);
+    currentChars += entryChars;
+  }
+  if (current.length) segments.push(current);
+  return segments;
+}
+
 function cleanMemory(value) {
   if (!isRecord(value)) return null;
   const content = typeof value.content === "string" ? value.content.trim() : "";
@@ -97,12 +153,46 @@ export function parseMemoryExtractionResponse(text) {
  * @param {(prompt: string) => Promise<string>} options.complete  model completion
  * @param {Array<{cursor: number, content: string, timestamp?: string}>} options.entries
  * @param {{wing?: string, room?: string}} [options.defaults]
+ * @param {{enabled?: boolean, threshold?: number, maxSegmentChars?: number}} [options.segmentation]
  */
-export async function consolidateMemoryHistory({ bridge, complete, entries, defaults = {} }) {
+export async function consolidateMemoryHistory({ bridge, complete, entries, defaults = {}, segmentation = {} }) {
   if (!entries.length) return { processed: 0, memories: [], facts: [] };
-  const prompt = buildMemoryExtractionPrompt(entries);
-  const text = await complete(prompt);
-  const { memories, facts } = parseMemoryExtractionResponse(text);
+
+  // 段级整合:语义边界切段(embedding 余弦 < threshold = 主题切换),
+  // 每段独立提取,信息不因整批截断而丢失。
+  // embed 失败时降级为仅大小上限切段——分段是软决策,不阻塞整合。
+  let segments = [entries];
+  if (segmentation.enabled !== false && entries.length > 1) {
+    try {
+      const vectors = await embedTexts(bridge, entries.map((entry) => String(entry?.content ?? "").slice(0, 500)));
+      segments = segmentEntriesBySimilarity(entries, {
+        vectors,
+        threshold: segmentation.threshold,
+        maxSegmentChars: segmentation.maxSegmentChars
+      });
+    } catch {
+      segments = segmentEntriesBySimilarity(entries, {
+        threshold: 0,
+        maxSegmentChars: segmentation.maxSegmentChars
+      });
+    }
+  }
+
+  // 每段一次 LLM 编码;小批量并发(3)控制 API 压力。
+  const extracted = [];
+  for (let start = 0; start < segments.length; start += 3) {
+    const batch = segments.slice(start, start + 3);
+    const batchResults = await Promise.all(
+      batch.map(async (segment) => {
+        const prompt = buildMemoryExtractionPrompt(segment);
+        const text = await complete(prompt);
+        return parseMemoryExtractionResponse(text);
+      })
+    );
+    extracted.push(...batchResults);
+  }
+  const memories = extracted.flatMap((result) => result.memories);
+  const facts = extracted.flatMap((result) => result.facts);
 
   const stored = [];
   for (const memory of memories) {
@@ -112,7 +202,7 @@ export async function consolidateMemoryHistory({ bridge, complete, entries, defa
       room: memory.room ?? defaults.room ?? "general",
       hall: memory.hall ?? "hall_discoveries",
       source_file: "equaxis-dream",
-      metadata: { source: "dream" }
+      metadata: { source: "dream", segments: segments.length }
     });
     stored.push(result.record.drawer_id);
   }
@@ -122,7 +212,7 @@ export async function consolidateMemoryHistory({ bridge, complete, entries, defa
       subject: fact.subject,
       predicate: fact.predicate,
       object: fact.object,
-      metadata: { source: "dream" }
+      metadata: { source: "dream", segments: segments.length }
     });
     storedFacts.push(result.triple.triple_id);
   }
@@ -130,4 +220,10 @@ export async function consolidateMemoryHistory({ bridge, complete, entries, defa
   const lastCursor = entries[entries.length - 1].cursor;
   await bridge.request("set_dream_cursor", { cursor: lastCursor });
   return { processed: entries.length, memories: stored, facts: storedFacts };
+}
+
+async function embedTexts(bridge, texts) {
+  const result = await bridge.request("embed", { texts });
+  if (!Array.isArray(result?.vectors)) throw new Error("embed returned no vectors");
+  return result.vectors;
 }

@@ -18,6 +18,12 @@ interface MemoryDreamConfig {
   model?: string;
 }
 
+interface MemorySegmentationConfig {
+  enabled: boolean;
+  threshold: number;
+  maxSegmentChars: number;
+}
+
 interface MemoryConfig {
   enabled: boolean;
   pythonCommand: string;
@@ -30,6 +36,7 @@ interface MemoryConfig {
   maxStoredMessageChars: number;
   requestTimeoutMs: number;
   dream: MemoryDreamConfig;
+  segmentation?: MemorySegmentationConfig;
 }
 
 interface SearchMatch {
@@ -491,6 +498,7 @@ ${context || "No relevant stored memory was retrieved."}
       bridge: memory,
       entries,
       defaults: { wing: config.defaultWing, room: config.defaultRoom },
+      segmentation: config.segmentation,
       complete: async (prompt: string) => {
         const response = await completeSimple(
           model,

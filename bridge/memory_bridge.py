@@ -251,6 +251,11 @@ def dispatch(memory: AgentMemory, action: str, payload: dict[str, Any]) -> Any:
     if action == "record_assistant":
         memory.on_assistant_message(str(payload["session_id"]), str(payload["content"]))
         return {"recorded": True}
+    if action == "embed":
+        texts = [str(t) for t in payload.get("texts", [])]
+        if not texts:
+            raise ValueError("texts is required")
+        return {"vectors": memory.embed(texts)}
     if action == "search":
         result = memory.search(
             query=str(payload["query"]),

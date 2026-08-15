@@ -74,6 +74,11 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
       enabled: true,
       onShutdown: false,
       maxEntries: 200
+    },
+    segmentation: {
+      enabled: true,
+      threshold: 0.75,
+      maxSegmentChars: 3000
     }
   },
   skills: {
