@@ -11,6 +11,7 @@
     "reliability",
     "memory",
     "skills",
+    "codeGraph",
     "evaluation",
     "subagents",
     "protocols"
@@ -497,6 +498,42 @@
             "type": "string",
             "minLength": 1
           }
+        }
+      }
+    },
+    "codeGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "rootDir",
+        "includeDirs",
+        "maxFiles",
+        "rebuildIfStaleMs"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rootDir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "includeDirs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "maxFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "rebuildIfStaleMs": {
+          "type": "integer",
+          "minimum": 60000
         }
       }
     },

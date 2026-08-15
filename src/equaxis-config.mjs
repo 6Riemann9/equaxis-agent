@@ -94,6 +94,13 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     maxContextTokens: 3000,
     requiredNames: []
   },
+  codeGraph: {
+    enabled: true,
+    rootDir: ".pi/runtime/code-graph",
+    includeDirs: ["src"],
+    maxFiles: 2000,
+    rebuildIfStaleMs: 6 * 3600 * 1000
+  },
   intentGate: {
     enabled: true,
     patterns: []
@@ -278,7 +285,7 @@ function assertKnownKeys(value, field, baseValue, configPath) {
 function mergeConfig(base, custom) {
   // DSH-style discipline: unknown keys in custom config are rejected so a
   // typo surfaces at load time instead of being silently merged away.
-  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "evaluation", "subagents", "intentGate"];
+  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "evaluation", "subagents", "intentGate"];
   const SUB_SECTIONS = [
     ["runtime", "services"], ["runtime", "gates"],
     ["reliability", "trace"], ["reliability", "approval"], ["reliability", "limits"], ["reliability", "toolRouting"], ["reliability", "eval"],
@@ -331,6 +338,7 @@ function mergeConfig(base, custom) {
       segmentation: { ...base.memory.segmentation, ...(custom.memory?.segmentation ?? {}) }
     },
     skills: { ...base.skills, ...(custom.skills ?? {}) },
+    codeGraph: { ...base.codeGraph, ...(custom.codeGraph ?? {}) },
     evaluation: { ...base.evaluation, ...(custom.evaluation ?? {}) },
     subagents: {
       ...base.subagents,
@@ -478,6 +486,15 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   if (!Array.isArray(config.skills.requiredNames) || config.skills.requiredNames.some((item) => typeof item !== "string" || !item.trim())) {
     throw configError(configPath, "skills.requiredNames", "must be an array of non-empty strings");
   }
+
+  assertRecord(config.codeGraph, configPath, "codeGraph");
+  assertBoolean(config.codeGraph.enabled, configPath, "codeGraph.enabled");
+  assertLocalPath(config.codeGraph.rootDir, configPath, "codeGraph.rootDir");
+  if (!Array.isArray(config.codeGraph.includeDirs) || config.codeGraph.includeDirs.some((item) => typeof item !== "string" || !item.trim())) {
+    throw configError(configPath, "codeGraph.includeDirs", "must be an array of non-empty strings");
+  }
+  assertInteger(config.codeGraph.maxFiles, configPath, "codeGraph.maxFiles", 1, 100000);
+  assertInteger(config.codeGraph.rebuildIfStaleMs, configPath, "codeGraph.rebuildIfStaleMs", 60_000, 30 * 24 * 3600 * 1000);
 
   assertRecord(config.evaluation, configPath, "evaluation");
   assertBoolean(config.evaluation.enabled, configPath, "evaluation.enabled");

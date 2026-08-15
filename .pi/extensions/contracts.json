@@ -454,6 +454,31 @@
         "tools": 0,
         "notes": "regex 命中才注入模式指令,零模型成本"
       }
+    },
+    {
+      "id": "code-graph",
+      "entry": "code-graph.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "trace",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "tool:code_graph_query",
+        "tool:code_graph_rebuild",
+        "command:equaxis-code-graph",
+        "event:session_start",
+        "code-graph:index"
+      ],
+      "promptImpact": {
+        "systemPromptChars": 0,
+        "tools": 2,
+        "notes": "索引按需重建,查询工具零注入;TencentDB CodeGraph 资产模式"
+      }
     }
   ]
 }
