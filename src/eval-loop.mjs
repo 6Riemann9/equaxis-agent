@@ -141,6 +141,46 @@ export function compareCandidate({ baseline, candidate, minSamples = 5, minSucce
   return { decision: "scoped", reason: "candidate is comparable but improvement is below deploy threshold", successDelta, latencyDeltaRatio, costDeltaRatio, confidence };
 }
 
+/**
+ * 双数据集接受门 — train-set improvement + holdout (dev-set) non-regression.
+ *
+ * AutoDesign (arXiv 2608.13560) gates every harness change on "train-set
+ * improvement AND dev-set non-regression" (their eq. 6 acceptance gate) so a
+ * change that overfits its evaluation slice never ships. This composes the
+ * single-set compareCandidate with a holdout comparison: the candidate must
+ * pass the main gate AND keep the holdout success rate above
+ * -holdoutRegressionTolerance. Holdout failures return "reject" with the
+ * main decision preserved for diagnostics.
+ */
+export function compareCandidateWithHoldout({ baseline, candidate, holdoutBaseline, holdoutCandidate, holdoutRegressionTolerance = 0.02, minSamples = 5, ...rest } = {}) {
+  const main = compareCandidate({ baseline, candidate, minSamples, ...rest });
+  if (main.decision === "reject" || main.decision === "insufficient_data") return main;
+  if (!holdoutBaseline || !holdoutCandidate) return { ...main, holdout: "skipped", holdoutDelta: null };
+  const holdoutAttempts = Math.min(Number(holdoutBaseline.attempts ?? 0), Number(holdoutCandidate.attempts ?? 0));
+  if (holdoutAttempts < minSamples) {
+    return { ...main, holdout: "insufficient_data", holdoutDelta: null, holdoutAttempts };
+  }
+  const baseRate = Number(holdoutBaseline.successRate ?? 0);
+  const candidateRate = Number(holdoutCandidate.successRate ?? 0);
+  const holdoutDelta = rounded(candidateRate - baseRate, 4);
+  if (holdoutDelta < -holdoutRegressionTolerance) {
+    return {
+      decision: "reject",
+      reason: `holdout (dev-set) regression: ${holdoutDelta} below -${holdoutRegressionTolerance} tolerance`,
+      holdout: "regressed",
+      holdoutDelta,
+      holdoutAttempts,
+      mainDecision: main.decision,
+      mainReason: main.reason,
+      successDelta: main.successDelta,
+      latencyDeltaRatio: main.latencyDeltaRatio,
+      costDeltaRatio: main.costDeltaRatio,
+      confidence: main.confidence
+    };
+  }
+  return { ...main, holdout: "pass", holdoutDelta, holdoutAttempts };
+}
+
 const EVAL_TRACE_EVENT = "eval_outcome_recorded";
 const EVAL_TRACE_FIELDS = [
   "taskId", "cycleId", "experimentId", "cohort", "model", "tool", "capabilities",

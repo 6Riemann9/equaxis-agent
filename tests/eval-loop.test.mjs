@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { collectEvalEventsFromTraceDir, createEvalLoopFromTrace, EvalLoop, compareCandidate, createCandidateChange, createEvalEvent } from "../src/eval-loop.mjs";
+import { collectEvalEventsFromTraceDir, createEvalLoopFromTrace, EvalLoop, compareCandidate, compareCandidateWithHoldout, createCandidateChange, createEvalEvent } from "../src/eval-loop.mjs";
 
 function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-eval-loop-"));
@@ -85,6 +85,58 @@ test("deterministically decides A/B outcomes", () => {
   const costReject = compareCandidate({ baseline, candidate: { attempts: 200, successes: 142, successRate: 0.71, averageLatencyMs: 100, averageCostUsd: 0.02 } });
   assert.equal(costReject.decision, "reject");
   assert.match(costReject.reason, /cost regressed/);
+});
+
+test("holdout gate deploys only on train gain + dev non-regression", () => {
+  const baseline = { attempts: 200, successes: 140, successRate: 0.7, averageLatencyMs: 100, averageCostUsd: 0.01 };
+  const improved = { attempts: 200, successes: 180, successRate: 0.9, averageLatencyMs: 105, averageCostUsd: 0.011 };
+  const holdoutBaseline = { attempts: 100, successes: 70, successRate: 0.7, averageLatencyMs: 100, averageCostUsd: 0.01 };
+
+  // train improved + holdout flat -> deploy
+  const deploy = compareCandidateWithHoldout({
+    baseline,
+    candidate: improved,
+    holdoutBaseline,
+    holdoutCandidate: { attempts: 100, successes: 72, successRate: 0.72, averageLatencyMs: 100, averageCostUsd: 0.01 }
+  });
+  assert.equal(deploy.decision, "deploy");
+  assert.equal(deploy.holdout, "pass");
+
+  // train improved + holdout regressed -> reject (AutoDesign acceptance gate)
+  const rejected = compareCandidateWithHoldout({
+    baseline,
+    candidate: improved,
+    holdoutBaseline,
+    holdoutCandidate: { attempts: 100, successes: 60, successRate: 0.6, averageLatencyMs: 100, averageCostUsd: 0.01 }
+  });
+  assert.equal(rejected.decision, "reject");
+  assert.equal(rejected.holdout, "regressed");
+  assert.match(rejected.reason, /holdout/);
+  assert.equal(rejected.mainDecision, "deploy");
+
+  // main reject short-circuits without holdout
+  const shortCircuit = compareCandidateWithHoldout({
+    baseline,
+    candidate: { attempts: 200, successes: 120, successRate: 0.6, averageLatencyMs: 90, averageCostUsd: 0.01 },
+    holdoutBaseline,
+    holdoutCandidate: { attempts: 100, successes: 80, successRate: 0.8, averageLatencyMs: 90, averageCostUsd: 0.01 }
+  });
+  assert.equal(shortCircuit.decision, "reject");
+  assert.equal(shortCircuit.holdout, undefined);
+
+  // missing holdout data -> skipped, main decision stands
+  const skipped = compareCandidateWithHoldout({ baseline, candidate: improved });
+  assert.equal(skipped.decision, "deploy");
+  assert.equal(skipped.holdout, "skipped");
+
+  // insufficient holdout samples -> not deployed via holdout path
+  const thin = compareCandidateWithHoldout({
+    baseline,
+    candidate: improved,
+    holdoutBaseline,
+    holdoutCandidate: { attempts: 2, successes: 2, successRate: 1, averageLatencyMs: 90, averageCostUsd: 0.01 }
+  });
+  assert.equal(thin.holdout, "insufficient_data");
 });
 
 test("normalizes candidate changes with version provenance", () => {
