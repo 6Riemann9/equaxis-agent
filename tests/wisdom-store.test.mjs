@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readWisdom, recordWisdom, wisdomPreamble } from "../src/wisdom-store.mjs";
+import { pruneWisdom, readWisdom, recordWisdom, wisdomDir, wisdomPreamble } from "../src/wisdom-store.mjs";
 import { SubagentRuntime } from "../src/subagent-runtime.mjs";
 
 function workspace(t) {
@@ -74,4 +74,16 @@ test("schedule prepends dependency wisdom across batches", async (t) => {
   await runtime.wait("b");
   assert.match(seen[1], /\[wisdom from a \(completed\)\] result of a/);
   assert.match(seen[1], /do B using A's output/);
+});
+
+test("pruneWisdom keeps only the newest ring", (t) => {
+  const root = workspace(t);
+  for (let i = 0; i < 5; i += 1) {
+    recordWisdom({ projectRoot: root, taskId: `w-${i}`, label: `l${i}`, result: { summary: `s${i}` } });
+  }
+  const removed = pruneWisdom({ projectRoot: root, keep: 2 });
+  assert.equal(removed.length, 3);
+  const remaining = fs.readdirSync(wisdomDir(root)).filter((name) => name.endsWith(".json"));
+  assert.equal(remaining.length, 2);
+  assert.ok(remaining.some((name) => name.includes("w-4")), "newest survives");
 });

@@ -72,3 +72,30 @@ export function wisdomPreamble({ projectRoot, taskIds, maxChars = 800, rootDir =
   const joined = parts.join("\n");
   return joined.length > maxChars ? `${joined.slice(0, maxChars)}…` : joined;
 }
+
+/** Keep at most `keep` newest wisdom entries; oldest removed. Returns removed ids. */
+export function pruneWisdom({ projectRoot, keep = 200, rootDir = ".pi/runtime/subagents" }) {
+  const dir = wisdomDir(projectRoot, rootDir);
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => {
+      try {
+        const entry = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+        return { name, recordedAt: entry?.recordedAt ?? "" };
+      } catch {
+        return { name, recordedAt: "" };
+      }
+    })
+    .sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt)));
+  const removed = [];
+  for (const entry of entries.slice(keep)) {
+    try {
+      fs.rmSync(path.join(dir, entry.name), { force: true });
+      removed.push(entry.name.replace(/\.json$/, ""));
+    } catch {
+      // best effort
+    }
+  }
+  return removed;
+}
