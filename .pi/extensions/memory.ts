@@ -338,19 +338,47 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "memory_add_fact",
     label: "Memory Fact",
-    description: "Add a durable subject-predicate-object fact to the Equaxis temporal knowledge graph.",
+    description:
+      "Add a durable subject-predicate-object fact to the Equaxis temporal knowledge graph. Optionally attach provenance (source_ref/source_quote) — the fact then carries a content checksum and is tamper-verifiable. Conflicting facts (same subject+predicate, different object) are flagged in the result, never silently overwritten.",
     parameters: Type.Object({
       subject: Type.String(),
       predicate: Type.String(),
-      object: Type.String()
+      object: Type.String(),
+      source_ref: Type.Optional(Type.String({ description: "Provenance: where this fact came from (e.g. session id or document path)" })),
+      source_quote: Type.Optional(Type.String({ description: "Provenance: verbatim quote backing the fact" }))
     }),
     async execute(_toolCallId, params, signal) {
       const memory = await ensureBridgeForTool();
       const result = await memory.request("add_fact", params, { signal });
+      const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
+      const conflictNote = conflicts.length
+        ? `\nNote: ${conflicts.length} conflicting fact(s) exist for ${params.subject} --${params.predicate}--> (different object); no fact was overwritten.`
+        : "";
       return {
-        content: [{ type: "text", text: `Fact stored: ${params.subject} --${params.predicate}--> ${params.object}` }],
+        content: [{ type: "text", text: `Fact stored: ${params.subject} --${params.predicate}--> ${params.object}${conflictNote}` }],
         details: result
       };
+    }
+  });
+
+  pi.registerTool({
+    name: "memory_graph_search",
+    label: "Memory Graph Search",
+    description:
+      "Multi-hop knowledge-graph retrieval: BFS from seed entities over current facts with per-hop score decay. Use it to surface indirectly-related entities (e.g. what depends on X, what X affects) that single-entity queries miss.",
+    parameters: Type.Object({
+      seeds: Type.Array(Type.String(), { description: "Seed entity names" }),
+      max_hops: Type.Optional(Type.Integer({ minimum: 1, maximum: 6, default: 2 })),
+      min_score: Type.Optional(Type.Number({ minimum: 0, maximum: 1, default: 0.05 }))
+    }),
+    async execute(_toolCallId, params, signal) {
+      const memory = await ensureBridgeForTool();
+      const result = await memory.request("graph_search", params, { signal });
+      const nodes = Array.isArray(result.nodes) ? result.nodes : [];
+      const text = nodes.length
+        ? `Graph search: ${result.visited} node(s) visited\n${nodes.map((node: { name: string; score: number; depth: number }) => `${"  ".repeat(node.depth)}${node.name} (score ${node.score})`).join("\n")}`
+        : "Graph search: no entities found from the given seeds.";
+      return { content: [{ type: "text", text }], details: result };
     }
   });
 

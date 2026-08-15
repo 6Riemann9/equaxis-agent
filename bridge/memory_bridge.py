@@ -297,8 +297,23 @@ def dispatch(memory: AgentMemory, action: str, payload: dict[str, Any]) -> Any:
             predicate=str(payload["predicate"]),
             object_name=str(payload["object"]),
             metadata=payload.get("metadata"),
+            source_ref=str(payload.get("source_ref", "")),
+            source_quote=str(payload.get("source_quote", "")),
         )
-        return {"triple": triple}
+        # Semantica conflict flagging: same (subject, predicate) with a
+        # different object is surfaced, never silently overwritten.
+        conflicts = memory.manager.knowledge_graph.detect_conflicts(str(payload["subject"]), str(payload["predicate"]))
+        return {"triple": clean_surrogates(triple), "conflicts": clean_surrogates(conflicts)}
+    if action == "graph_search":
+        return memory.manager.knowledge_graph.graph_search(
+            seeds=list(payload.get("seeds", [])),
+            max_hops=int(payload.get("max_hops", 2)),
+            hop_decay=float(payload.get("hop_decay", 0.5)),
+            min_score=float(payload.get("min_score", 0.05)),
+            max_nodes=int(payload.get("max_nodes", 100)),
+        )
+    if action == "checksum_report":
+        return memory.manager.knowledge_graph.checksum_report(str(payload["name"]))
     if action == "query_entity":
         return {"facts": memory.query_entity(str(payload["name"]))}
     if action == "delete_memory":

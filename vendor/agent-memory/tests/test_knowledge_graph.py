@@ -140,4 +140,88 @@ class TestKnowledgeGraphStore:
         assert triple.triple_id == "t_legacy"
         assert kg.stats()["triples"] == 1
         assert facts[0]["confidence"] == 0.9
-        assert facts[0]["metadata"] == {"source": "new"}
+        assert facts[0]["metadata"]["source"] == "new"
+        assert "content_sha256" in facts[0]["metadata"]
+
+
+class TestProvenanceAndGraphSearch:
+    @pytest.fixture
+    def kg(self):
+        with tempfile.TemporaryDirectory() as tmp_:
+            root = Path(tmp_) / "agent_test"
+            yield KnowledgeGraphStore(MemoryConfig(root_dir=root))
+
+    def test_add_triple_records_provenance(self, kg):
+        triple = kg.add_triple(
+            "Kai", "works_on", "Orion",
+            source_ref="session-42", source_quote="Kai leads Orion now",
+        )
+        assert triple.metadata["source_ref"] == "session-42"
+        assert triple.metadata["source_quote"] == "Kai leads Orion now"
+        assert len(triple.metadata["content_sha256"]) == 64
+        assert kg.verify_checksum(kg.query_entity("Kai")[0]) is True
+
+    def test_add_triple_chains_previous_versions(self, kg):
+        first = kg.add_triple("Kai", "role", "engineer", source_quote="v1")
+        second = kg.add_triple("Kai", "role", "engineer", source_quote="v2")
+        assert first.triple_id == second.triple_id
+        meta = kg.query_entity("Kai")[0]["metadata"]
+        assert len(meta["previous_versions"]) == 1
+        assert meta["previous_versions"][0]["content_sha256"] == first.metadata["content_sha256"]
+        assert meta["content_sha256"] != first.metadata["content_sha256"]
+
+    def test_verify_checksum_detects_tampering(self, kg):
+        kg.add_triple("Kai", "role", "engineer", source_quote="original")
+        row = kg.query_entity("Kai")[0]
+        row["metadata"]["source_quote"] = "tampered"
+        assert kg.verify_checksum(row) is False
+        report = kg.checksum_report("Kai")
+        assert len(report) == 1
+        assert report[0]["checksum_ok"] is True
+
+    def test_conflict_detection_flags_different_objects(self, kg):
+        kg.add_triple("Kai", "role", "engineer", source_ref="s1")
+        conflicting = kg.add_triple("Kai", "role", "manager", source_ref="s2")
+        assert conflicting.metadata["conflict_with"]
+        conflicts = kg.detect_conflicts("Kai", "role")
+        assert {c["object"] for c in conflicts} == {"engineer", "manager"}
+        # re-adding the same (s, p, o) is a version update on the same row,
+        # not a new conflict entry
+        updated = kg.add_triple("Kai", "role", "manager", source_quote="v2")
+        assert updated.triple_id == conflicting.triple_id
+        assert len(updated.metadata["previous_versions"]) == 1
+        assert len(kg.detect_conflicts("Kai", "role")) == 2
+
+    def test_graph_search_multi_hop_with_decay(self, kg):
+        for subject, predicate, object_name in [
+            ("A", "links", "B"),
+            ("B", "links", "C"),
+            ("C", "links", "D"),
+            ("E", "links", "F"),
+        ]:
+            kg.add_triple(subject, predicate, object_name)
+
+        result = kg.graph_search(["A"], max_hops=2)
+        names = {node["name"]: node for node in result["nodes"]}
+        assert names["a"]["score"] == 1.0
+        assert names["b"]["score"] == 0.5
+        assert names["c"]["score"] == 0.25
+        assert "d" not in names
+        assert "e" not in names and "f" not in names
+
+        deeper = kg.graph_search(["A"], max_hops=3)
+        assert "d" in {node["name"] for node in deeper["nodes"]}
+
+        cutoff = kg.graph_search(["A"], max_hops=3, min_score=0.4)
+        assert {node["name"] for node in cutoff["nodes"]} == {"a", "b"}
+
+        empty = kg.graph_search([])
+        assert empty["nodes"] == [] and empty["visited"] == 0
+
+    def test_graph_search_undirected_and_dedup(self, kg):
+        kg.add_triple("A", "depends_on", "B")
+        kg.add_triple("B", "depends_on", "C")
+        # seed on the middle node reaches both directions
+        result = kg.graph_search(["B"], max_hops=1)
+        assert {node["name"] for node in result["nodes"]} == {"a", "b", "c"}
+        assert result["visited"] == 3

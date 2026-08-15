@@ -145,7 +145,15 @@ class AsyncAgentMemory:
         validate_limit(limit)
         return await asyncio.to_thread(self.memory_stack.recall, wing=wing, room=room, limit=limit)
 
-    async def add_fact(self, subject: str, predicate: str, object_name: str, metadata: dict[str, Any] | None = None):
+    async def add_fact(
+        self,
+        subject: str,
+        predicate: str,
+        object_name: str,
+        metadata: dict[str, Any] | None = None,
+        source_ref: str = "",
+        source_quote: str = "",
+    ):
         """Add a fact to the knowledge graph asynchronously."""
         validate_entity_name(subject, "subject")
         validate_entity_name(predicate, "predicate")
@@ -153,7 +161,13 @@ class AsyncAgentMemory:
         validate_metadata(metadata)
         logger.info(f"Adding fact: {subject} --{predicate}--> {object_name}")
         return await asyncio.to_thread(
-            self.manager.knowledge_graph.add_triple, subject, predicate, object_name, metadata=metadata
+            self.manager.knowledge_graph.add_triple,
+            subject,
+            predicate,
+            object_name,
+            metadata=metadata,
+            source_ref=source_ref,
+            source_quote=source_quote,
         )
 
     async def query_entity(self, name: str) -> list[dict[str, Any]]:

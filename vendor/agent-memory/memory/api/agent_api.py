@@ -154,13 +154,23 @@ class AgentMemory:
         validate_limit(limit)
         return self.memory_stack.recall(wing=wing, room=room, limit=limit)
 
-    def add_fact(self, subject: str, predicate: str, object_name: str, metadata: dict[str, Any] | None = None):
+    def add_fact(
+        self,
+        subject: str,
+        predicate: str,
+        object_name: str,
+        metadata: dict[str, Any] | None = None,
+        source_ref: str = "",
+        source_quote: str = "",
+    ):
         validate_entity_name(subject, "subject")
         validate_entity_name(predicate, "predicate")
         validate_entity_name(object_name, "object_name")
         validate_metadata(metadata)
         logger.info(f"Adding fact: {subject} --{predicate}--> {object_name}")
-        return self.manager.knowledge_graph.add_triple(subject, predicate, object_name, metadata=metadata)
+        return self.manager.knowledge_graph.add_triple(
+            subject, predicate, object_name, metadata=metadata, source_ref=source_ref, source_quote=source_quote
+        )
 
     def query_entity(self, name: str) -> list[dict[str, Any]]:
         validate_entity_name(name, "name")

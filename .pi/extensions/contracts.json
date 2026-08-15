@@ -137,6 +137,7 @@
         "tool:memory_remember",
         "tool:retain",
         "tool:memory_add_fact",
+        "tool:memory_graph_search",
         "tool:learn",
         "tool:reflect",
         "tool:memory_query_entity",
@@ -148,7 +149,7 @@
       ],
       "promptImpact": {
         "systemPromptChars": 300,
-        "tools": 8,
+        "tools": 9,
         "notes": "记忆指令固定注入;recall 等工具按需调用"
       }
     },
