@@ -37,8 +37,13 @@ export function validateEditFreshness(toolName, input, options = {}) {
   if (!fs.existsSync(absolutePath)) {
     return { code: "STALE_EDIT_FILE_MISSING", field: "path", message: "edit target does not exist", retryable: true };
   }
-  const text = fs.readFileSync(absolutePath, "utf8");
+  // Only read the target when a freshness check is actually requested
+  // (hash or oldText); plain edits with neither skip the read entirely —
+  // this avoids pulling huge/binary files into memory on every edit.
   const expectedHash = typeof input?.expectedHash === "string" ? input.expectedHash.trim().toLowerCase() : "";
+  const oldTexts = collectOldTexts(input);
+  if (!expectedHash && oldTexts.length === 0) return null;
+  const text = fs.readFileSync(absolutePath, "utf8");
   const actualHash = hashText(text);
   if (expectedHash && expectedHash !== actualHash) {
     return {
@@ -50,7 +55,6 @@ export function validateEditFreshness(toolName, input, options = {}) {
       actualHash
     };
   }
-  const oldTexts = collectOldTexts(input);
   if (oldTexts.length === 0) return null;
   for (const oldText of oldTexts) {
     const occurrences = countOccurrences(text, oldText);

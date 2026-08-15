@@ -75,7 +75,7 @@ export function createEvalEvent(input = {}) {
   const provider = String(input.model?.provider ?? input.provider ?? "unknown");
   const modelId = String(input.model?.id ?? input.modelId ?? "unknown");
   const toolName = String(input.tool?.name ?? input.toolName ?? "unknown");
-  const capabilities = array(input.capabilities ?? input.capabilityTags ?? input.capability ?? "unlabeled");
+  const capabilities = [...new Set(array(input.capabilities ?? input.capabilityTags ?? input.capability ?? "unlabeled"))];
   return {
     timestamp: input.timestamp ?? new Date().toISOString(),
     taskId: input.taskId ? String(input.taskId) : null,
@@ -84,7 +84,7 @@ export function createEvalEvent(input = {}) {
     cohort: input.cohort ? String(input.cohort) : null,
     model: { provider, id: modelId },
     tool: { name: toolName, namespace: input.tool?.namespace ? String(input.tool.namespace) : null },
-    capabilities: capabilities.length ? capabilities : ["unlabeled"],
+    capabilities,
     outcome: normalizeOutcome(input.outcome ?? input.success),
     score: Number.isFinite(Number(input.score)) ? Number(input.score) : null,
     errorCode: input.errorCode ? String(input.errorCode) : null,

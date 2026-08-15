@@ -19,6 +19,8 @@ interface SubagentEngineConfig {
     timeoutMs?: number | null;
     maxRetries?: number;
   };
+  modelConcurrency?: Record<string, number>;
+  categoryRoutes?: Record<string, { model?: string }>;
   persistence?: {
     enabled?: boolean;
     rootDir?: string;
@@ -62,8 +64,10 @@ export default function subagentEngine(pi: ExtensionAPI): void {
     : new SubagentStateStore({ projectRoot, rootDir: config?.persistence?.rootDir ?? ".pi/runtime/subagents" });
   const runtime = new SubagentRuntime({
     maxConcurrent: config?.maxConcurrent ?? 2,
-    defaultTimeoutMs: config?.budgets?.timeoutMs ?? null,
+    defaultTimeoutMs: config?.budgets?.timeoutMs === undefined ? undefined : config.budgets.timeoutMs,
     defaultMaxRetries: config?.budgets?.maxRetries ?? 0,
+    modelConcurrency: config?.modelConcurrency,
+    categoryRoutes: config?.categoryRoutes,
     stateStore,
     verifyEvidence: config?.evidence?.enabled === false ? null : createFileEvidenceVerifier({ projectRoot }),
     onTaskComplete: (task: { id: string; label: string; status: string; result?: unknown }) => {

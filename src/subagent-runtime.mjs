@@ -80,7 +80,7 @@ export class SubagentRuntime {
     this.onTaskComplete = options.onTaskComplete ?? null;
     this.maxConcurrent = options.maxConcurrent ?? 2;
     this.trace = options.trace ?? (() => {});
-    this.defaultTimeoutMs = options.defaultTimeoutMs ?? 60000;
+    this.defaultTimeoutMs = options.defaultTimeoutMs === undefined ? 60000 : options.defaultTimeoutMs;
     this.defaultMaxRetries = options.defaultMaxRetries ?? 1;
     this.stateStore = options.stateStore ?? null;
     this.tasks = new Map();
@@ -200,7 +200,9 @@ export class SubagentRuntime {
       }
     }
     const controller = new AbortController();
-    const timeoutMs = boundedInteger(request.timeoutMs, this.defaultTimeoutMs, { min: 100, max: 600_000, field: "subagent timeoutMs" });
+    const timeoutMs = request.timeoutMs === null || this.defaultTimeoutMs === null
+      ? null // explicit "no default timeout" (config allows budgets.timeoutMs: null)
+      : boundedInteger(request.timeoutMs, this.defaultTimeoutMs, { min: 100, max: 600_000, field: "subagent timeoutMs" });
     const maxRetries = boundedInteger(request.maxRetries, this.defaultMaxRetries, { min: 0, max: 5, field: "subagent maxRetries" });
     const traceId = request.traceId ?? createId("trace");
     const task = {
@@ -310,8 +312,11 @@ export class SubagentRuntime {
   schedule(nodes, options = {}) {
     if (!Array.isArray(nodes)) throw new Error("schedule requires a node array");
     const ids = new Map();
+    const seenNames = new Set();
     for (const node of nodes) {
       if (!node.name || typeof node.name !== "string") throw new Error("each schedule node requires a name");
+      if (seenNames.has(node.name)) throw new Error(`duplicate schedule node name: ${node.name}`);
+      seenNames.add(node.name);
       ids.set(node.name, createId(node.name));
     }
     const spawned = [];
@@ -496,6 +501,8 @@ export class SubagentRuntime {
           }
           task.status = "completed";
           task.result = result;
+          task.error = null; // a retried task that eventually succeeds must not carry stale failure text
+          task.errorCode = null;
           this.trace("subagent_completed", { id: task.id, traceId: task.traceId, attempts: task.attempts });
           break;
         } catch (error) {
@@ -555,6 +562,22 @@ export class SubagentRuntime {
         attempt: task.attempts,
         timeoutMs: task.timeoutMs
       }, { signal: attemptController.signal });
+      })
+      .then((value) => {
+        // Unwrap the transport envelope: production executors resolve
+        // { ok, id, label, output, stderr } where output is the subagent's
+        // JSON reply text. Downstream consumers (schema validation, evidence
+        // verification, review, wisdom) must see the actual reply, not the
+        // envelope — otherwise every schema-verified task fails and evidence
+        // scanning reads the wrapper's 'output' field as an artifact.
+        if (value && typeof value === "object" && typeof value.output === "string" && value.output.trim()) {
+          try {
+            return JSON.parse(value.output);
+          } catch {
+            return value.output.trim(); // non-JSON text result
+          }
+        }
+        return value;
       })
       .catch((error) => {
         if (timedOut) throw timeoutError(task.timeoutMs);

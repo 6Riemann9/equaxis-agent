@@ -33,7 +33,7 @@ export function policyRuleVersion(config) {
 const HIGH_RISK_BASH = [
   { pattern: /(?:^|[^\w])(?:rm|del)\b[^\r\n]*(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|--recursive\b|--force\b|\/s\b|\/q\b)/i, reason: "recursive deletion" },
   { pattern: /\bRemove-Item\b[^\r\n]*-Recurse\b/i, reason: "recursive deletion" },
-  { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+(?:-[a-z]*f|--force)|git\s+(?:checkout|restore)\s+(?:--\s+)?[.*])/i, reason: "destructive git operation" },
+  { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+(?:-[a-z]*f|--force)|git\s+(?:checkout\s+--\s+\S+|restore\s+\S+))/i, reason: "destructive git operation" },
   { pattern: /\b(format|mkfs|diskpart)\b/i, reason: "disk modification" },
   { pattern: /\b(shutdown|reboot|Stop-Computer|Restart-Computer)\b/i, reason: "system shutdown" },
   { pattern: /\b(sudo|runas)\b/i, reason: "privilege escalation" },
@@ -75,7 +75,7 @@ export function matchesProtectedPath(targetPath, patterns) {
     const literal = pattern.replace(/^\/+|\/+$/g, "");
     if (literal === ".env") return parts.some((part) => part === ".env" || part.startsWith(".env."));
     if (literal.includes("/")) {
-      return normalized === literal || normalized.startsWith(`${literal}/`) || normalized.includes(`/${literal}/`);
+      return normalized === literal || normalized.startsWith(`${literal}/`) || normalized.includes(`/${literal}/`) || normalized.endsWith(`/${literal}`);
     }
     return parts.includes(literal);
   }) ?? null;
@@ -217,7 +217,7 @@ export function containsSecretLikeInput(input) {
 
 export function classifyToolCall(toolName, input, config, cwd) {
   if (containsSecretLikeInput(input)) {
-    return { risk: RISK.BLOCKED, reason: "possible raw secret in tool arguments", approval: false };
+    return { risk: RISK.BLOCKED, reason: "possible raw secret in tool arguments", approval: false, redactInput: true };
   }
 
   if (
@@ -225,7 +225,7 @@ export function classifyToolCall(toolName, input, config, cwd) {
     /^(?:api[_-]?key|password|secret|token|access[_-]?token|auth[_-]?token)$/i.test(String(input?.predicate ?? "")) &&
     String(input?.object ?? "").trim().length >= 8
   ) {
-    return { risk: RISK.BLOCKED, reason: "possible raw secret in knowledge-graph fact", approval: false };
+    return { risk: RISK.BLOCKED, reason: "possible raw secret in knowledge-graph fact", approval: false, redactInput: true };
   }
 
   if (toolName === "bash") {

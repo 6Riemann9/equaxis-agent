@@ -41,7 +41,7 @@ test("DAG: dependent task blocks then runs after its dependency completes", asyn
 
   const aStatus = await runtime.wait("a");
   assert.equal(aStatus.status, "completed");
-  assert.equal(aStatus.result?.output, "done:a");
+  assert.equal(aStatus.result, "done:a", "transport envelope is unwrapped to the subagent reply");
 
   const bStatus = await runtime.wait("b");
   assert.equal(bStatus.status, "completed");
@@ -70,7 +70,7 @@ test("persists events and snapshots, restores completed work on a new runtime", 
   });
   const status = restored.status("a");
   assert.equal(status.status, "completed");
-  assert.equal(status.result?.output, "out:a");
+  assert.equal(status.result, "out:a", "snapshot holds the unwrapped subagent reply");
 });
 
 test("non-terminal snapshots restore as failed with a reason (no silent drop)", async (t) => {

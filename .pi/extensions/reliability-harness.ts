@@ -451,7 +451,7 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   pi.on("tool_call", async (event, ctx) => {
     if (state.mode === "off") return;
 
-    let classification: { risk: string; reason: string; approval: boolean };
+    let classification: { risk: string; reason: string; approval: boolean; redactInput?: boolean };
     try {
       const validation = validateToolInput(event.toolName, event.input)
         ?? validateEditFreshness(event.toolName, event.input, { cwd: ctx.cwd });
@@ -483,7 +483,8 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
         }
         // Audit mode lets the call through but still counts it so the
         // per-turn tool limit applies to repeated invalid calls too.
-        state.toolCallsThisTurn += 1;
+        // The single increment below (after classification) covers this
+        // call exactly once — do not count twice here.
       }
       classification = classifyToolCall(event.toolName, event.input, config, ctx.cwd);
     } catch (error) {
@@ -501,7 +502,9 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     const limitReason = shouldBlockForLimits(state, config, classification);
     state.toolCallsThisTurn += 1;
     if (classification.risk === RISK.HIGH) state.highRiskCallsThisTurn += 1;
-    const containsSecret = classification.reason === "possible raw secret in tool arguments";
+    // Redaction is a classification flag, not a reason-string match: a policy
+    // wording change must never silently leak inputs into traces/approvals.
+    const containsSecret = classification.redactInput === true;
     // Unified tool contract: the invocation envelope carries policy risk
     // metadata; trace consumers keep the legacy field names via spread.
     const invocation = createToolInvocation({
@@ -522,9 +525,22 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
 
     // Cost brake: once the session budget is exhausted, high-risk calls are
     // blocked until the user resets the budget (/equaxis-budget reset).
+    // Cost brake: HIGH-risk calls are hard-stopped once the session budget is
+    // exhausted. The latch is refreshed here (not only at turn_end) so a
+    // single turn that burns through the budget cannot keep issuing
+    // high-risk calls until the turn ends.
+    if (state.mode === "enforce" && !state.costBrakeTriggered && config.costBrake?.enabled) {
+      try {
+        const spent = sessionCost(ctx);
+        if (spent >= Number(config.costBrake.maxSessionCostUsd ?? 0)) state.costBrakeTriggered = true;
+      } catch {
+        // cost sampling is best-effort; never block tool calls on it
+      }
+    }
     if (state.costBrakeTriggered && classification.risk === RISK.HIGH && state.mode === "enforce") {
       state.blockedCalls += 1;
       trace(ctx, "tool_blocked", { ...decision, reason: "session cost budget exhausted" });
+      recordL1Blocked(ctx, event, classification, "session cost budget exhausted");
       updateStatus(ctx);
       return { block: true, reason: `Reliability Harness: session cost budget reached (${config.costBrake?.maxSessionCostUsd} USD); run /equaxis-budget reset to resume` };
     }
