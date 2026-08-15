@@ -42,6 +42,17 @@ function validateResultSchema(value, schema) {
   }
 }
 
+/** Parse a reviewer result into { status, verdict, issues }. */
+export function parseReviewVerdict(value) {
+  const verdict = typeof value?.verdict === "string" ? value.verdict.toUpperCase() : null;
+  if (verdict === "OKAY") return { status: "okay", verdict: "OKAY", issues: [] };
+  if (verdict === "REJECT") {
+    const issues = Array.isArray(value?.issues) ? value.issues.map(String).slice(0, 10) : [];
+    return { status: "reject", verdict: "REJECT", issues };
+  }
+  return { status: "error", verdict: null, issues: ["reviewer returned no OKAY/REJECT verdict"] };
+}
+
 /**
  * MARC v1 (arXiv 2608.13476) stage-level failure attribution: every failure
  * is attributed to the execution stage it occurred in plus a failure kind,
@@ -81,6 +92,10 @@ export class SubagentRuntime {
     // one model saturate its quota while another model's tasks keep running.
     this.defaultModelKey = options.defaultModelKey ?? "default";
     this.modelConcurrency = options.modelConcurrency ?? {};
+    // Category routing (oh-my-opencode): schedule/spawn nodes declare a work
+    // category ("deep"/"quick"/...) instead of a model; the harness maps the
+    // category to a model key via this table. Explicit request.model wins.
+    this.categoryRoutes = options.categoryRoutes ?? {};
     this.activeByModel = new Map();
     this.#restoreSnapshots();
   }
@@ -192,7 +207,10 @@ export class SubagentRuntime {
       id,
       label: request.label ?? id,
       prompt,
-      modelKey: request.model ?? this.defaultModelKey,
+      category: request.category ?? null,
+      reviewPrompt: request.reviewPrompt ?? null,
+      review: null,
+      modelKey: request.model ?? this.categoryRoutes[request.category]?.model ?? this.defaultModelKey,
       schema: request.schema ?? null,
       dependencies,
       traceId,
@@ -232,6 +250,7 @@ export class SubagentRuntime {
       id: task.id,
       label: task.label,
       modelKey: task.modelKey ?? null,
+      category: task.category ?? null,
       status: task.status,
       dependencies: [...(task.dependencies ?? [])],
       traceId: task.traceId,
@@ -246,7 +265,8 @@ export class SubagentRuntime {
       errorCode: task.errorCode ?? null,
       failurePhase: task.failurePhase ?? null,
       failureKind: task.failureKind ?? null,
-      evidence: task.evidence ?? null
+      evidence: task.evidence ?? null,
+      review: task.review ?? null
     };
   }
 
@@ -319,6 +339,7 @@ export class SubagentRuntime {
         prompt,
         schema: node.schema,
         model: node.model,
+        category: node.category,
         timeoutMs: node.timeoutMs,
         maxRetries: node.maxRetries,
         traceId: node.traceId,
@@ -384,6 +405,27 @@ export class SubagentRuntime {
     }
   }
 
+  /** Independent reviewer pass (oh-my-opencode dual-review gate). */
+  async #runReview(task, result) {
+    const reviewTask = {
+      id: `review-${task.id}`,
+      label: `review:${task.label}`,
+      prompt: `${task.reviewPrompt}\n\n--- result to review ---\n${String(typeof result === "string" ? result : JSON.stringify(result)).slice(0, 12000)}`,
+      schema: null,
+      traceId: task.traceId,
+      attempt: 1,
+      timeoutMs: Math.max(10000, task.timeoutMs ?? 60000),
+      isReview: true
+    };
+    try {
+      const reviewResult = await this.executor(reviewTask, { signal: task.controller.signal });
+      const verdict = parseReviewVerdict(reviewResult);
+      return verdict;
+    } catch (error) {
+      return { status: "error", verdict: null, issues: [`review failed: ${String(error?.message ?? error)}`] };
+    }
+  }
+
   async #run(task) {
     this.active += 1;
     const modelKey = task.modelKey ?? this.defaultModelKey;
@@ -419,6 +461,14 @@ export class SubagentRuntime {
               task.evidence = { status: "unverified", issues: [`evidence verifier error: ${String(error?.message ?? error)}`] };
             }
             this.trace(task.evidence.status === "verified" ? "subagent_evidence_verified" : "subagent_evidence_unverified", { id: task.id, traceId: task.traceId, issues: task.evidence.issues });
+          }
+          // Dual-review gate (oh-my-opencode Momus+Oracle): when a review
+          // prompt is configured, an independent reviewer pass runs against
+          // the result. The verdict (OKAY/REJECT) is recorded on the task —
+          // the run stays completed; the caller decides what REJECT means.
+          if (task.reviewPrompt) {
+            task.review = await this.#runReview(task, result);
+            this.trace(task.review.status === "okay" ? "subagent_review_okay" : "subagent_review_reject", { id: task.id, traceId: task.traceId, issues: task.review.issues });
           }
           task.status = "completed";
           task.result = result;

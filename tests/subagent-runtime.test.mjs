@@ -369,3 +369,76 @@ test("no modelConcurrency config keeps legacy behavior (single unbounded bucket)
   await runtime.waitAll(["x1", "x2"]);
   assert.ok(Date.now() - t0 < 70, "legacy: both run concurrently");
 });
+
+test("category routing maps work categories to model keys", async () => {
+  const runtime = new SubagentRuntime({
+    maxConcurrent: 4,
+    categoryRoutes: { deep: { model: "model-xl" }, quick: { model: "model-fast" } },
+    executor: async (task) => ({ ok: true, model: task.modelKey })
+  });
+  const a = runtime.spawn({ id: "cat-1", prompt: "deep work", category: "deep" });
+  const b = runtime.spawn({ id: "cat-2", prompt: "quick check", category: "quick" });
+  const c = runtime.spawn({ id: "cat-3", prompt: "explicit wins", category: "deep", model: "model-custom" });
+  const d = runtime.spawn({ id: "cat-4", prompt: "no category" });
+  assert.equal(a.modelKey, "model-xl");
+  assert.equal(b.modelKey, "model-fast");
+  assert.equal(c.modelKey, "model-custom", "explicit model beats category route");
+  assert.equal(d.modelKey, "default");
+  assert.equal(a.category, "deep");
+  assert.equal(d.category, null);
+  const results = await runtime.waitAll(["cat-1", "cat-2", "cat-3", "cat-4"]);
+  assert.ok(results.every((s) => s.status === "completed"));
+});
+
+test("dual-review gate records OKAY/REJECT without failing the run", async () => {
+  const calls = [];
+  const runtime = new SubagentRuntime({
+    executor: async (task) => {
+      calls.push(task.id);
+      if (task.isReview) return { verdict: "OKAY", issues: [] };
+      return { ok: true };
+    }
+  });
+  runtime.spawn({ id: "rev-ok", prompt: "do x", reviewPrompt: "Review this result critically." });
+  const okResult = await runtime.wait("rev-ok");
+  assert.equal(okResult.status, "completed");
+  assert.equal(okResult.review.status, "okay");
+  assert.equal(calls.includes("review-rev-ok"), true, "reviewer ran as an independent pass");
+
+  const rejectRuntime = new SubagentRuntime({
+    executor: async (task) => {
+      if (task.isReview) return { verdict: "REJECT", issues: ["missing tests", "bad naming"] };
+      return { ok: true };
+    }
+  });
+  rejectRuntime.spawn({ id: "rev-bad", prompt: "do x", reviewPrompt: "Review." });
+  const badResult = await rejectRuntime.wait("rev-bad");
+  assert.equal(badResult.status, "completed", "REJECT does not fail the run");
+  assert.equal(badResult.review.status, "reject");
+  assert.deepEqual(badResult.review.issues, ["missing tests", "bad naming"]);
+});
+
+test("reviewer crash or bad verdict degrades to review error", async () => {
+  const crashRuntime = new SubagentRuntime({
+    executor: async (task) => {
+      if (task.isReview) throw new Error("reviewer crashed");
+      return { ok: true };
+    }
+  });
+  crashRuntime.spawn({ id: "rev-crash", prompt: "x", reviewPrompt: "Review." });
+  const crashed = await crashRuntime.wait("rev-crash");
+  assert.equal(crashed.status, "completed");
+  assert.equal(crashed.review.status, "error");
+  assert.match(crashed.review.issues[0], /reviewer crashed/);
+
+  const junkRuntime = new SubagentRuntime({
+    executor: async (task) => {
+      if (task.isReview) return { note: "i liked it" };
+      return { ok: true };
+    }
+  });
+  junkRuntime.spawn({ id: "rev-junk", prompt: "x", reviewPrompt: "Review." });
+  const junk = await junkRuntime.wait("rev-junk");
+  assert.equal(junk.review.status, "error");
+  assert.match(junk.review.issues[0], /no OKAY\/REJECT/);
+});

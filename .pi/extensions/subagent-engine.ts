@@ -8,6 +8,7 @@ import { createPiJsonExecutor } from "../../src/subagent-executor.mjs";
 import { SubagentStateStore } from "../../src/subagent-state-store.mjs";
 import { createFileEvidenceVerifier } from "../../src/subagent-evidence.mjs";
 import { recordWisdom, wisdomPreamble } from "../../src/wisdom-store.mjs";
+import { buildRolePrompt } from "../../src/role-templates.mjs";
 
 interface SubagentEngineConfig {
   enabled: boolean;
@@ -108,6 +109,8 @@ export default function subagentEngine(pi: ExtensionAPI): void {
         prompt: Type.String({ minLength: 1, description: "Self-contained subagent prompt" }),
         dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Node names this node waits for" })),
         model: Type.Optional(Type.String({ description: "Model bucket key for per-model concurrency limits (optional)" })),
+        category: Type.Optional(Type.String({ description: "Work category routed to a model via the category table (optional)" })),
+        role: Type.Optional(Type.String({ description: "Role template (architect/analyst/engineer/expert) wrapping the prompt (optional)" })),
         timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 600000, description: "Per-node timeout in milliseconds" })),
         maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 5, description: "Per-node retry count after failures" })),
         traceId: Type.Optional(Type.String({ description: "Optional trace correlation id" })),
@@ -115,7 +118,10 @@ export default function subagentEngine(pi: ExtensionAPI): void {
       }))
     }),
     async execute(_toolCallId, params) {
-      const spawned = runtime.schedule(params.nodes, { wisdomRoot: projectRoot }).map((status) => status!);
+      const routedNodes = params.nodes.map((node) => node.role
+        ? { ...node, prompt: buildRolePrompt(node.role, node.prompt) }
+        : node);
+      const spawned = runtime.schedule(routedNodes, { wisdomRoot: projectRoot }).map((status) => status!);
       trace({} as ExtensionContext, "subagent_schedule", { count: spawned.length });
       return {
         content: [{ type: "text", text: JSON.stringify(spawned, null, 2) }],
