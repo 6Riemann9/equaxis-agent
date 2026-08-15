@@ -22,6 +22,49 @@ function timeoutError(timeoutMs) {
   return error;
 }
 
+/**
+ * No-replay retry classification (cloudflare/computer no-replay boundary,
+ * 2026-08 trending). A retry must never double-apply a side effect:
+ * - pre_dispatch failures (executor rejected before sending) are safe to retry;
+ * - ambiguous transport failures (EPIPE/ECONNRESET/…) may have reached the
+ *   peer — report, never replay;
+ * - everything else keeps the legacy transient-retry behavior.
+ */
+export const SAFE_RETRY_CODES = new Set([
+  "ERR_INVALID_ARG_TYPE",
+  "ERR_INVALID_ARG_VALUE",
+  "ERR_BAD_ARG_VALUE",
+  "ERR_INVALID_URL",
+  "VALIDATION",
+  "SCHEMA_ERROR",
+  "TASK_REJECTED"
+]);
+
+export const AMBIGUOUS_RETRY_CODES = new Set([
+  "EPIPE",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "ERR_STREAM_WRITE_AFTER_END",
+  "ERR_STREAM_DESTROYED",
+  "UND_ERR_SOCKET"
+]);
+
+export function classifyRetryFailure(error, { attempt = 0 } = {}) {
+  const code = String(error?.code ?? "");
+  if (code === "ABORT_ERR" || code === "TIMEOUT") {
+    return { retry: false, class: "terminal", reason: "cancelled or budget exhausted" };
+  }
+  if (SAFE_RETRY_CODES.has(code)) {
+    return { retry: true, class: "pre_dispatch", reason: "executor rejected before dispatch; side effects cannot have applied" };
+  }
+  if (AMBIGUOUS_RETRY_CODES.has(code)) {
+    return { retry: false, class: "ambiguous", reason: "transport failure after possible dispatch; refusing to replay non-idempotent side effects" };
+  }
+  return { retry: true, class: "unclassified", reason: `transient executor failure (attempt ${attempt + 1})` };
+}
+
 function boundedInteger(value, fallback, { min, max, field }) {
   if (value === undefined || value === null) return fallback;
   if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${field} must be an integer between ${min} and ${max}`);
@@ -544,6 +587,16 @@ export class SubagentRuntime {
           // transient executor failures, not for budget exhaustion.
           const cancelled = task.controller.signal.aborted || error?.code === "ABORT_ERR" || error?.code === "TIMEOUT";
           if (cancelled || task.attempts > task.maxRetries) throw error;
+          // No-replay boundary (cloudflare/computer): an ambiguous transport
+          // failure may have reached the executor, so a retry could double-apply
+          // non-idempotent side effects — report instead of replaying.
+          const policy = classifyRetryFailure(error, { attempt: task.attempts });
+          if (!policy.retry) {
+            const annotated = new Error(`${String(error?.message ?? error)} [no-replay: ${policy.reason}]`, { cause: error });
+            annotated.code = String(error?.code ?? "NO_REPLAY");
+            this.trace("subagent_retry_skipped", { id: task.id, traceId: task.traceId, attempt: task.attempts, class: policy.class, reason: policy.reason, code: annotated.code });
+            throw annotated;
+          }
           task.error = String(error?.message ?? error);
           this.trace("subagent_retry", { id: task.id, traceId: task.traceId, attempt: task.attempts, error: task.error });
           this.#record("retry", task);

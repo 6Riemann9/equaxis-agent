@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SubagentRuntime } from "../src/subagent-runtime.mjs";
+import { classifyRetryFailure, SubagentRuntime } from "../src/subagent-runtime.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -456,4 +456,66 @@ test("terminal tasks are pruned beyond the retention window", async () => {
   assert.equal(runtime.status("p-1"), null, "second-oldest pruned too");
   assert.ok(runtime.status("p-2"), "retention window (3) keeps the newest three");
   assert.ok(runtime.status("p-4"), "newest task retained");
+});
+
+test("classifyRetryFailure applies the no-replay boundary", () => {
+  const withCode = (code) => { const e = new Error(code); e.code = code; return e; };
+
+  // pre-dispatch codes are safe to retry
+  assert.deepEqual(classifyRetryFailure(withCode("VALIDATION")), { retry: true, class: "pre_dispatch", reason: "executor rejected before dispatch; side effects cannot have applied" });
+  // ambiguous transport failures are never replayed
+  for (const code of ["EPIPE", "ECONNRESET", "ETIMEDOUT", "ERR_STREAM_WRITE_AFTER_END"]) {
+    const policy = classifyRetryFailure(withCode(code));
+    assert.equal(policy.retry, false, `${code} must not retry`);
+    assert.equal(policy.class, "ambiguous");
+  }
+  // terminal failures
+  assert.equal(classifyRetryFailure(withCode("ABORT_ERR")).retry, false);
+  assert.equal(classifyRetryFailure(withCode("TIMEOUT")).class, "terminal");
+  // unknown codes keep the legacy transient-retry behavior
+  assert.deepEqual(classifyRetryFailure(new Error("boom")), { retry: true, class: "unclassified", reason: "transient executor failure (attempt 1)" });
+});
+
+test("ambiguous transport failures fail fast instead of replaying side effects", async () => {
+  const events = [];
+  let attempts = 0;
+  const runtime = new SubagentRuntime({
+    trace: (event, data) => events.push([event, data]),
+    executor: async () => {
+      attempts += 1;
+      const error = new Error("write EPIPE");
+      error.code = "EPIPE";
+      throw error;
+    }
+  });
+  runtime.spawn({ id: "noreplay", prompt: "run", maxRetries: 2 });
+  const result = await runtime.wait("noreplay");
+  assert.equal(result.status, "failed");
+  assert.equal(attempts, 1, "EPIPE must not be retried");
+  assert.equal(result.errorCode, "EPIPE");
+  assert.match(result.error, /no-replay/);
+  assert.ok(events.some(([event]) => event === "subagent_retry_skipped"), "skip decision must be traced");
+  assert.ok(!events.some(([event]) => event === "subagent_retry"), "no replay attempt");
+});
+
+test("pre-dispatch failures still retry within budget", async () => {
+  const events = [];
+  let attempts = 0;
+  const runtime = new SubagentRuntime({
+    trace: (event, data) => events.push([event, data]),
+    executor: async (task) => {
+      attempts += 1;
+      if (attempts === 1) {
+        const error = new Error("schema rejected");
+        error.code = "SCHEMA_ERROR";
+        throw error;
+      }
+      return { ok: true, attempts };
+    }
+  });
+  runtime.spawn({ id: "predispatch", prompt: "run", maxRetries: 1 });
+  const result = await runtime.wait("predispatch");
+  assert.equal(result.status, "completed");
+  assert.equal(attempts, 2);
+  assert.ok(events.some(([event]) => event === "subagent_retry"));
 });
