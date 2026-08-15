@@ -52,7 +52,10 @@ function assertWorkspacePath(projectRoot, targetPath, label) {
 }
 
 export function goalStatePath(projectRoot, rootDir) {
-  return path.join(path.resolve(projectRoot), rootDir, "goal-state.json");
+  // path.resolve resets on absolute segments on every platform, so an
+  // absolute rootDir lands outside the project and the workspace guard
+  // rejects it (path.join would embed it on POSIX).
+  return path.resolve(projectRoot, rootDir, "goal-state.json");
 }
 
 export function loadGoalState(filePath) {
