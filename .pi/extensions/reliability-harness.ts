@@ -676,6 +676,11 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
     const latencyMs = call ? Number((performance.now() - call.startedAt).toFixed(2)) : undefined;
     // Runtime facts only: the outcome goes into the trace stream
     // (eval_outcome_recorded) so offline evaluation can rebuild full history.
+    // cohort/version come from config.eval so offline EvalLoop can run the
+    // holdout acceptance gate (decisionWithHoldout, AutoDesign 2608.13560):
+    // baseline runs use cohort=train + versionId=<old>, candidate runs use
+    // versionId=<new>, dev-cohort runs use cohort=dev.
+    const evalCfg = (config as { eval?: { cohort?: string; versionId?: string } }).eval ?? {};
     const evalEvent = createEvalEvent({
       provider: activeModel.provider,
       modelId: activeModel.id,
@@ -684,7 +689,9 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
       outcome: event.isError ? "failure" : "success",
       errorCode: event.isError ? "TOOL_ERROR" : null,
       latencyMs,
-      traceId: event.toolCallId
+      traceId: event.toolCallId,
+      cohort: evalCfg.cohort ?? undefined,
+      version: evalCfg.versionId ? { kind: "policy", id: evalCfg.versionId } : undefined
     });
     trace(ctx, "eval_outcome_recorded", evalEvent);
     trace(ctx, "tool_result", {

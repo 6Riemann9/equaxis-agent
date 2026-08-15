@@ -31,6 +31,10 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     traceDir: ".pi/runtime",
     trace: { maxFileBytes: 5 * 1024 * 1024, maxFiles: 3 },
     protectPaths: [".env", ".git/", "node_modules/", "*.pem", "*.key"],
+    eval: {
+      cohort: "",
+      versionId: ""
+    },
     approval: {
       highRiskBash: true,
       writesOutsideWorkspace: true,
@@ -268,7 +272,8 @@ function mergeConfig(base, custom) {
       trace: { ...base.reliability.trace, ...(custom.reliability?.trace ?? {}) },
       approval: { ...base.reliability.approval, ...(custom.reliability?.approval ?? {}) },
       limits: { ...base.reliability.limits, ...(custom.reliability?.limits ?? {}) },
-      toolRouting: { ...base.reliability.toolRouting, ...(custom.reliability?.toolRouting ?? {}) }
+      toolRouting: { ...base.reliability.toolRouting, ...(custom.reliability?.toolRouting ?? {}) },
+      eval: { ...base.reliability.eval, ...(custom.reliability?.eval ?? {}) }
     },
     advisor: { ...base.advisor, ...(custom.advisor ?? {}) },
     protocols: {

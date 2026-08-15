@@ -6,6 +6,7 @@ import { createExtensionRuntimeServices } from "../../src/extension-runtime-serv
 import { SubagentRuntime } from "../../src/subagent-runtime.mjs";
 import { createPiJsonExecutor } from "../../src/subagent-executor.mjs";
 import { SubagentStateStore } from "../../src/subagent-state-store.mjs";
+import { createFileEvidenceVerifier } from "../../src/subagent-evidence.mjs";
 
 interface SubagentEngineConfig {
   enabled: boolean;
@@ -19,6 +20,9 @@ interface SubagentEngineConfig {
   persistence?: {
     enabled?: boolean;
     rootDir?: string;
+  };
+  evidence?: {
+    enabled?: boolean;
   };
   isolation?: {
     enabled?: boolean;
@@ -59,6 +63,7 @@ export default function subagentEngine(pi: ExtensionAPI): void {
     defaultTimeoutMs: config?.budgets?.timeoutMs ?? null,
     defaultMaxRetries: config?.budgets?.maxRetries ?? 0,
     stateStore,
+    verifyEvidence: config?.evidence?.enabled === false ? null : createFileEvidenceVerifier({ projectRoot }),
     executor: createPiJsonExecutor({
       piEntry: config?.piEntry || defaultPiEntry,
       args: config?.jsonArgs ?? [],
