@@ -5,6 +5,17 @@
   "license": "MIT",
   "type": "module",
   "description": "Equaxis: a governed, observable and reliable agent runtime powered by Pi.",
+  "keywords": [
+    "equaxis",
+    "pi",
+    "pi-package",
+    "agent",
+    "reliability",
+    "extension"
+  ],
+  "pi": {
+    "extensions": ["./.pi/extensions"]
+  },
   "files": [
     "scripts/",
     "src/",
@@ -55,6 +66,7 @@
     ".pi/extensions/",
     "LICENSE",
     "README.md",
+    "README.zh-CN.md",
     "CHANGELOG.md"
   ],
   "bin": {
@@ -85,6 +97,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.83.0",
+    "acorn": "^8.17.0",
+    "effect": "^2.4.19",
     "typebox": "^1.1.38"
   },
   "devDependencies": {
