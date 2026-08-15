@@ -11,12 +11,24 @@
  * here are for reporting, not gating.
  */
 
+import { createHash } from "node:crypto";
+
 /** Character-level longest common prefix length between two strings. */
 export function longestCommonPrefixLength(a, b) {
   const max = Math.min(a.length, b.length);
   let i = 0;
   while (i < max && a.charCodeAt(i) === b.charCodeAt(i)) i += 1;
   return i;
+}
+
+/**
+ * Content fingerprint (sha256, 16 hex chars) of a system prompt.
+ * Lets offline tooling compare prompts across sessions without storing
+ * full text — identical fingerprints mean a byte-stable prefix (provider
+ * cache hit territory).
+ */
+export function hashPrompt(prompt) {
+  return createHash("sha256").update(String(prompt ?? "")).digest("hex").slice(0, 16);
 }
 
 /**

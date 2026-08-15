@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPrefixTracker, longestCommonPrefixLength, stablePrefixStats } from "../src/prefix-stability.mjs";
+import { createPrefixTracker, hashPrompt, longestCommonPrefixLength, stablePrefixStats } from "../src/prefix-stability.mjs";
 
 test("longestCommonPrefixLength computes byte-level stable prefix", () => {
   assert.equal(longestCommonPrefixLength("abc", "abc"), 3);
@@ -48,4 +48,14 @@ test("tracker treats empty prompts as zero-stability measurements, not errors", 
   assert.equal(stats.currLength, 0);
   assert.equal(stats.stableRatio, 0);
   assert.equal(tracker.history().length, 1);
+});
+
+test("hashPrompt fingerprints prompts for cross-session comparison", () => {
+  const a = hashPrompt("same prompt content");
+  const b = hashPrompt("same prompt content");
+  const c = hashPrompt("different prompt content");
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+  assert.match(a, /^[0-9a-f]{16}$/);
+  assert.match(hashPrompt(""), /^[0-9a-f]{16}$/);
 });

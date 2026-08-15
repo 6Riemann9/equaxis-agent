@@ -1,6 +1,25 @@
+import path from "node:path";
+import fs from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
-import { createPrefixTracker } from "../../src/prefix-stability.mjs";
+import { createPrefixTracker, hashPrompt, stablePrefixStats } from "../../src/prefix-stability.mjs";
+
+function readState(filePath: string): { sample?: string } | null {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8")) as { sample?: string };
+  } catch {
+    return null;
+  }
+}
+
+function writeState(filePath: string, state: { sample: string; at: string }): void {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(state), "utf8");
+  } catch {
+    // Observability only.
+  }
+}
 
 /**
  * Prompt prefix-stability observability (KVFlow, NeurIPS 2025).
@@ -31,6 +50,13 @@ interface PrefixStats {
 export default function equaxisPrefixStability(pi: ExtensionAPI): void {
   const services = createExtensionRuntimeServices({ cwd: process.cwd(), extensionId: "prefix-stability", pi });
   const tracker = createPrefixTracker({ windowSize: 10 });
+  // Cross-session sample: persist the head of the last system prompt so the
+  // first measurement of a new session can compare against the previous
+  // session (provider caches persist across sessions too).
+  const stateDir = path.join(services.paths.workspace, ".pi", "runtime");
+  const stateFile = path.join(stateDir, "prefix-stability.json");
+  const SAMPLE_CHARS = 20000;
+  let lastSessionSample = readState(stateFile)?.sample ?? "";
 
   function trace(ctx: ExtensionContext, event: string, data: Record<string, unknown> = {}): void {
     services.trace.record(ctx, event, data);
@@ -43,17 +69,21 @@ export default function equaxisPrefixStability(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event, ctx) => {
     try {
-      const stats = tracker.snapshot(event.systemPrompt);
-      trace(ctx, "prefix_stability", {
-        prevLength: stats.prevLength,
-        currLength: stats.currLength,
-        commonPrefixLength: stats.commonPrefixLength,
-        stableRatio: stats.stableRatio,
-        minStableRatio: stats.minStableRatio,
-        avgStableRatio: stats.avgStableRatio,
-        window: stats.window
-      });
-      updateStatus(ctx, stats);
+      const current = String(event.systemPrompt ?? "");
+      const crossSession = lastSessionSample
+        ? stablePrefixStats(lastSessionSample, current.slice(0, SAMPLE_CHARS))
+        : null;
+      const stats = tracker.snapshot(current);
+      const merged = {
+        ...stats,
+        crossSessionRatio: crossSession ? crossSession.stableRatio : null,
+        crossSessionCommon: crossSession ? crossSession.commonPrefixLength : null,
+        promptSha: hashPrompt(current)
+      };
+      trace(ctx, "prefix_stability", merged);
+      updateStatus(ctx, merged);
+      lastSessionSample = current.slice(0, SAMPLE_CHARS);
+      writeState(stateFile, { sample: lastSessionSample, at: new Date().toISOString() });
     } catch {
       // Observability only: never block agent start on measurement failure.
     }
