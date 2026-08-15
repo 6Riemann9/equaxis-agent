@@ -12,6 +12,7 @@
     "memory",
     "skills",
     "codeGraph",
+    "goalState",
     "evaluation",
     "subagents",
     "protocols"
@@ -534,6 +535,42 @@
         "rebuildIfStaleMs": {
           "type": "integer",
           "minimum": 60000
+        }
+      }
+    },
+    "goalState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "rootDir",
+        "defaultQuota"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "rootDir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "defaultQuota": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tokenBudget",
+            "windowHours"
+          ],
+          "properties": {
+            "tokenBudget": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "windowHours": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     },

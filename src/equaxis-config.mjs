@@ -101,6 +101,11 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     maxFiles: 2000,
     rebuildIfStaleMs: 6 * 3600 * 1000
   },
+  goalState: {
+    enabled: true,
+    rootDir: ".pi/runtime/goals",
+    defaultQuota: { tokenBudget: 200000, windowHours: 24 }
+  },
   intentGate: {
     enabled: true,
     patterns: []
@@ -285,13 +290,14 @@ function assertKnownKeys(value, field, baseValue, configPath) {
 function mergeConfig(base, custom) {
   // DSH-style discipline: unknown keys in custom config are rejected so a
   // typo surfaces at load time instead of being silently merged away.
-  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "evaluation", "subagents", "intentGate"];
+  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "goalState", "evaluation", "subagents", "intentGate"];
   const SUB_SECTIONS = [
     ["runtime", "services"], ["runtime", "gates"],
     ["reliability", "trace"], ["reliability", "approval"], ["reliability", "limits"], ["reliability", "toolRouting"], ["reliability", "eval"],
     ["reliability", "costBrake"], ["reliability", "commandAllowlist"],
     ["protocols", "lsp"], ["protocols", "dap"],
     ["memory", "governance"], ["memory", "dream"], ["memory", "segmentation"],
+    ["goalState", "defaultQuota"],
     ["subagents", "budgets"], ["subagents", "persistence"], ["subagents", "isolation"], ["subagents", "evidence"]
   ];
   for (const section of SECTIONS) {
@@ -339,6 +345,11 @@ function mergeConfig(base, custom) {
     },
     skills: { ...base.skills, ...(custom.skills ?? {}) },
     codeGraph: { ...base.codeGraph, ...(custom.codeGraph ?? {}) },
+    goalState: {
+      ...base.goalState,
+      ...(custom.goalState ?? {}),
+      defaultQuota: { ...base.goalState.defaultQuota, ...(custom.goalState?.defaultQuota ?? {}) }
+    },
     evaluation: { ...base.evaluation, ...(custom.evaluation ?? {}) },
     subagents: {
       ...base.subagents,
@@ -495,6 +506,13 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   }
   assertInteger(config.codeGraph.maxFiles, configPath, "codeGraph.maxFiles", 1, 100000);
   assertInteger(config.codeGraph.rebuildIfStaleMs, configPath, "codeGraph.rebuildIfStaleMs", 60_000, 30 * 24 * 3600 * 1000);
+
+  assertRecord(config.goalState, configPath, "goalState");
+  assertBoolean(config.goalState.enabled, configPath, "goalState.enabled");
+  assertLocalPath(config.goalState.rootDir, configPath, "goalState.rootDir");
+  assertRecord(config.goalState.defaultQuota, configPath, "goalState.defaultQuota");
+  assertNumber(config.goalState.defaultQuota.tokenBudget, configPath, "goalState.defaultQuota.tokenBudget", 1, 1_000_000_000);
+  assertNumber(config.goalState.defaultQuota.windowHours, configPath, "goalState.defaultQuota.windowHours", 1, 24 * 365);
 
   assertRecord(config.evaluation, configPath, "evaluation");
   assertBoolean(config.evaluation.enabled, configPath, "evaluation.enabled");

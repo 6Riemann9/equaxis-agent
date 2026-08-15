@@ -479,6 +479,30 @@
         "tools": 2,
         "notes": "索引按需重建,查询工具零注入;TencentDB CodeGraph 资产模式"
       }
+    },
+    {
+      "id": "goal-state",
+      "entry": "goal-state.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "trace",
+        "status"
+      ],
+      "requires": [],
+      "provides": [
+        "tool:goal_status",
+        "command:equaxis-goal",
+        "event:session_start",
+        "goal-state:store"
+      ],
+      "promptImpact": {
+        "systemPromptChars": 0,
+        "tools": 1,
+        "notes": "目标状态单一 JSON 重启包,session_start 载入;loopx lifetime-goal 模式"
+      }
     }
   ]
 }
