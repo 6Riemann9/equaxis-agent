@@ -38,7 +38,7 @@ Pi Agent Loop
   - `enabled`：总开关（默认 true）
   - `onShutdown`：会话结束自动触发（默认 true）
   - `maxEntries`：单次处理的历史条数上限（默认 200）
-  - `provider` / `model`：提取用模型；不填则用当前会话模型（默认 `deepseek/deepseek-v4-flash`）
+  - `provider` / `model`：提取用模型；不填则用当前会话模型（无厂商默认）
 - 手动触发：`/memory-dream` 命令。
 - 提取提示词与解析：`src/memory-consolidate.mjs`（严格 JSON：`{memories, facts}`，容忍 markdown fence）。
 - 相关事件（trace）：`memory_dream_consolidated` / `memory_dream_failed`。

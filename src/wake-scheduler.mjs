@@ -59,9 +59,9 @@ export function scheduledTaskCommand({ projectRoot, intervalMinutes = 30, taskNa
 /**
  * Run the scheduled wake: when the plan says wouldRun, spawn an Equaxis
  * session (json mode, nextAction as the prompt) with the configured
- * provider/model (autoWake.provider/model, falling back to
- * deepseek/deepseek-v4-flash). Returns the plan + started flag; never
- * spawns when not wouldRun.
+ * provider/model (autoWake.provider/model — required when autoWake is
+ * enabled; no vendor default is assumed). Returns the plan + started
+ * flag; never spawns when not wouldRun.
  */
 export async function runScheduledWake({ projectRoot, config = {}, goal, spawnImpl, log = () => {} } = {}) {
   const plan = buildWakePlan({ goal, config });
@@ -70,8 +70,13 @@ export async function runScheduledWake({ projectRoot, config = {}, goal, spawnIm
     return { ...plan, started: false, args: null };
   }
   const autoWake = config.autoWake ?? {};
-  const provider = String(autoWake.provider || "deepseek");
-  const model = String(autoWake.model || "deepseek-v4-flash");
+  const provider = String(autoWake.provider ?? "").trim();
+  const model = String(autoWake.model ?? "").trim();
+  if (!provider || !model) {
+    const error = "autoWake is enabled but goalState.autoWake.provider/model is not set — configure them in .pi/equaxis.json";
+    log(`wake skipped: ${error}`);
+    return { ...plan, started: false, args: null, error };
+  }
   const args = ["scripts/equaxis.mjs", "--mode", "json", "--thinking", "off", "--provider", provider, "--model", model, String(plan.nextAction)];
   const launch = spawnImpl ?? ((cmd, argv) => new Promise((resolve) => {
     const child = spawn(cmd, argv, { cwd: path.resolve(projectRoot), stdio: "inherit", windowsHide: true });

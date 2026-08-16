@@ -522,8 +522,8 @@ ${context || "No relevant stored memory was retrieved."}
     const entries = pending.entries ?? [];
     if (entries.length === 0) return { processed: 0, memories: [], facts: [] };
 
-    const provider = dream.provider ?? ctx.model?.provider;
-    const modelId = dream.model ?? ctx.model?.id;
+    const provider = dream.provider || ctx.model?.provider;
+    const modelId = dream.model || ctx.model?.id;
     if (!provider || !modelId) {
       throw new Error("No model available for dream consolidation (set memory.dream.provider/model in .pi/equaxis.json)");
     }

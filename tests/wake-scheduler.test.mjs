@@ -88,18 +88,20 @@ test("runScheduledWake spawns one session with nextAction and configured model",
   assert.deepEqual(calls[0].args, ["scripts/equaxis.mjs", "--mode", "json", "--thinking", "off", "--provider", "deepseek", "--model", "deepseek-v4-flash", "merge the PR"]);
 });
 
-test("runScheduledWake falls back to default provider/model", async () => {
+test("runScheduledWake refuses to spawn without configured provider/model", async () => {
   const calls = [];
-  await runScheduledWake({
+  const logs = [];
+  const result = await runScheduledWake({
     projectRoot: "C:/proj",
     config: { autoWake: { enabled: true } },
     goal: goalWith({ nextAction: "ship" }),
-    spawnImpl: async (cmd, args) => { calls.push(args); }
+    spawnImpl: async (cmd, args) => { calls.push(args); },
+    log: (line) => logs.push(line)
   });
-  assert.ok(calls[0].includes("--provider"), "provider flag present");
-  assert.equal(calls[0][calls[0].indexOf("--provider") + 1], "deepseek");
-  assert.ok(calls[0].includes("--model"), "model flag present");
-  assert.equal(calls[0][calls[0].indexOf("--model") + 1], "deepseek-v4-flash");
+  assert.equal(calls.length, 0, "no spawn without provider/model");
+  assert.equal(result.started, false);
+  assert.ok(result.error.includes("autoWake.provider/model"), `error names the missing keys: ${result.error}`);
+  assert.ok(logs.some((line) => line.includes("autoWake.provider/model")));
 });
 
 test("runScheduledWake logs skip and spawn failure via the log hook", async () => {
@@ -111,7 +113,7 @@ test("runScheduledWake logs skip and spawn failure via the log hook", async () =
   const failLogs = [];
   await runScheduledWake({
     projectRoot: "C:/p",
-    config: { autoWake: { enabled: true } },
+    config: { autoWake: { enabled: true, provider: "deepseek", model: "deepseek-v4-flash" } },
     goal: goalWith({ nextAction: "x" }),
     spawnImpl: async () => { throw new Error("no node"); },
     log: (line) => failLogs.push(line)

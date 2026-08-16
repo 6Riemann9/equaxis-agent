@@ -94,9 +94,7 @@
     "dream": {
       "enabled": true,
       "onShutdown": false,
-      "maxEntries": 150,
-      "provider": "deepseek",
-      "model": "deepseek-v4-flash"
+      "maxEntries": 150
     }
   },
   "skills": {

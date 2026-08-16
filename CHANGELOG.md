@@ -9,6 +9,10 @@ All notable changes to Equaxis are documented here. Format follows [Keep a Chang
 - scripts/memory-json.mjs: protocol-compatible JSONL bridge over the native core; pi-web memory route and harness probe select the process by backend.
 - /memory-migrate: one-command migration of legacy Python-backend memory (export → import; history and graph reused in place, idempotent).
 
+### Changed
+- No vendor-pinned default model ships with the package: the bundled .pi/equaxis.json no longer sets memory.dream.provider/model (previously deepseek/deepseek-v4-flash), so dream consolidation uses the current session model, and an empty provider/model string is treated as "unset" instead of erroring.
+- Auto-wake (goalState.autoWake) no longer silently falls back to deepseek/deepseek-v4-flash: when enabled without an explicit provider/model it reports a config error and does not spawn, so users are never charged on a provider they did not choose.
+
 ## [0.3.5] - 2026-08-16
 
 ### Added
