@@ -167,6 +167,90 @@ function formatDate(timestamp: string): string {
   return date.toLocaleString();
 }
 
+function getPathValue(object: Record<string, unknown> | undefined, path: string): unknown {
+  let current: unknown = object;
+  for (const part of path.split(".")) {
+    if (current === null || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+function ConfigKeyRow({ meta, path, source, layers, file, busy, onSave }: {
+  meta: ConfigKeyMeta;
+  path: string;
+  source: Record<string, unknown>;
+  layers: ConfigView["layers"];
+  file: string;
+  busy: boolean;
+  onSave: (key: string, value: unknown | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const value = getPathValue(source, path);
+  const layer = file === "settings"
+    ? (value !== undefined ? "project" : "default")
+    : getPathValue(layers.project, path) !== undefined ? "project"
+      : getPathValue(layers.global, path) !== undefined ? "global"
+        : "default";
+  const display = value === undefined ? "—" : (typeof value === "object" ? JSON.stringify(value) : String(value));
+
+  const startEdit = () => {
+    setDraft(display === "—" ? "" : display);
+    setEditing(true);
+  };
+  const save = () => {
+    let parsed: unknown = draft.trim();
+    if (parsed === "") {
+      onSave(path, null);
+      setEditing(false);
+      return;
+    }
+    try {
+      parsed = JSON.parse(String(parsed));
+    } catch {
+      // keep as a plain string
+    }
+    onSave(path, parsed);
+    setEditing(false);
+  };
+
+  return (
+    <div className="harness-config-row">
+      <div className="harness-config-row-head">
+        <span className="harness-config-key">{meta.label ?? meta.key}</span>
+        <span className={`harness-layer-badge ${layer}`}>{layer}</span>
+        <code className="harness-config-path">{meta.key}</code>
+      </div>
+      {meta.description && <div className="harness-config-desc">{meta.description}</div>}
+      {file === "settings" ? (
+        <div className="harness-config-value">
+          <code>{display}</code>
+          <span className="harness-config-readonly">managed in .pi/settings.json</span>
+        </div>
+      ) : editing ? (
+        <div className="harness-config-edit">
+          {meta.type === "enum" && meta.options ? (
+            <select value={draft} onChange={(event) => setDraft(event.target.value)}>
+              {meta.options.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          ) : (
+            <input value={draft} onChange={(event) => setDraft(event.target.value)} />
+          )}
+          <button className="harness-approve-btn" disabled={busy} onClick={save}>Save</button>
+          <button className="harness-deny-btn" disabled={busy} onClick={() => { onSave(path, null); setEditing(false); }}>Reset</button>
+          <button className="harness-action-btn" onClick={() => setEditing(false)}>Cancel</button>
+        </div>
+      ) : (
+        <div className="harness-config-value">
+          <code>{display}</code>
+          <button className="harness-action-btn" disabled={busy} onClick={startEdit}>Edit</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function shortDetail(entry: TraceEvent): string | null {
   const candidates = [entry.error, entry.reason, entry.toolName];
   for (const value of candidates) {
@@ -175,7 +259,35 @@ function shortDetail(entry: TraceEvent): string | null {
   return null;
 }
 
-type Tab = "overview" | "events" | "files" | "eval" | "harbor" | "approvals";
+type Tab = "overview" | "events" | "files" | "eval" | "harbor" | "approvals" | "settings";
+
+interface ConfigKeyMeta {
+  key: string;
+  label?: string;
+  type?: string;
+  options?: string[];
+  description?: string;
+}
+
+interface ConfigSectionMeta {
+  id: string;
+  label: string;
+  file: string;
+  description: string;
+  keys: ConfigKeyMeta[];
+}
+
+interface ConfigView {
+  sections: ConfigSectionMeta[];
+  layers: {
+    defaults: Record<string, unknown>;
+    global: Record<string, unknown>;
+    project: Record<string, unknown>;
+  };
+  effective: Record<string, unknown>;
+  piSettings: Record<string, unknown>;
+  paths: { global: string; project: string };
+}
 
 interface ApprovalItem {
   requestId: string;
@@ -211,6 +323,9 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
   const [evalSort, setEvalSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "", dir: "asc" });
   const [approvals, setApprovals] = useState<{ pending: ApprovalItem[]; history: ApprovalItem[] } | null>(null);
   const [approvalBusy, setApprovalBusy] = useState(false);
+  const [configView, setConfigView] = useState<ConfigView | null>(null);
+  const [configSection, setConfigSection] = useState<string>("agent");
+  const [configBusy, setConfigBusy] = useState(false);
 
   const load = useCallback(() => {
     if (!cwd) return;
@@ -266,6 +381,44 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
       })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
   }, [cwd]);
+
+  const loadConfig = useCallback(() => {
+    if (!cwd) return;
+    setError(null);
+    fetch(`/api/harness/config?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(String(body?.error ?? `HTTP ${response.status}`));
+        setConfigView(body as ConfigView);
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+  }, [cwd]);
+
+  const saveConfigKey = useCallback(async (key: string, value: unknown | null) => {
+    if (!cwd) return;
+    setConfigBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/harness/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cwd,
+          action: value === null ? "unset" : "set",
+          layer: "project",
+          key,
+          ...(value === null ? {} : { value }),
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(String(body?.error ?? `HTTP ${response.status}`));
+      loadConfig();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setConfigBusy(false);
+    }
+  }, [cwd, loadConfig]);
 
   const loadApprovals = useCallback(() => {
     if (!cwd) return;
@@ -326,7 +479,8 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
     setError(null);
     if (next === "events" && !events) loadEvents(0);
     if (next === "files" && !files) loadFiles();
-  }, [events, files, loadEvents, loadFiles]);
+    if (next === "settings" && !configView) loadConfig();
+  }, [events, files, configView, loadEvents, loadFiles, loadConfig]);
 
   const reliability = snapshot?.reliability?.state ?? null;
   const dashboard = snapshot?.dashboard ?? null;
@@ -392,6 +546,7 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
               Failures <span className="harness-tab-count">{traces.failureEvents}</span>
             </button>
           )}
+          <button className={tab === "settings" ? "active" : ""} onClick={() => openTab("settings")}>Settings</button>
         </div>
 
         <div className="harness-body">
@@ -739,6 +894,51 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
                   </div>
                 ))}
                 {approvals && approvals.history.length === 0 && <div className="harness-empty">No decisions yet.</div>}
+              </div>
+            </section>
+          )}
+
+          {tab === "settings" && (
+            <section className="harness-section">
+              <div className="harness-settings-grid">
+                <aside className="harness-settings-nav">
+                  {!configView ? (
+                    <div className="harness-empty">Loading settings…</div>
+                  ) : (
+                    configView.sections.map((section) => (
+                      <button key={section.id} className={configSection === section.id ? "selected" : ""} onClick={() => setConfigSection(section.id)}>
+                        <span>{section.label}</span>
+                        <em>{section.file === "settings" ? "settings.json" : "equaxis.json"}</em>
+                      </button>
+                    ))
+                  )}
+                </aside>
+                <div className="harness-settings-main">
+                  {!configView ? null : (() => {
+                    const section = configView.sections.find((item) => item.id === configSection) ?? configView.sections[0];
+                    const source = section.file === "settings" ? configView.piSettings : configView.effective;
+                    return (
+                      <>
+                        <div className="harness-section-title">
+                          {section.label}
+                          <span className="harness-settings-desc">{section.description}</span>
+                        </div>
+                        {section.keys.map((meta) => (
+                          <ConfigKeyRow
+                            key={meta.key}
+                            meta={meta}
+                            path={section.file === "settings" ? meta.key : `${section.id}.${meta.key}`}
+                            source={source}
+                            layers={configView.layers}
+                            file={section.file}
+                            busy={configBusy}
+                            onSave={saveConfigKey}
+                          />
+                        ))}
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
             </section>
           )}

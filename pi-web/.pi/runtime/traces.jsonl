@@ -1,0 +1,10 @@
+{"timestamp":"2026-08-14T12:35:12.687Z","source":"subagent-engine","event":"subagent_subagent_queued","id":"reliability-review_0642aef805e4c579","traceId":"trace_8f149a28f54984d5","label":"reliability-review"}
+{"timestamp":"2026-08-14T12:35:12.689Z","source":"subagent-engine","event":"subagent_subagent_started","id":"reliability-review_0642aef805e4c579","traceId":"trace_8f149a28f54984d5","label":"reliability-review"}
+{"timestamp":"2026-08-14T12:35:12.690Z","source":"subagent-engine","event":"subagent_subagent_queued","id":"memory-review_7219aec4697d3a32","traceId":"trace_70ea27a5e42ae48d","label":"memory-review"}
+{"timestamp":"2026-08-14T12:35:12.691Z","source":"subagent-engine","event":"subagent_subagent_started","id":"memory-review_7219aec4697d3a32","traceId":"trace_70ea27a5e42ae48d","label":"memory-review"}
+{"timestamp":"2026-08-14T12:35:12.691Z","source":"subagent-engine","event":"subagent_subagent_queued","id":"project-review_c51700989f990f59","traceId":"trace_33ed7439ce0bf964","label":"project-review"}
+{"timestamp":"2026-08-14T12:35:12.692Z","source":"subagent-engine","event":"subagent_schedule","count":3}
+{"timestamp":"2026-08-14T12:37:12.698Z","source":"subagent-engine","event":"subagent_subagent_failed","id":"reliability-review_0642aef805e4c579","traceId":"trace_8f149a28f54984d5","attempts":1,"error":"subagent timed out after 120000ms"}
+{"timestamp":"2026-08-14T12:37:12.699Z","source":"subagent-engine","event":"subagent_subagent_started","id":"project-review_c51700989f990f59","traceId":"trace_33ed7439ce0bf964","label":"project-review"}
+{"timestamp":"2026-08-14T12:37:12.709Z","source":"subagent-engine","event":"subagent_subagent_failed","id":"memory-review_7219aec4697d3a32","traceId":"trace_70ea27a5e42ae48d","attempts":1,"error":"subagent timed out after 120000ms"}
+{"timestamp":"2026-08-14T12:39:12.707Z","source":"subagent-engine","event":"subagent_subagent_failed","id":"project-review_c51700989f990f59","traceId":"trace_33ed7439ce0bf964","attempts":1,"error":"subagent timed out after 120000ms"}

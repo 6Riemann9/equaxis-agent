@@ -107,6 +107,18 @@ pi-web fork 顶栏的 **Equaxis Harness** 按钮打开实时 harness 面板（`/
 
 Harness 面板 Overview 的 **Session costs** 段从项目 session 文件聚合助手消息的 `usage`：总 token、总成本、按 provider/model 分组的 token/成本（最近 15 个会话明细）。
 
+## 分层设置（Layered Settings）
+
+配置分三层合并，上层覆盖下层：
+
+| 层 | 位置 | 作用域 |
+|---|---|---|
+| `default` | 代码内 `DEFAULT_EQUAXIS_CONFIG` | 兜底 |
+| `global` | `~/.equaxis/config.json` | 所有项目 |
+| `project` | `.pi/equaxis.json` | 当前项目 |
+
+`loadEquaxisConfigLayers(cwd)` 返回 `{defaults, global, project, effective}`；`scripts/config-edit.mjs` 提供 `view / set / unset`（写入前对**被编辑层单独校验**，非法值不落盘并回滚）。pi-web Harness 面板的 **Settings** tab 按分区展示（Agent/Governance/Memory/Skills/Subagents/Evaluation/Protocols/Runtime/Extensions/…），每个键显示当前生效值 + 来源徽标（default/global/project），可内联编辑（写入 project 层）或 Reset（回退下层默认）。Agent 分区只读展示 `.pi/settings.json`（provider/model 走 pi-web Models 面板管理）。
+
 ## Shared Runtime Services
 
 `createExtensionRuntimeServices()` supplies:

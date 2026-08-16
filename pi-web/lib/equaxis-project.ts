@@ -36,10 +36,10 @@ export function getProjectSessionDir(projectRoot: string): string {
  * resolve its JSON stdout. Uses `Promise.withResolvers` so a slow or dead
  * script cannot hang the request forever.
  */
-export function runEquaxisScript(projectRoot: string, scriptName: string): Promise<unknown> {
+export function runEquaxisScript(projectRoot: string, scriptName: string, args: string[] = []): Promise<unknown> {
   const { promise, resolve, reject } = Promise.withResolvers<unknown>();
   const scriptPath = join(projectRoot, "scripts", scriptName);
-  const child = spawn(process.execPath, [scriptPath], {
+  const child = spawn(process.execPath, [scriptPath, ...args], {
     cwd: projectRoot,
     env: process.env,
     windowsHide: true,

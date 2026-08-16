@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const UNIFIED_CONFIG_FILE = ".pi/equaxis.json";
@@ -299,7 +300,7 @@ function assertKnownKeys(value, field, baseValue, configPath) {
   }
 }
 
-function mergeConfig(base, custom) {
+export function mergeConfig(base, custom) {
   // DSH-style discipline: unknown keys in custom config are rejected so a
   // typo surfaces at load time instead of being silently merged away.
   const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "goalState", "refine", "wiki", "evaluation", "subagents", "intentGate"];
@@ -589,18 +590,45 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   return config;
 }
 
-export function loadEquaxisConfig(cwd) {
-  const unifiedPath = path.join(cwd, UNIFIED_CONFIG_FILE);
-  const custom = fs.existsSync(unifiedPath)
-    ? parseJson(unifiedPath)
+/** User-level config layer: ~/.equaxis/config.json (applies to every project). */
+export function globalEquaxisConfigPath() {
+  return path.join(os.homedir(), ".equaxis", "config.json");
+}
+
+/**
+ * Load all config layers for a project and report provenance:
+ *   defaults (bundled) → global (~/.equaxis/config.json) → project (.pi/equaxis.json)
+ * The effective config is the fully merged and validated result the runtime
+ * uses; the UI shows each layer so users can see where a value comes from.
+ */
+export function loadEquaxisConfigLayers(cwd) {
+  const globalPath = globalEquaxisConfigPath();
+  const globalCustom = fs.existsSync(globalPath) ? parseJson(globalPath) : {};
+  const projectPath = path.join(cwd, UNIFIED_CONFIG_FILE);
+  const projectCustom = fs.existsSync(projectPath)
+    ? parseJson(projectPath)
     : {
         reliability: readOptionalJson(cwd, LEGACY_RELIABILITY_FILE),
         memory: readOptionalJson(cwd, LEGACY_MEMORY_FILE)
       };
-  const configPath = fs.existsSync(unifiedPath) ? unifiedPath : path.join(cwd, UNIFIED_CONFIG_FILE);
-  const migrated = migrateEquaxisConfig(custom ?? {}, configPath);
-  const merged = mergeConfig(DEFAULT_EQUAXIS_CONFIG, migrated ?? {});
-  return validateEquaxisConfig(merged, configPath);
+  const globalMigrated = migrateEquaxisConfig(globalCustom ?? {}, globalPath);
+  const projectMigrated = migrateEquaxisConfig(projectCustom ?? {}, projectPath);
+  const effective = validateEquaxisConfig(
+    mergeConfig(mergeConfig(DEFAULT_EQUAXIS_CONFIG, globalMigrated ?? {}), projectMigrated ?? {}),
+    projectPath
+  );
+  return {
+    defaults: DEFAULT_EQUAXIS_CONFIG,
+    global: globalCustom,
+    project: projectCustom,
+    effective,
+    globalPath,
+    projectPath
+  };
+}
+
+export function loadEquaxisConfig(cwd) {
+  return loadEquaxisConfigLayers(cwd).effective;
 }
 
 export function unifiedConfigPath(cwd) {

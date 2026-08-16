@@ -2,6 +2,12 @@
 
 All notable changes to Equaxis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [0.3.5] - 2026-08-16
+
+### Added
+- Layered settings model: defaults → global (~/.equaxis/config.json) → project (.pi/equaxis.json), exposed via loadEquaxisConfigLayers and scripts/config-edit.mjs (view/set/unset with per-layer validation).
+- pi-web Harness Settings tab: section tree with per-key effective value, layer provenance badge (default/global/project), inline editing and reset.
+
 ## [0.3.4] - 2026-08-16
 
 ### Changed
