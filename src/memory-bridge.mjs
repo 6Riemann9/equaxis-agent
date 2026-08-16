@@ -46,7 +46,8 @@ export class MemoryBridge {
           cwd: this.cwd,
           env: buildPythonBridgeEnv(),
           stdio: ["pipe", "pipe", "pipe"],
-          windowsHide: true
+          windowsHide: true,
+          detached: process.platform !== "win32"
         },
         label: "memory-bridge"
       });

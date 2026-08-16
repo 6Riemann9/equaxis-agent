@@ -194,6 +194,24 @@ test("rm combination flags trigger HIGH recursive-deletion classification", () =
   assert.notEqual(classifyBash("rm file.txt", {}).risk, RISK.HIGH, "plain rm is not recursive");
 });
 
+test("split-flag and rmdir recursive deletion are HIGH", () => {
+  for (const command of ["rm -r ./out", "rm -R ./out", "rm -r -f ./out", "rm -f -r ./out", "rmdir /s /q out", "del /s /q out", "rm --recursive --force out"]) {
+    const result = classifyBash(command, {});
+    assert.equal(result.risk, RISK.HIGH, command);
+    assert.match(result.reason, /recursive deletion/);
+  }
+  assert.notEqual(classifyBash("rm -r", {}).risk, RISK.LOW);
+  assert.equal(classifyBash("rmdir out", {}).risk, RISK.MEDIUM, "bare rmdir on an empty dir is not recursive");
+});
+
+test("interpreters are never allowlisted as read-only", () => {
+  for (const command of ["node -e \"fs.rmSync('src', {recursive:true})\"", "python -c \"print(1)\"", "npx tsc --noEmit", "bun run build", "sed -i s/x/y/ f.txt", "awk '{print $1}' f.txt"]) {
+    const result = classifyBash(command, {});
+    assert.notEqual(result.risk, RISK.LOW, `interpreter must not be LOW: ${command}`);
+    assert.equal(result.risk, RISK.MEDIUM, command);
+  }
+});
+
 test("write-shaped commands that touch protected paths are blocked", (t) => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-policy-write-"));
   t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));

@@ -17,7 +17,9 @@ test("allowlisted read commands classify as low risk", () => {
   assert.equal(classifyBash("grep -r \"foo\" src").risk, RISK.LOW);
   assert.equal(classifyBash("git status --short").risk, RISK.LOW);
   assert.equal(classifyBash("git diff HEAD").risk, RISK.LOW);
-  assert.equal(classifyBash("node -v").risk, RISK.LOW);
+  // Interpreters (node/python/...) are never allowlisted: `node -e` can run
+  // arbitrary code, so even `node -v` classifies MEDIUM and is audited.
+  assert.equal(classifyBash("node -v").risk, RISK.MEDIUM);
 });
 
 test("unrecognized commands default to medium risk", () => {

@@ -70,7 +70,10 @@ export function createPiJsonExecutor(options = {}) {
       const child = spawnTracked({
         command: nodePath,
         args,
-        options: { cwd: spawnOptions.cwd, env: spawnOptions.env, stdio: ["ignore", "pipe", "pipe"] },
+        // POSIX: spawn as process-group leader so killProcessTree's negative
+        // pid can reach grandchildren (detached on win32 is unnecessary —
+        // taskkill /T handles the tree).
+        options: { cwd: spawnOptions.cwd, env: spawnOptions.env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" },
         label: `subagent:${task.id}`,
         spawnImpl
       });

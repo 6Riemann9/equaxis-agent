@@ -32,6 +32,11 @@ export function policyRuleVersion(config) {
 
 const HIGH_RISK_BASH = [
   { pattern: /(?:^|[^\w])(?:rm|del)\b[^\r\n]*(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|--recursive\b|--force\b|\/s\b|\/q\b)/i, reason: "recursive deletion" },
+  // Split flags (`rm -r -f x`) and recursion without force (`rm -r src`)
+  // do not match the combined-flag regex above; recursion alone is the
+  // highest-risk operation and must not slip to MEDIUM/allowlisted.
+  { pattern: /\b(?:rm|del)\b[^\r\n]*\s-[a-zA-Z]*r[a-zA-Z]*\b/i, reason: "recursive deletion" },
+  { pattern: /\brmdir\b[^\r\n]*\/s\b/i, reason: "recursive deletion" },
   { pattern: /\bRemove-Item\b[^\r\n]*-Recurse\b/i, reason: "recursive deletion" },
   { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+(?:-[a-z]*f|--force)|git\s+(?:checkout\s+--\s+\S+|restore\s+\S+))/i, reason: "destructive git operation" },
   { pattern: /\b(format|mkfs|diskpart)\b/i, reason: "disk modification" },

@@ -70,3 +70,25 @@ test("loadEquaxisConfig still returns the effective config", (t) => {
   assert.equal(config.reliability.mode, "enforce");
   assert.equal(config.memory.enabled, false);
 });
+
+test("safety arrays union-merge instead of replacing defaults", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-layers-union-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".pi"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    runtime: { profile: "standard" },
+    extensions: { manifest: ".pi/extensions/contracts.json", enabled: [], disabled: [] },
+    reliability: {
+      protectPaths: [".env"],
+      approval: { externalEditRoots: ["<workspace>"] },
+      commandAllowlist: { extraCommands: ["equaxis"] }
+    }
+  }), "utf8");
+  const config = loadEquaxisConfig(root);
+  for (const entry of [".git/", "node_modules/", "*.pem", "*.key", ".env"]) {
+    assert.ok(config.reliability.protectPaths.includes(entry), `default protectPath kept: ${entry}`);
+  }
+  assert.ok(config.reliability.approval.externalEditRoots.includes("<workspace>"), "custom externalEditRoot kept");
+  assert.ok(config.reliability.commandAllowlist.extraCommands.includes("equaxis"), "custom extraCommand kept");
+});

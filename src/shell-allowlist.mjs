@@ -6,10 +6,9 @@
 
 const READ_COMMANDS = new Set([
   "ls", "dir", "cat", "type", "head", "tail", "wc", "grep", "rg", "find",
-  "where", "which", "sort", "uniq", "cut", "tr", "awk", "sed", "echo", "printf",
+  "where", "which", "sort", "uniq", "cut", "tr", "echo", "printf",
   "pwd", "cd", "date", "env", "stat", "file", "du", "df", "free", "basename",
-  "dirname", "realpath", "readlink", "expr", "test", "[", "true", "false",
-  "node", "npm", "npx", "pnpm", "yarn", "bun", "python", "python3", "pip", "pip3", "tsc"
+  "dirname", "realpath", "readlink", "expr", "test", "[", "true", "false"
 ]);
 
 const SAFE_GIT_SUBCOMMANDS = new Set([

@@ -99,7 +99,8 @@ export function spawnProtocolProcess(command, args = [], options = {}) {
       env: options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: options.windowsHide ?? true,
-      shell: false
+      shell: false,
+      detached: process.platform !== "win32"
     },
     label: `protocol:${String(command).split(/[\\/]/).pop()}`
   });

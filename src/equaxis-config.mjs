@@ -301,6 +301,19 @@ function assertKnownKeys(value, field, baseValue, configPath) {
   }
 }
 
+/**
+ * Union-merge for safety arrays (protectPaths, extraCommands,
+ * externalEditRoots): a user override must never silently drop the
+ * defaults — protectPaths defaults are a security boundary, and a
+ * replace-semantics merge would unprotect .git/, node_modules/ and
+ * key files the moment a user lists one extra path.
+ */
+function unionArrays(baseArray, customArray) {
+  if (!Array.isArray(customArray)) return baseArray;
+  if (!Array.isArray(baseArray)) return customArray;
+  return [...new Set([...baseArray, ...customArray])];
+}
+
 export function mergeConfig(base, custom) {
   // DSH-style discipline: unknown keys in custom config are rejected so a
   // typo surfaces at load time instead of being silently merged away.
@@ -333,13 +346,22 @@ export function mergeConfig(base, custom) {
     reliability: {
       ...base.reliability,
       ...(custom.reliability ?? {}),
+      protectPaths: unionArrays(base.reliability.protectPaths, custom.reliability?.protectPaths),
       trace: { ...base.reliability.trace, ...(custom.reliability?.trace ?? {}) },
-      approval: { ...base.reliability.approval, ...(custom.reliability?.approval ?? {}) },
+      approval: {
+        ...base.reliability.approval,
+        ...(custom.reliability?.approval ?? {}),
+        externalEditRoots: unionArrays(base.reliability.approval.externalEditRoots, custom.reliability?.approval?.externalEditRoots)
+      },
       limits: { ...base.reliability.limits, ...(custom.reliability?.limits ?? {}) },
       toolRouting: { ...base.reliability.toolRouting, ...(custom.reliability?.toolRouting ?? {}) },
       eval: { ...base.reliability.eval, ...(custom.reliability?.eval ?? {}) },
       costBrake: { ...base.reliability.costBrake, ...(custom.reliability?.costBrake ?? {}) },
-      commandAllowlist: { ...base.reliability.commandAllowlist, ...(custom.reliability?.commandAllowlist ?? {}) }
+      commandAllowlist: {
+        ...base.reliability.commandAllowlist,
+        ...(custom.reliability?.commandAllowlist ?? {}),
+        extraCommands: unionArrays(base.reliability.commandAllowlist.extraCommands, custom.reliability?.commandAllowlist?.extraCommands)
+      }
     },
     advisor: { ...base.advisor, ...(custom.advisor ?? {}) },
     protocols: {
