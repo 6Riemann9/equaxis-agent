@@ -7,22 +7,20 @@ Pi Agent Loop
    │ before_agent_start / agent_end / custom tools
    ▼
 .pi/extensions/memory.ts
-   │ request-id JSONL
-   ▼
-src/memory-bridge.mjs ── persistent Python process
-   │
-   ▼
-bridge/memory_bridge.py
-   │
-   ▼
-vendor/agent-memory/memory
-   ├── Short-term JSONL history
-   ├── ChromaDB long-term memory
-   ├── SQLite temporal knowledge graph
-   └── Dream and consolidation core
+   │  request(action, payload)
+   ├─ native（默认）→ src/memory-core.mjs（进程内，纯 Node）
+   │      ├── history/  JSONL 短期历史 + cursor
+   │      ├── long_term/drawers.json（384-d 向量抽屉）
+   │      ├── knowledge_graph.sqlite3（node:sqlite）
+   │      └── @huggingface/transformers 语义 embedding（all-MiniLM-L6-v2）
+   └─ python（可选）→ src/memory-bridge.mjs ── Python 进程
+                          ▼
+                      bridge/memory_bridge.py → vendor/agent-memory（ChromaDB）
 ```
 
-`vendor/agent-memory` 包含项目运行所需的 Memory Core 快照，因此克隆仓库后无需依赖外部源码目录即可运行。
+**默认后端是 native**（`memory.backend: "native"`）：纯 Node 实现，无 Python/chromadb 依赖，Linux/Arch 开箱即用；历史与知识图谱数据布局与 Python 版一致（`history.jsonl`、cursor 文件、`knowledge_graph.sqlite3` schema 相同，可直接打开既有数据）。`memory.backend: "python"` 切回旧桥。`scripts/memory-json.mjs` 提供协议兼容的 JSONL 桥（pi-web 与 snapshot 探测按 backend 自动选择进程）。
+
+**迁移**：已有 Python 数据（`.equaxis/memory/long_term/palace/`）用 `/memory-migrate` 迁移（Python 导出 → 原生导入，历史与图谱原地复用、去重幂等）。
 
 ## 生命周期
 

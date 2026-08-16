@@ -359,6 +359,10 @@
         "enabled": {
           "type": "boolean"
         },
+        "backend": {
+          "type": "string",
+          "enum": ["native", "python"]
+        },
         "pythonCommand": {
           "type": "string",
           "minLength": 1

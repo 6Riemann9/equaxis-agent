@@ -43,13 +43,17 @@ try {
   config = { error: error instanceof Error ? error.message : String(error) };
 }
 
-/** Probe the memory bridge: spawn it, ping, close. ~1s, side-effect free. */
+/** Probe the memory backend: spawn it, ping, close. ~1s, side-effect free. */
 function probeMemoryBridge() {
-  const pythonCommand = config?.memory?.pythonCommand ?? "python";
   const rootDir = path.resolve(projectRoot, config?.memory?.rootDir ?? ".equaxis/memory");
-  const bridgePath = path.join(projectRoot, "bridge", "memory_bridge.py");
-  if (!fs.existsSync(bridgePath)) return { ok: false, error: "bridge script missing" };
-  const result = spawnSync(pythonCommand, ["-u", bridgePath, "--root", rootDir], {
+  const native = config?.memory?.backend !== "python";
+  const command = native ? process.execPath : (config?.memory?.pythonCommand ?? "python");
+  const args = native
+    ? [path.join(projectRoot, "scripts", "memory-json.mjs"), "--root", rootDir]
+    : ["-u", path.join(projectRoot, "bridge", "memory_bridge.py"), "--root", rootDir];
+  if (native && !fs.existsSync(args[0])) return { ok: false, error: "native memory script missing" };
+  if (!native && !fs.existsSync(args[1])) return { ok: false, error: "bridge script missing" };
+  const result = spawnSync(command, args, {
     cwd: projectRoot,
     input: '{"id":"snapshot","action":"ping","payload":{}}\n{"id":"snapshot","action":"close","payload":{}}\n',
     encoding: "utf8",

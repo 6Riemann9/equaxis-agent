@@ -2,6 +2,13 @@
 
 All notable changes to Equaxis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [0.3.6] - 2026-08-16
+
+### Added
+- Native Node memory backend (memory.backend: "native", default): pure-JS memory core (src/memory-core.mjs) with transformers.js embeddings (all-MiniLM-L6-v2), JSON drawer store and node:sqlite knowledge graph — no Python/chromadb dependency, Linux/Arch out of the box.
+- scripts/memory-json.mjs: protocol-compatible JSONL bridge over the native core; pi-web memory route and harness probe select the process by backend.
+- /memory-migrate: one-command migration of legacy Python-backend memory (export → import; history and graph reused in place, idempotent).
+
 ## [0.3.5] - 2026-08-16
 
 ### Added

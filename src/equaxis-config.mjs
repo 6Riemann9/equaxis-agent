@@ -61,6 +61,7 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
   },
   memory: {
     enabled: true,
+    backend: "native",
     pythonCommand: "python",
     rootDir: ".equaxis/memory",
     autoRecall: true,

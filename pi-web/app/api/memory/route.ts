@@ -12,6 +12,7 @@ const RESPONSE_PREFIX = "__EQUAXIS_MEMORY__";
 const BRIDGE_TIMEOUT_MS = 30_000;
 
 interface MemoryConfig {
+  backend?: string;
   pythonCommand?: string;
   rootDir?: string;
 }
@@ -33,12 +34,16 @@ function requestBridge(
   payload: Record<string, unknown>,
 ): Promise<unknown> {
   const config = readMemoryConfig(projectRoot);
-  const pythonCommand = config.pythonCommand ?? "python";
   const rootDir = resolve(projectRoot, config.rootDir ?? ".equaxis/memory");
-  const bridgePath = join(projectRoot, "bridge", "memory_bridge.py");
+  // memory.backend selects the process: native (Node core) or python (legacy bridge).
+  const native = config.backend !== "python";
+  const command = native ? process.execPath : (config.pythonCommand ?? "python");
+  const args = native
+    ? [join(projectRoot, "scripts", "memory-json.mjs"), "--root", rootDir]
+    : ["-u", join(projectRoot, "bridge", "memory_bridge.py"), "--root", rootDir];
 
   const { promise, resolve: settleResolve, reject: settleReject } = Promise.withResolvers<unknown>();
-  const child = spawn(pythonCommand, ["-u", bridgePath, "--root", rootDir], {
+  const child = spawn(command, args, {
     cwd: projectRoot,
     env: {
       ...process.env,

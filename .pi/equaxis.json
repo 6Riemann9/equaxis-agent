@@ -59,7 +59,7 @@
     },
     "costBrake": {
       "enabled": true,
-      "maxSessionCostUsd": 2.0,
+      "maxSessionCostUsd": 2,
       "warnAtFraction": 0.8
     },
     "commandAllowlist": {
@@ -74,11 +74,11 @@
   "memory": {
     "enabled": true,
     "pythonCommand": "python",
+    "backend": "native",
     "rootDir": ".equaxis/memory",
     "autoRecall": true,
     "defaultWing": "equaxis",
     "defaultRoom": "general",
-    "recallLimit": 5,
     "maxContextChars": 8000,
     "maxStoredMessageChars": 24000,
     "requestTimeoutMs": 60000,
@@ -94,7 +94,7 @@
     "dream": {
       "enabled": true,
       "onShutdown": false,
-      "maxEntries": 200,
+      "maxEntries": 150,
       "provider": "deepseek",
       "model": "deepseek-v4-flash"
     }

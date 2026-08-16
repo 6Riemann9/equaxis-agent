@@ -158,7 +158,7 @@ export function parseMemoryExtractionResponse(text) {
 
 /**
  * @param {object} options
- * @param {import("./memory-bridge.mjs").MemoryBridge} options.bridge
+ * @param {{ request: (action: string, payload: Record<string, unknown>, options?: object) => Promise<any> }} options.bridge  memory backend (native or python)
  * @param {(prompt: string) => Promise<string>} options.complete  model completion
  * @param {Array<{cursor: number, content: string, timestamp?: string}>} options.entries
  * @param {{wing?: string, room?: string}} [options.defaults]

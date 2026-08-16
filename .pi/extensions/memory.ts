@@ -5,6 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { MemoryBridge } from "../../src/memory-bridge.mjs";
+import { NativeMemoryBackend, NativeMemoryCore } from "../../src/memory-core.mjs";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { MEMORY_EXTRACTION_SYSTEM_PROMPT, consolidateMemoryHistory } from "../../src/memory-consolidate.mjs";
 import { containsSecretLikeInput } from "../../src/policy.mjs";
@@ -26,6 +27,7 @@ interface MemorySegmentationConfig {
 
 interface MemoryConfig {
   enabled: boolean;
+  backend: "native" | "python";
   pythonCommand: string;
   rootDir: string;
   autoRecall: boolean;
@@ -104,7 +106,7 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
     pi
   });
   let config = services.config.memory as MemoryConfig;
-  let bridge: MemoryBridge | undefined;
+  let bridge: MemoryBridge | NativeMemoryBackend | undefined;
   let ready = false;
   let lastDiagnostic = "";
   let lastRecordedPromptKey = "";
@@ -121,7 +123,13 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
     services.status.set(ctx, "equaxis-memory", `Memory ${state}`);
   }
 
-  function createBridge(ctx: ExtensionContext): MemoryBridge {
+  function createBridge(ctx: ExtensionContext): MemoryBridge | NativeMemoryBackend {
+    if (config.backend !== "python") {
+      // Native Node backend: no Python/chromadb dependency, in-process.
+      return new NativeMemoryBackend({
+        rootDir: path.join(ctx.cwd, config.rootDir)
+      });
+    }
     return new MemoryBridge({
       cwd: ctx.cwd,
       pythonCommand: config.pythonCommand,
@@ -136,7 +144,7 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
     });
   }
 
-  async function ensureBridge(ctx: ExtensionContext): Promise<MemoryBridge> {
+  async function ensureBridge(ctx: ExtensionContext): Promise<MemoryBridge | NativeMemoryBackend> {
     if (!config.enabled) throw new Error("Equaxis Memory is disabled in .pi/equaxis.json");
     bridge ??= createBridge(ctx);
     try {
@@ -398,7 +406,7 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
   });
 
   let lastContext: ExtensionContext | undefined;
-  async function ensureBridgeForTool(): Promise<MemoryBridge> {
+  async function ensureBridgeForTool(): Promise<MemoryBridge | NativeMemoryBackend> {
     if (!lastContext) throw new Error("Equaxis Memory has not received a Pi session context yet");
     return ensureBridge(lastContext);
   }
@@ -667,6 +675,45 @@ ${context || "No relevant stored memory was retrieved."}
     handler: async (_args, ctx) => {
       lastContext = ctx;
       ctx.ui.notify(`${ctx.cwd}/${config.rootDir}`.replaceAll("\\", "/"), "info");
+    }
+  });
+
+  pi.registerCommand("memory-migrate", {
+    description: "Migrate legacy Python-backend memory into the native core (export → import drawers; history and graph are read in place)",
+    handler: async (_args, ctx) => {
+      lastContext = ctx;
+      try {
+        if (config.backend === "python") {
+          ctx.ui.notify("memory.backend is python; nothing to migrate. Set memory.backend=native first.", "warning");
+          return;
+        }
+        const rootDir = path.join(ctx.cwd, config.rootDir);
+        const legacyDir = path.join(rootDir, "long_term", "palace");
+        if (!fs.existsSync(legacyDir)) {
+          ctx.ui.notify("No legacy Python memory found (long_term/palace absent); nothing to migrate.", "info");
+          return;
+        }
+        const legacy = new MemoryBridge({
+          cwd: ctx.cwd,
+          pythonCommand: config.pythonCommand,
+          rootDir: config.rootDir,
+          bridgePath: memoryBridgePath,
+          requestTimeoutMs: 60000
+        });
+        await legacy.start();
+        let dump;
+        try {
+          dump = await legacy.request("export", { limit: 5000 });
+        } finally {
+          await legacy.stop();
+        }
+        const core = new NativeMemoryCore({ rootDir });
+        const result = core.importExport(dump);
+        trace(ctx, "memory_migrated", { imported: result.imported, source: "python-export" });
+        ctx.ui.notify(`Memory migrated: ${result.imported} drawers imported into the native core.`, "info");
+      } catch (error) {
+        ctx.ui.notify(`Memory migration failed: ${String(error)}`, "error");
+      }
     }
   });
 
