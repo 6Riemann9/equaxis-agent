@@ -98,8 +98,10 @@ function checkExtensionContractsAtRoot(checks, projectRoot, unifiedConfig) {
   return extensionContracts;
 }
 
-function checkPiDependency(checks, projectRoot) {
-  const piEntry = path.join(projectRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+function checkPiDependency(checks, projectRoot, piEntryOverride) {
+  // For global npm installs the pi entry resolves through the package's own
+  // dependency graph, not <projectRoot>/node_modules.
+  const piEntry = piEntryOverride ?? path.join(projectRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
   checks.push(check("Pi dependency", fs.existsSync(piEntry), fs.existsSync(piEntry) ? "installed" : "run npm install"));
 }
 
@@ -165,7 +167,7 @@ export function runStartupPreflight(options = {}) {
     checks.push(check("Extension contracts", false, "skipped because unified config failed"));
   }
 
-  checkPiDependency(checks, projectRoot);
+  checkPiDependency(checks, projectRoot, options.piEntry);
   const credentialSource = hasCredential(projectRoot, cwd, env);
   checks.push(check("Provider credential", Boolean(credentialSource), credentialSource ? `available via ${path.basename(credentialSource)}` : "OPENAI_API_KEY or local key is required"));
   checkWorkspaceAccess(checks, cwd);
@@ -185,7 +187,7 @@ export function runDoctor(options = {}) {
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const env = options.env ?? process.env;
   const run = options.spawnSyncImpl ?? spawnSync;
-  const startup = runStartupPreflight({ projectRoot, cwd, env, nodeVersion: options.nodeVersion });
+  const startup = runStartupPreflight({ projectRoot, cwd, env, nodeVersion: options.nodeVersion, piEntry: options.piEntry });
   const checks = [...startup.checks];
 
   let memoryConfig;

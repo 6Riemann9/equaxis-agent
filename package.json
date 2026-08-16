@@ -20,6 +20,7 @@
     "scripts/",
     "src/",
     "bridge/",
+    ".pi/",
     "vendor/agent-memory/memory",
     "vendor/agent-memory/tests",
     "vendor/agent-memory/pyproject.toml",

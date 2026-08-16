@@ -49,12 +49,23 @@
 
 ## Quick Start
 
+Install the CLI from npm (ships the runtime, memory core, and the bundled pi-web dashboards):
+
+```powershell
+npm install -g equaxis-agent
+$env:OPENAI_API_KEY = "<your-key>"   # or configure a provider key (see docs/PROVIDER.md)
+equaxis --approve                    # first run only
+```
+
+Run it from any project directory — Equaxis auto-detects `./.pi/equaxis.json` (walking up from the working directory) and falls back to the bundled template config. Open the dashboards inside the agent with `/pi-web`.
+
+**From source** (for contributors or pi-web customization):
+
 ```powershell
 git clone https://github.com/6Riemann9/equaxis-agent.git
 cd equaxis-agent
 npm run setup          # toolchain check + install + doctor
-$env:OPENAI_API_KEY = "<your-key>"
-npm run equaxis -- --approve   # first run only
+npm run equaxis -- --approve
 ```
 
 `npm run verify:full` = TypeScript check + Node tests + memory + evaluation suites.

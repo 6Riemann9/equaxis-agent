@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,15 +20,34 @@ import { createDefaultResourceProviderRegistry } from "../src/resource-provider-
 import { checkExtensionContracts, extensionPaths, formatExtensionContractReport } from "../src/extension-compat.mjs";
 import { formatEquaxisBanner, shouldShowBanner } from "../src/cli-banner.mjs";
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const piEntry = path.join(
-  projectRoot,
-  "node_modules",
-  "@earendil-works",
-  "pi-coding-agent",
-  "dist",
-  "cli.js"
-);
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * The active Equaxis root: the nearest ancestor of the working directory with
+ * a .pi/equaxis.json (a project configured to use Equaxis), falling back to
+ * the package's own bundled template config. This lets a globally installed
+ * `equaxis` command serve any project from anywhere.
+ */
+function findProjectRoot(start) {
+  let current = path.resolve(start);
+  while (true) {
+    if (fs.existsSync(path.join(current, ".pi", "equaxis.json"))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return packageRoot;
+    current = parent;
+  }
+}
+
+const projectRoot = findProjectRoot(process.cwd());
+const piEntry = (() => {
+  try {
+    // Resolves through the package's own dependency graph (works for global
+    // installs where deps live in the global node_modules, not under the package).
+    return createRequire(import.meta.url).resolve("@earendil-works/pi-coding-agent/dist/cli.js");
+  } catch {
+    return path.join(packageRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+  }
+})();
 let unifiedConfig;
 try {
   unifiedConfig = loadEquaxisConfig(projectRoot);
@@ -142,9 +162,9 @@ try {
   process.exit(1);
 }
 
-const startup = runStartupPreflight({ projectRoot, cwd: process.cwd(), env: process.env });
+const startup = runStartupPreflight({ projectRoot, cwd: process.cwd(), env: process.env, piEntry });
 if (!startup.ok) {
-  const report = runDoctor({ projectRoot, cwd: process.cwd(), env: process.env });
+  const report = runDoctor({ projectRoot, cwd: process.cwd(), env: process.env, piEntry });
   if (cliArgs.includes("--json")) console.log(JSON.stringify(report, null, 2));
   else console.error(formatDoctorReport(report));
   process.exit(1);
