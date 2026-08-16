@@ -13,6 +13,14 @@ All notable changes to Equaxis are documented here. Format follows [Keep a Chang
 - No vendor-pinned default model ships with the package: the bundled .pi/equaxis.json no longer sets memory.dream.provider/model (previously deepseek/deepseek-v4-flash), so dream consolidation uses the current session model, and an empty provider/model string is treated as "unset" instead of erroring.
 - Auto-wake (goalState.autoWake) no longer silently falls back to deepseek/deepseek-v4-flash: when enabled without an explicit provider/model it reports a config error and does not spawn, so users are never charged on a provider they did not choose.
 
+### Review round (4-way parallel review: governance / memory / subagents / extensions)
+- Native memory backend now answers `associative_search` and `graph_search` (the memory_recall --associative and memory_graph_search tools previously threw "Unknown memory action"); associative recall keeps anchors first and appends same-source neighbors.
+- Knowledge-graph facts are (s,p,o)-idempotent (deterministic triple id, ON CONFLICT DO NOTHING): at-least-once dream retries can no longer mint duplicates. Dream cursor is monotonic and prompt recording no longer depends on autoRecall, so dream consolidation always has the user-side history.
+- Memory governance never deletes records it cannot date: numeric/missing timestamps were previously parsed to NaN → age Infinity → instant deletion.
+- Governance: interpreters (node/python/npx/bun/tsc/sed/awk/…) are no longer allowlisted as read-only, so `node -e "fs.rmSync(...)"` can no longer bypass HITL/protectPaths; `rm -r` (recursion without force), split flags (`rm -r -f`) and `rmdir /s` now classify HIGH (previously MEDIUM, no approval). protectPaths / externalEditRoots / extraCommands union-merge instead of silently dropping defaults when a user lists one extra path. Subagent/adapters spawn detached on POSIX so process-tree cleanup reaches grandchildren.
+- Subagents: schema failures and non-zero subprocess exits are no longer retried (they were "unclassified" → retried, re-applying side effects after the subagent had run); subagent ids are sanitized in artifact paths and rejected by subagent_spawn (path traversal); a hung reviewer is aborted on timeout instead of leaking an orphan Pi subprocess.
+- Config/schema alignment: advisor.mode schema enum now matches the validator; dream.provider/model no longer demand minLength 1 ('' is a valid "use the session model" value); reliability.checkpoints.enabled is now a real configurable key (was always-on and unconfigurable).
+
 ## [0.3.5] - 2026-08-16
 
 ### Added
