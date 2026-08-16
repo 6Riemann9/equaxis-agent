@@ -150,6 +150,9 @@ export default function subagentEngine(pi: ExtensionAPI): void {
       schema: resultSchemaParameter
     }),
     async execute(_toolCallId, params) {
+      if (params.id !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(params.id)) {
+        throw new Error(`subagent id must be alphanumeric with . _ - (got ${JSON.stringify(params.id)})`);
+      }
       const spawned = runtime.spawn({
         id: params.id,
         label: params.label,

@@ -32,7 +32,10 @@ export function createPiJsonExecutor(options = {}) {
   function spillFailure(task, { code, stdout, stderr }) {
     try {
       fs.mkdirSync(artifactDir, { recursive: true });
-      const filePath = path.join(artifactDir, `${task.id}-attempt${task.attempt ?? 1}.out`);
+      // task.id is model-controlled via subagent_spawn; sanitize so a crafted
+      // id (../../x) cannot escape the artifact directory.
+      const safeId = String(task.id ?? "unknown").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 128);
+      const filePath = path.join(artifactDir, `${safeId}-attempt${task.attempt ?? 1}.out`);
       fs.writeFileSync(filePath, `--- pi json subprocess exited ${code} ---\n\n=== stdout ===\n${stdout}\n\n=== stderr ===\n${stderr}\n`, "utf8");
       return path.relative(projectRoot, filePath);
     } catch {
@@ -98,7 +101,11 @@ export function createPiJsonExecutor(options = {}) {
         const artifact = spillFailure(task, { code, stdout, stderr });
         const tail = stderr.trim().slice(-400);
         const detail = artifact ? ` (full output: ${artifact})` : "";
-        done(new Error(`pi json subprocess exited ${code}: ${tail}${detail}`));
+        // SUBAGENT_EXIT marks a post-dispatch failure: the subagent ran (its
+        // side effects may have applied) so the runtime must not retry it.
+        const error = new Error(`pi json subprocess exited ${code}: ${tail}${detail}`);
+        error.code = "SUBAGENT_EXIT";
+        done(error);
       });
         if (signal) {
           signal.addEventListener("abort", () => {

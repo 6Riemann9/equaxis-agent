@@ -51,6 +51,15 @@ export const AMBIGUOUS_RETRY_CODES = new Set([
   "UND_ERR_SOCKET"
 ]);
 
+// Post-dispatch deterministic failures: the subagent ran (side effects may
+// have applied) but its output failed to satisfy the contract. Retrying
+// would replay non-idempotent side effects for a result we already have —
+// report, never replay (no-replay boundary).
+export const POST_DISPATCH_CODES = new Set([
+  "SCHEMA",
+  "SUBAGENT_EXIT"
+]);
+
 export function classifyRetryFailure(error, { attempt = 0 } = {}) {
   const code = String(error?.code ?? "");
   if (code === "ABORT_ERR" || code === "TIMEOUT") {
@@ -61,6 +70,9 @@ export function classifyRetryFailure(error, { attempt = 0 } = {}) {
   }
   if (AMBIGUOUS_RETRY_CODES.has(code)) {
     return { retry: false, class: "ambiguous", reason: "transport failure after possible dispatch; refusing to replay non-idempotent side effects" };
+  }
+  if (POST_DISPATCH_CODES.has(code)) {
+    return { retry: false, class: "post_dispatch", reason: "subagent ran but its output failed the contract; refusing to replay side effects" };
   }
   return { retry: true, class: "unclassified", reason: `transient executor failure (attempt ${attempt + 1})` };
 }
@@ -488,7 +500,8 @@ export class SubagentRuntime {
   }
 
   /** Independent reviewer pass (oh-my-opencode dual-review gate). */
-  async #runReview(task, result) {    const reviewTask = {
+  async #runReview(task, result) {
+    const reviewTask = {
       id: `review-${task.id}`,
       label: `review:${task.label}`,
       prompt: `${task.reviewPrompt}\n\n--- result to review ---\n${String(typeof result === "string" ? result : JSON.stringify(result)).slice(0, 12000)}`,
@@ -500,14 +513,22 @@ export class SubagentRuntime {
     };
     // The review runs under its own timeout (a hung reviewer must not hold
     // the concurrency slot or block wait() forever) and honors cancellation.
+    // The reviewer child is aborted on timeout so it cannot linger as an
+    // orphan after the race is lost.
+    const reviewController = new AbortController();
+    const onParentAbort = () => reviewController.abort(task.controller.signal.reason);
+    task.controller.signal.addEventListener("abort", onParentAbort, { once: true });
     const reviewTimeoutMs = reviewTask.timeoutMs;
     let timeoutHandle = null;
     const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => reject(new Error("review timed out")), reviewTimeoutMs);
+      timeoutHandle = setTimeout(() => {
+        reviewController.abort("review timed out");
+        reject(new Error("review timed out"));
+      }, reviewTimeoutMs);
     });
     try {
       const reviewResult = await Promise.race([
-        this.executor(reviewTask, { signal: task.controller.signal }),
+        this.executor(reviewTask, { signal: reviewController.signal }),
         timeoutPromise
       ]);
       // Production executor resolves the transport wrapper {ok, output, ...};
@@ -528,6 +549,7 @@ export class SubagentRuntime {
       return { status: "error", verdict: null, issues: [`review failed: ${String(error?.message ?? error)}`] };
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      task.controller.signal.removeEventListener("abort", onParentAbort);
     }
   }
 
