@@ -11,8 +11,14 @@ test("defaults → global → project merge order and provenance", (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-layers-home-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  const originalHome = process.env.USERPROFILE;
+  // os.homedir() reads USERPROFILE on Windows but $HOME on POSIX, and caches
+  // its result for the process — both must be redirected (and the first
+  // os.homedir() call in this process happens inside loadEquaxisConfigLayers,
+  // i.e. after this mutation).
+  const originalWinHome = process.env.USERPROFILE;
+  const originalPosixHome = process.env.HOME;
   process.env.USERPROFILE = home;
+  process.env.HOME = home;
 
   fs.mkdirSync(path.join(root, ".pi"), { recursive: true });
   fs.mkdirSync(path.join(home, ".equaxis"), { recursive: true });
@@ -38,8 +44,10 @@ test("defaults → global → project merge order and provenance", (t) => {
     assert.equal(layers.effective.skills.enabled, false); // global layer applied
     assert.equal(layers.effective.reliability.mode, "audit");
   } finally {
-    if (originalHome === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = originalHome;
+    if (originalWinHome === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalWinHome;
+    if (originalPosixHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalPosixHome;
   }
 });
 
