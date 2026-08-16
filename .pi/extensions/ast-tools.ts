@@ -62,7 +62,7 @@ export default function astToolsExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     context = ctx;
     services.configure(ctx.cwd);
-    services.status.set(ctx, "equaxis-ast", "AST tools ready");
+    services.status.set(ctx, "equaxis-ast", "AST ready");
     trace("ast_tools_started", {});
   });
 }

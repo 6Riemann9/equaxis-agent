@@ -302,7 +302,7 @@ export default function protocolToolsExtension(pi: ExtensionAPI): void {
   }
 
   function updateStatus(ctx: ExtensionContext): void {
-    services.status.set(ctx, "equaxis-protocol", "Protocol tools ready");
+    services.status.set(ctx, "equaxis-protocol", "Protocols ready");
   }
 
   pi.registerTool({
