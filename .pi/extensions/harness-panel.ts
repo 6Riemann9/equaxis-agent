@@ -51,8 +51,8 @@ export default function harnessPanelExtension(pi: ExtensionAPI) {
 			(_tui, theme) => ({
 				invalidate() {},
 				render(width: number) {
-					const header = theme.fg("accent", theme.bold("Harness Flow")) + theme.fg("dim", "  /harness-panel toggle | /harness-clear clear");
-					const lines = [header];
+					const header = theme.fg("accent", theme.bold("Harness Flow")) + theme.fg("dim", "  /harness-panel toggle · /harness-clear clear");
+					const lines = [header, theme.fg("borderMuted", "─".repeat(Math.max(1, width)))];
 					for (const event of snapshot.slice(-12)) {
 						const marker = colorMarker(theme, event.level);
 						const id = theme.fg("dim", `${String(event.seq).padStart(3, "0")} ${event.time}`);
@@ -274,8 +274,8 @@ function levelMarker(level: Level): string {
 }
 
 function colorMarker(theme: ExtensionContext["ui"]["theme"], level: Level): string {
-	if (level === "ok") return theme.fg("success", "+");
+	if (level === "ok") return theme.fg("success", "✓");
 	if (level === "warn") return theme.fg("warning", "!");
-	if (level === "error") return theme.fg("error", "x");
-	return theme.fg("accent", ">");
+	if (level === "error") return theme.fg("error", "✗");
+	return theme.fg("accent", "›");
 }

@@ -282,14 +282,30 @@ export default function uiCustomization(pi: ExtensionAPI) {
             columns(theme.fg("muted", usage), theme.fg("muted", git), width),
           ];
 
-          // Extension statuses render after the two dashboard lines, one per row.
+          // Extension statuses render compactly after the dashboard lines,
+          // grouped on shared lines with the same "·" separator used inside
+          // the Equaxis status, wrapping at the terminal width instead of
+          // one row per status (which stretched the bar into a tall stack).
           const statuses = footerData.getExtensionStatuses();
-          const statusLines = Array.from(statuses.entries())
+          const statusTexts = Array.from(statuses.entries())
             .sort(([a], [b]) => a.localeCompare(b))
-            .flatMap(([, text]) => text.split("\n"));
-          for (const statusLine of statusLines) {
+            .map(([, text]) => text.split("\n")[0]);
+          const separator = " · ";
+          let current = "";
+          for (const text of statusTexts) {
+            const candidate = current ? `${current}${separator}${text}` : text;
+            if (current && visibleWidth(candidate) > width) {
+              lines.push(
+                truncateToWidth(current, width, theme.fg("dim", "...")),
+              );
+              current = text;
+            } else {
+              current = candidate;
+            }
+          }
+          if (current) {
             lines.push(
-              truncateToWidth(statusLine, width, theme.fg("dim", "...")),
+              truncateToWidth(current, width, theme.fg("dim", "...")),
             );
           }
 
