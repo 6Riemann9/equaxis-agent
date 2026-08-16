@@ -131,3 +131,76 @@ test("dispatch covers the full action surface", async (t) => {
   assert.equal((await dispatchMemoryAction(core, "repair", {})).drawers, 0);
   await assert.rejects(dispatchMemoryAction(core, "nope"), /Unknown memory action/);
 });
+
+test("addFact is idempotent: re-adding the same triple never duplicates", (t) => {
+  const root = tempRoot(t);
+  const core = new NativeMemoryCore({ rootDir: root });
+  const first = core.addFact({ subject: "pi", predicate: "powers", object: "equaxis" });
+  const second = core.addFact({ subject: "PI", predicate: "powers", object: "Equaxis" });
+  assert.equal(first.triple.triple_id, second.triple.triple_id, "deterministic triple id");
+  assert.equal(core.status().knowledge_graph.triples, 1, "single row despite at-least-once retry");
+  assert.equal(core.queryEntity("pi").facts.length, 1);
+});
+
+test("setDreamCursor is monotonic: a stale writer cannot roll the cursor back", (t) => {
+  const root = tempRoot(t);
+  const core = new NativeMemoryCore({ rootDir: root });
+  core.recordUser("s1", "a");
+  core.recordUser("s1", "b");
+  core.setDreamCursor(2);
+  const stale = core.setDreamCursor(1);
+  assert.equal(stale.dream_cursor, 2, "lower cursor ignored");
+  assert.equal(core.pendingHistory({}).dream_cursor, 2);
+});
+
+test("graph_search BFS with decay, undirected edges and caps", (t) => {
+  const root = tempRoot(t);
+  const core = new NativeMemoryCore({ rootDir: root });
+  core.addFact({ subject: "a", predicate: "links", object: "b" });
+  core.addFact({ subject: "b", predicate: "links", object: "c" });
+
+  const direct = core.graphSearch({ seeds: ["a"], max_hops: 2 });
+  assert.equal(direct.visited, 3);
+  const names = Object.fromEntries(direct.nodes.map((node) => [node.name, node.score]));
+  assert.equal(names.a, 1);
+  assert.equal(names.b, 0.5);
+  assert.equal(names.c, 0.25);
+
+  // undirected: seeding the middle node reaches both directions
+  const middle = core.graphSearch({ seeds: ["B"], max_hops: 1 });
+  assert.equal(middle.visited, 3);
+
+  // min_score cutoff and empty seeds
+  const cutoff = core.graphSearch({ seeds: ["a"], max_hops: 3, min_score: 0.4 });
+  assert.deepEqual(cutoff.nodes.map((node) => node.name).sort(), ["a", "b"]);
+  assert.deepEqual(core.graphSearch({ seeds: [] }), { nodes: [], edges: [], visited: 0 });
+});
+
+test("associative_search expands along source edges with anchor priority", async (t) => {
+  const root = tempRoot(t);
+  const core = new NativeMemoryCore({ rootDir: root });
+  await core.remember({ wing: "w", room: "r", content: "deploy pipeline runs nightly", source_file: "ci.md" });
+  await core.remember({ wing: "w", room: "r", content: "the pipeline retries on failure", source_file: "ci.md" });
+  await core.remember({ wing: "w", room: "r", content: "deploy pipeline uploads artifacts", source_file: "f1.md" });
+  await core.remember({ wing: "w", room: "r", content: "deploy pipeline tags releases", source_file: "f2.md" });
+  await core.remember({ wing: "w", room: "r", content: "deploy pipeline rolls back", source_file: "f3.md" });
+  await core.remember({ wing: "w", room: "r", content: "deploy pipeline pings slack", source_file: "f4.md" });
+  await core.remember({ wing: "w", room: "r", content: "deploy pipeline builds images", source_file: "f5.md" });
+  await core.remember({ wing: "w", room: "r", content: "unrelated note about weather", source_file: "other.md" });
+
+  const result = await core.associativeSearchAsync({ query: "deploy pipeline nightly", limit: 2 });
+  const contents = result.matches.map((match) => match.content);
+  assert.ok(contents[0].includes("nightly"), "anchor ranks first");
+  assert.ok(contents.some((item) => item.includes("retries")), "same-source evidence recollected");
+  assert.ok(contents.length >= 3, `anchors + expansion, got ${contents.length}`);
+  assert.ok(!contents.some((item) => item.includes("weather")), "foreign-source item not recalled");
+  const expansionIndex = contents.findIndex((item) => item.includes("retries"));
+  assert.ok(result.matches[0].score > result.matches[expansionIndex].score, "anchor score above expansion");
+
+  // dispatch-level: the protocol actions the extension tools call resolve
+  const viaDispatch = await dispatchMemoryAction(core, "associative_search", { query: "deploy pipeline nightly", limit: 2 });
+  assert.ok(viaDispatch.matches.some((match) => match.content.includes("retries")));
+  const graphViaDispatch = await dispatchMemoryAction(core, "graph_search", { seeds: ["a"], max_hops: 1 });
+  assert.equal(graphViaDispatch.visited, 1);
+  assert.equal(graphViaDispatch.nodes[0].name, "a");
+});

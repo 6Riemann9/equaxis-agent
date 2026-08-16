@@ -6,9 +6,18 @@ import { redactTraceValue } from "./trace-store.mjs";
 const DEFAULT_RETENTION_DAYS = { hot: 3650, warm: 365, cold: 180 };
 
 function ageDays(record, now) {
-  const stamp = Date.parse(record.updatedAt ?? record.createdAt ?? 0);
-  if (!Number.isFinite(stamp)) return Infinity;
-  return Math.max(0, Math.floor((now - stamp) / 86_400_000));
+  const stamp = record.updatedAt ?? record.createdAt;
+  // Accept both ISO strings and epoch-millis numbers (timestamp() semantics).
+  // Unknown/missing timestamps are treated as fresh (age 0): governance must
+  // never delete memories it cannot date — silent data loss is worse than a
+  // record lingering a cycle.
+  const parsed = stamp === undefined || stamp === null
+    ? NaN
+    : typeof stamp === "number"
+      ? stamp
+      : Date.parse(stamp);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.floor((now - parsed) / 86_400_000));
 }
 
 function normalizeRetention(retentionDays = {}) {

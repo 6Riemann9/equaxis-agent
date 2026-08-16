@@ -430,8 +430,10 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     let context = "";
     if (config.autoRecall) {
-      // Only autoRecall needs the bridge up front. Without it, the Python
-      // bridge stays dormant until a memory tool or /memory command is used.
+      // Only autoRecall needs the bridge up front for context retrieval.
+      // Prompt recording is NOT gated on it: dream consolidation needs the
+      // user side of history even when autoRecall is off, and the native
+      // backend is in-process (no spawn cost).
       try {
         const memory = await ensureBridge(ctx);
         // NOTE: the context action composes the full memory snapshot; the
@@ -453,25 +455,25 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
         lastDiagnostic = String(error);
         trace(ctx, "memory_context_failed", { error: String(error) });
       }
+    }
 
-      const promptKey = `${sessionId}:${ctx.sessionManager.getLeafId() ?? "root"}:${event.prompt}`;
-      if (promptKey !== lastRecordedPromptKey && !containsSecretLikeInput({ content: event.prompt })) {
-        try {
-          // ensureBridge is idempotent: the bridge is already running here.
-          const memory = await ensureBridge(ctx);
-          await memory.request("record_user", {
-            session_id: sessionId,
-            content: event.prompt.slice(0, config.maxStoredMessageChars)
-          }, { signal: ctx.signal });
-          lastRecordedPromptKey = promptKey;
-          trace(ctx, "memory_user_recorded", { chars: Math.min(event.prompt.length, config.maxStoredMessageChars) });
-        } catch (error) {
-          lastDiagnostic = String(error);
-          trace(ctx, "memory_user_record_failed", { error: String(error) });
-        }
-      } else if (promptKey !== lastRecordedPromptKey) {
-        trace(ctx, "memory_user_record_skipped", { reason: "possible_raw_secret" });
+    const promptKey = `${sessionId}:${ctx.sessionManager.getLeafId() ?? "root"}:${event.prompt}`;
+    if (promptKey !== lastRecordedPromptKey && !containsSecretLikeInput({ content: event.prompt })) {
+      try {
+        // ensureBridge is idempotent: the bridge is already running here.
+        const memory = await ensureBridge(ctx);
+        await memory.request("record_user", {
+          session_id: sessionId,
+          content: event.prompt.slice(0, config.maxStoredMessageChars)
+        }, { signal: ctx.signal });
+        lastRecordedPromptKey = promptKey;
+        trace(ctx, "memory_user_recorded", { chars: Math.min(event.prompt.length, config.maxStoredMessageChars) });
+      } catch (error) {
+        lastDiagnostic = String(error);
+        trace(ctx, "memory_user_record_failed", { error: String(error) });
       }
+    } else if (promptKey !== lastRecordedPromptKey) {
+      trace(ctx, "memory_user_record_skipped", { reason: "possible_raw_secret" });
     }
 
     const memoryInstructions = `

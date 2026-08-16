@@ -308,6 +308,86 @@ export class NativeMemoryCore {
     };
   }
 
+  /**
+   * Associative recall (RippleMem structural channel): anchors from the
+   * plain search rank first, then same-source neighbors (source_file edge)
+   * are appended by raw score, up to `limit` extra matches. Absolute-score
+   * re-ranking with a fixed penalty can never surface a non-anchor item
+   * (it would already rank above the anchor tail), so provenance expansion
+   * is additive: anchors stay first by construction, scattered same-source
+   * evidence gets recollected. Reading-side soft enhancement: expansion
+   * errors only affect ranking.
+   */
+  async associativeSearchAsync({ query, wing, room, limit = 5, anchorMultiplier = 3 } = {}) {
+    const queryTokens = tokenize(query);
+    const inScope = (drawer) => (!wing || drawer.wing === wing) && (!room || drawer.room === room);
+    const scoped = (await this.#scoreDrawers(query, queryTokens)).filter(({ drawer }) => inScope(drawer));
+    if (scoped.length === 0) return { matches: [] };
+    const ranked = [...scoped].sort((left, right) => right.score - left.score);
+    const anchors = ranked.slice(0, Math.min(limit * anchorMultiplier, 30));
+    const matches = anchors.map(({ drawer, score }) => ({
+      id: drawer.id, content: drawer.content, metadata: this.#matchMetadata(drawer), score: Math.max(0, score)
+    }));
+    const seen = new Set(matches.map((match) => match.id));
+    const sourceOf = new Set(anchors.map(({ drawer }) => drawer.source_file).filter(Boolean));
+    const expansions = ranked
+      .filter(({ drawer }) => !seen.has(drawer.id) && sourceOf.has(drawer.source_file))
+      .slice(0, Math.min(limit, 20))
+      .map(({ drawer, score }) => ({
+        id: drawer.id, content: drawer.content, metadata: this.#matchMetadata(drawer), score: Math.max(0, score)
+      }));
+    return { matches: [...matches, ...expansions] };
+  }
+
+  #matchMetadata(drawer) {
+    return { wing: drawer.wing, room: drawer.room, hall: drawer.hall, source_file: drawer.source_file, filed_at: drawer.filed_at };
+  }
+
+  /**
+   * Multi-hop graph retrieval: BFS from seed entities over current facts,
+   * undirected, per-hop score decay, visited-node cap and min-score cutoff.
+   * Mirrors the Python knowledge-graph graph_search (TencentDB wiki analog).
+   */
+  graphSearch({ seeds = [], max_hops: maxHops = 2, hop_decay: hopDecay = 0.5, min_score: minScore = 0.05, max_nodes: maxNodes = 100 } = {}) {
+    const seedNames = [...new Set((seeds ?? []).map((seed) => normalizeEntity(seed)).filter(Boolean))];
+    if (seedNames.length === 0) return { nodes: [], edges: [], visited: 0 };
+    const db = this.#kg();
+    try {
+      this.#kgInitialize(db);
+      const rows = db.prepare("SELECT subject, predicate, object FROM triples WHERE valid_to IS NULL").all();
+      const byName = new Map();
+      for (const row of rows) {
+        for (const name of [row.subject, row.object]) {
+          if (!byName.has(name)) byName.set(name, []);
+          byName.get(name).push(row);
+        }
+      }
+      const visited = new Map();
+      const edges = [];
+      const queue = seedNames.map((name) => [name, 0]);
+      while (queue.length > 0 && visited.size < maxNodes) {
+        const [name, depth] = queue.shift();
+        if (visited.has(name) || depth > maxHops) continue;
+        const score = hopDecay ** depth;
+        if (score < minScore) continue;
+        visited.set(name, { name, score: Math.round(score * 10000) / 10000, depth });
+        for (const triple of byName.get(name) ?? []) {
+          edges.push({ from: triple.subject, predicate: triple.predicate, to: triple.object, depth: depth + 1 });
+          const neighbor = triple.subject === name ? triple.object : triple.subject;
+          if (!visited.has(neighbor)) queue.push([neighbor, depth + 1]);
+        }
+      }
+      const cappedEdges = edges.slice(0, maxNodes * 8);
+      return {
+        nodes: [...visited.values()].sort((left, right) => right.score - left.score || String(left.name).localeCompare(String(right.name))),
+        edges: cappedEdges.sort((left, right) => left.depth - right.depth || String(left.from).localeCompare(String(left.predicate))),
+        visited: visited.size
+      };
+    } finally {
+      db.close();
+    }
+  }
+
   async remember({ wing, room, content, source_file = "equaxis", hall = "hall_general", metadata = {} }) {
     if (!wing || !room) throw new Error("wing and room are required");
     const id = drawerId(wing, room, content);
@@ -359,7 +439,10 @@ export class NativeMemoryCore {
     const objectName = normalizeEntity(object);
     const predicateName = String(predicate ?? "").trim();
     if (!subjectName || !predicateName || !objectName) throw new Error("subject, predicate and object are required");
-    const tripleId = `t_${sha256(`${subjectName}\u0000${predicateName}\u0000${objectName}\u0000${nowIso()}`).slice(0, 24)}`;
+    // Deterministic id from (s, p, o): re-adding the same fact is a no-op,
+    // so at-least-once dream retries can never mint duplicate triples
+    // (mirrors the Python core's (s,p,o) idempotency).
+    const tripleId = `t_${sha256(`${subjectName}\u0000${predicateName}\u0000${objectName}`).slice(0, 24)}`;
     const db = this.#kg();
     try {
       this.#kgInitialize(db);
@@ -373,7 +456,8 @@ export class NativeMemoryCore {
       upsertEntity.run(subjectName, subjectName, now);
       upsertEntity.run(objectName, objectName, now);
       const insert = db.prepare(
-        "INSERT INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, metadata, extracted_at) VALUES (?, ?, ?, ?, NULL, NULL, 1.0, ?, ?)"
+        "INSERT INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, metadata, extracted_at) VALUES (?, ?, ?, ?, NULL, NULL, 1.0, ?, ?) " +
+        "ON CONFLICT(id) DO NOTHING"
       );
       insert.run(tripleId, subjectName, predicateName, objectName, JSON.stringify(metadata), now);
     } finally {
@@ -560,8 +644,11 @@ export class NativeMemoryCore {
 
   setDreamCursor(cursor) {
     if (!Number.isInteger(cursor) || cursor < 0) throw new Error("cursor must be a non-negative integer");
-    this.#writeInt(this.dreamCursorPath, cursor);
-    return { ok: true, dream_cursor: cursor };
+    // Monotonic: a stale writer must never roll the cursor back, or pending
+    // history would grow and re-process already-dreamed entries.
+    const next = Math.max(this.#readInt(this.dreamCursorPath), cursor);
+    this.#writeInt(this.dreamCursorPath, next);
+    return { ok: true, dream_cursor: next };
   }
 }
 
@@ -582,6 +669,8 @@ export async function dispatchMemoryAction(core, action, payload = {}) {
     case "record_assistant": return core.recordAssistant(payload.session_id, payload.content);
     case "context": return core.buildContext(payload);
     case "search": return core.searchAsync(payload);
+    case "associative_search": return core.associativeSearchAsync(payload);
+    case "graph_search": return core.graphSearch(payload);
     case "remember": return core.remember(payload);
     case "recall": return core.recall(payload);
     case "add_fact": return core.addFact(payload);
