@@ -5,6 +5,7 @@ import { createEvalLoopFromTrace } from "./eval-loop.mjs";
 import { VersionStore } from "./version-store.mjs";
 import { discoverProtocolAdapters } from "./protocol-adapters.mjs";
 import { evaluateRuntimeGates } from "./runtime-gates.mjs";
+import { makeUiKit } from "./ui-kit.mjs";
 
 function fileInfo(projectRoot, relativePath) {
   const absolute = path.resolve(projectRoot, relativePath);
@@ -92,7 +93,10 @@ export function buildRuntimeDashboard(options = {}) {
   };
 }
 
-export function formatRuntimeDashboard(dashboard) {
+export function formatRuntimeDashboard(dashboard, options = {}) {
+  if (options?.color) {
+    return renderRuntimeDashboardLines(dashboard, makeUiKit({ color: true })).join("\n");
+  }
   const lines = ["Equaxis runtime dashboard", `Runtime: ${dashboard.projectRoot}`, `Health: ${dashboard.health.ok ? "READY" : "NOT READY"}`];
   const failing = Array.isArray(dashboard.health.failing) ? dashboard.health.failing : [];
   if (failing.length) lines.push(`Failing: ${failing.join(", ")}`);
@@ -108,4 +112,32 @@ export function formatRuntimeDashboard(dashboard) {
   lines.push(`Protocol trace: ${dashboard.runtimeFiles.protocolTrace.exists ? `${dashboard.runtimeFiles.protocolTrace.bytes} bytes` : "missing"}`);
   lines.push(`Subagent events: ${dashboard.runtimeFiles.subagentEvents.exists ? `${dashboard.runtimeFiles.subagentEvents.bytes} bytes` : "missing"}`);
   return lines.join("\n");
+}
+
+/**
+ * Themed per-line rendering of the same dashboard data, shared by the CLI
+ * text output and the TUI full-screen viewer (dashboard-command.ts). Kept in
+ * lockstep with formatRuntimeDashboard so both backends show identical
+ * content with the styling handled by the caller-supplied kit.
+ */
+export function renderRuntimeDashboardLines(dashboard, kit = makeUiKit({ color: true })) {
+  const lines = [
+    kit.paint("accent", kit.bold("Equaxis runtime dashboard")),
+    kit.kv("Runtime", dashboard.projectRoot),
+    kit.status(dashboard.health.ok ? "ok" : "error", `Health: ${dashboard.health.ok ? "READY" : "NOT READY"}`)
+  ];
+  const failing = Array.isArray(dashboard.health.failing) ? dashboard.health.failing : [];
+  if (failing.length) lines.push(kit.kv("Failing", failing.join(", ")));
+  if (dashboard.runtime) lines.push(kit.kv("Mode", dashboard.runtime.profile));
+  if (dashboard.reliability) lines.push(kit.kv("Reliability", `${dashboard.reliability.mode}; approvals=highRiskBash:${dashboard.reliability.approvals.highRiskBash ? "on" : "off"}, externalEdit:${dashboard.reliability.approvals.externalEditPolicy}; trace=${dashboard.reliability.traceDir}`));
+  if (dashboard.subagents) lines.push(kit.kv("Subagents", `${dashboard.subagents.enabled ? "enabled" : "disabled"}; max=${dashboard.subagents.maxConcurrent}; persistence=${dashboard.subagents.persistence ? "on" : "off"}; isolation=${dashboard.subagents.isolation ? "on" : "off"}`));
+  if (dashboard.memory) lines.push(kit.kv("Memory", `${dashboard.memory.enabled ? "enabled" : "disabled"}; autoRecall=${dashboard.memory.autoRecall ? "on" : "off"}; root=${dashboard.memory.rootDir}`));
+  if (dashboard.protocols) lines.push(kit.kv("Protocols", `lsp=${dashboard.protocols.lsp.status}; dap=${dashboard.protocols.dap.status}`));
+  lines.push(kit.status(dashboard.gates.ok ? "ok" : "error", `Gates: ${dashboard.gates.ok ? "READY" : "NOT READY"}${dashboard.gates.failing?.length ? ` (${dashboard.gates.failing.join(", ")})` : ""}`));
+  lines.push(kit.kv("Evaluation", `attempts=${dashboard.evaluation.attempts}; successRate=${dashboard.evaluation.successRate ?? "n/a"}; candidates=${dashboard.evaluation.candidates}`));
+  if (dashboard.memoryGovernance) lines.push(kit.kv("Memory governance", `${dashboard.memoryGovernance.enabled ? "enabled" : "disabled"}; audit=${dashboard.memoryGovernance.auditLog.exists ? `${dashboard.memoryGovernance.auditLog.bytes} bytes` : "missing"}`));
+  lines.push(kit.kv("Versions", `total=${dashboard.versions.total}`));
+  lines.push(kit.kv("Protocol trace", dashboard.runtimeFiles.protocolTrace.exists ? `${dashboard.runtimeFiles.protocolTrace.bytes} bytes` : "missing"));
+  lines.push(kit.kv("Subagent events", dashboard.runtimeFiles.subagentEvents.exists ? `${dashboard.runtimeFiles.subagentEvents.bytes} bytes` : "missing"));
+  return lines;
 }
