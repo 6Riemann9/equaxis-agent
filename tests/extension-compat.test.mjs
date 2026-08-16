@@ -74,6 +74,36 @@ test("reports optional extension load failure as degradation", () => {
   assert.ok(result.warnings.some((item) => item.message.includes("factory failed")));
 });
 
+test("treats third-party Pi extensions (no contract) as notes, not warnings", () => {
+  const thirdParty = {
+    path: "/project/.pi/extensions/community.ts",
+    tools: new Map(),
+    commands: new Map(),
+    flags: new Map(),
+    handlers: new Map()
+  };
+  const result = inspectLoadedExtensions(
+    {
+      extensions: [thirdParty],
+      errors: [{ path: "/project/.pi/extensions/broken-community.ts", error: "factory failed" }],
+      runtime: {}
+    },
+    {
+      errors: [],
+      warnings: [],
+      contracts: []
+    }
+  );
+
+  // With no Equaxis contracts in play, the runtime stays healthy...
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.errors, []);
+  // ...and Pi-ecosystem extensions are reported as notes, never as warnings.
+  assert.deepEqual(result.warnings, []);
+  assert.ok(result.notes.some((item) => item.message.includes("has no Equaxis contract")));
+  assert.ok(result.notes.some((item) => item.message.includes("uncontracted extension failed to load")));
+});
+
 test("detects a loaded extension that violates its declared capabilities", () => {
   const extension = {
     path: "/project/.pi/extensions/core.ts",
