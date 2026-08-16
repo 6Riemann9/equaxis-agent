@@ -627,9 +627,14 @@ export function globalEquaxisConfigPath() {
  *   defaults (bundled) → global (~/.equaxis/config.json) → project (.pi/equaxis.json)
  * The effective config is the fully merged and validated result the runtime
  * uses; the UI shows each layer so users can see where a value comes from.
+ *
+ * @param {string} cwd project directory
+ * @param {{ globalConfigPath?: string }} [options] override the global layer
+ *   path (tests redirect the user home without depending on os.homedir(),
+ *   which caches per process and reads different env vars per platform)
  */
-export function loadEquaxisConfigLayers(cwd) {
-  const globalPath = globalEquaxisConfigPath();
+export function loadEquaxisConfigLayers(cwd, options = {}) {
+  const globalPath = options.globalConfigPath ?? globalEquaxisConfigPath();
   const globalCustom = fs.existsSync(globalPath) ? parseJson(globalPath) : {};
   const projectPath = path.join(cwd, UNIFIED_CONFIG_FILE);
   const projectCustom = fs.existsSync(projectPath)

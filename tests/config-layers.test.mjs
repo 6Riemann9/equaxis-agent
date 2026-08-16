@@ -11,18 +11,11 @@ test("defaults → global → project merge order and provenance", (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-layers-home-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  // os.homedir() reads USERPROFILE on Windows but $HOME on POSIX, and caches
-  // its result for the process — both must be redirected (and the first
-  // os.homedir() call in this process happens inside loadEquaxisConfigLayers,
-  // i.e. after this mutation).
-  const originalWinHome = process.env.USERPROFILE;
-  const originalPosixHome = process.env.HOME;
-  process.env.USERPROFILE = home;
-  process.env.HOME = home;
 
   fs.mkdirSync(path.join(root, ".pi"), { recursive: true });
   fs.mkdirSync(path.join(home, ".equaxis"), { recursive: true });
-  fs.writeFileSync(path.join(home, ".equaxis", "config.json"), JSON.stringify({
+  const globalConfigPath = path.join(home, ".equaxis", "config.json");
+  fs.writeFileSync(globalConfigPath, JSON.stringify({
     memory: { recallLimit: 7 },
     skills: { enabled: false }
   }), "utf8");
@@ -34,21 +27,17 @@ test("defaults → global → project merge order and provenance", (t) => {
     memory: { enabled: true, pythonCommand: "python", rootDir: ".equaxis/memory", autoRecall: true, recallLimit: 9 }
   }), "utf8");
 
-  try {
-    const layers = loadEquaxisConfigLayers(root);
-    // project wins over global wins over defaults
-    assert.equal(layers.effective.memory.recallLimit, 9);
-    assert.equal(getAtPath(layers.global, "memory.recallLimit"), 7);
-    assert.equal(getAtPath(layers.project, "memory.recallLimit"), 9);
-    assert.equal(getAtPath(layers.project, "skills.enabled"), undefined);
-    assert.equal(layers.effective.skills.enabled, false); // global layer applied
-    assert.equal(layers.effective.reliability.mode, "audit");
-  } finally {
-    if (originalWinHome === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = originalWinHome;
-    if (originalPosixHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalPosixHome;
-  }
+  // Global layer path is injected rather than redirected via home env vars:
+  // os.homedir() reads USERPROFILE on Windows but $HOME on POSIX and caches
+  // its result per process, so env-based redirection is not portable.
+  const layers = loadEquaxisConfigLayers(root, { globalConfigPath });
+  // project wins over global wins over defaults
+  assert.equal(layers.effective.memory.recallLimit, 9);
+  assert.equal(getAtPath(layers.global, "memory.recallLimit"), 7);
+  assert.equal(getAtPath(layers.project, "memory.recallLimit"), 9);
+  assert.equal(getAtPath(layers.project, "skills.enabled"), undefined);
+  assert.equal(layers.effective.skills.enabled, false); // global layer applied
+  assert.equal(layers.effective.reliability.mode, "audit");
 });
 
 test("setAtPath sets and deletes nested keys without mutating input", () => {
