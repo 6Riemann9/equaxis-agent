@@ -1,6 +1,6 @@
 {
   "name": "equaxis-agent",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": false,
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,9 @@
     "extension"
   ],
   "pi": {
-    "extensions": ["./.pi/extensions"]
+    "extensions": [
+      "./.pi/extensions"
+    ]
   },
   "files": [
     "scripts/",

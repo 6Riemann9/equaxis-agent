@@ -2,6 +2,12 @@
 
 All notable changes to Equaxis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [0.3.3] - 2026-08-16
+
+### Changed
+- Global CLI: the `equaxis` command resolves the active project config by walking up from the working directory (`.pi/equaxis.json`), falling back to the bundled template — usable from any project directory after `npm install -g equaxis-agent`.
+- Pi entry point resolves through the package dependency graph (createRequire), fixing global installs; doctor accepts an explicit piEntry.
+
 ## [0.3.2] - 2026-08-14
 
 ### Added
