@@ -95,6 +95,15 @@ This is an engineering harness around Pi, **not** an OS-level sandbox.
 
 [Architecture](docs/ARCHITECTURE.md) · [Policy](docs/POLICY.md) · [Memory](docs/MEMORY.md) · [Evaluation](docs/EVALUATION_ARCHITECTURE.md) · [Extension Interop](docs/EXTENSION_PACKAGING.md) · [中文版](README.zh-CN.md)
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop
+(the three verification suites), commit conventions, and the pull-request process.
+
+- 🐛 Bugs & feature ideas → [issues](https://github.com/6Riemann9/equaxis-agent/issues) (templates provided)
+- 🔒 Security issues → [SECURITY.md](SECURITY.md) (never a public issue)
+- 🆘 Help → [SUPPORT.md](SUPPORT.md)
+
 ## License
 
 MIT
