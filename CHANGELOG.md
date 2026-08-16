@@ -2,6 +2,13 @@
 
 All notable changes to Equaxis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [0.3.4] - 2026-08-16
+
+### Changed
+- Out-of-box provider selection: the shipped settings no longer pin a default provider/model or restrict enabledModels, so the model picker shows the full provider catalog and the user chooses in-session (/login or the pi-web Models panel) instead of setting env vars.
+- The CLI only forwards explicitly configured defaults (no hardcoded openai-inprior fallback) and prints a hint when no provider key is found.
+- Provider credential check is now a diagnostic in `equaxis --doctor`, not a startup gate — a fresh install can launch and pick a provider.
+
 ## [0.3.3] - 2026-08-16
 
 ### Changed

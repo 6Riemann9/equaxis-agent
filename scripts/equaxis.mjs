@@ -220,9 +220,18 @@ function readPiSettings() {
 const hasOption = (name) => cliArgs.some((arg) => arg === name || arg.startsWith(`${name}=`));
 const piSettings = readPiSettings();
 const modelArgs = [];
-if (!hasOption("--provider")) modelArgs.push("--provider", piSettings.defaultProvider ?? "openai-inprior");
-if (!hasOption("--model")) modelArgs.push("--model", piSettings.defaultModel ?? "gpt-5.5");
-if (!hasOption("--thinking")) modelArgs.push("--thinking", piSettings.defaultThinkingLevel ?? "xhigh");
+// Only force defaults that are explicitly configured: with no default
+// provider/model, Pi presents the full provider picker so the user can
+// choose (or /login) instead of being pinned to one vendor.
+if (!hasOption("--provider") && piSettings.defaultProvider) modelArgs.push("--provider", piSettings.defaultProvider);
+if (!hasOption("--model") && piSettings.defaultModel) modelArgs.push("--model", piSettings.defaultModel);
+if (!hasOption("--thinking") && piSettings.defaultThinkingLevel) modelArgs.push("--thinking", piSettings.defaultThinkingLevel);
+if (modelArgs.length === 0 && !hasOption("--model") && !hasOption("--provider") && !cliArgs.includes("--offline") && !cliArgs.includes("--list-models")) {
+  const hasKey = Boolean(process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
+  if (!hasKey) {
+    process.stderr.write("Equaxis: no provider key found — run /login inside the agent (or the Models panel in pi-web) to pick a provider.\n");
+  }
+}
 
 const result = spawnSync(
   process.execPath,

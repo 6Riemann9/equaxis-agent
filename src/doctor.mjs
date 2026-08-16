@@ -168,8 +168,6 @@ export function runStartupPreflight(options = {}) {
   }
 
   checkPiDependency(checks, projectRoot, options.piEntry);
-  const credentialSource = hasCredential(projectRoot, cwd, env);
-  checks.push(check("Provider credential", Boolean(credentialSource), credentialSource ? `available via ${path.basename(credentialSource)}` : "OPENAI_API_KEY or local key is required"));
   checkWorkspaceAccess(checks, cwd);
 
   return {
@@ -189,6 +187,9 @@ export function runDoctor(options = {}) {
   const run = options.spawnSyncImpl ?? spawnSync;
   const startup = runStartupPreflight({ projectRoot, cwd, env, nodeVersion: options.nodeVersion, piEntry: options.piEntry });
   const checks = [...startup.checks];
+  // Diagnostic, not a startup gate: a fresh install may still need /login.
+  const credentialSource = hasCredential(projectRoot, cwd, env);
+  checks.push(check("Provider credential", Boolean(credentialSource), credentialSource ? `available via ${path.basename(credentialSource)}` : "none configured — run /login or the pi-web Models panel to pick a provider"));
 
   let memoryConfig;
   try {

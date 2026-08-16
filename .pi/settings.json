@@ -1,13 +1,5 @@
 {
-  "defaultProvider": "openai-inprior",
-  "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "off",
-  "enabledModels": [
-    "openai-inprior/gpt-5.5",
-    "openai-inprior/gpt-5.6-sol",
-    "deepseek/deepseek-v4-flash",
-    "deepseek/deepseek-v4-pro"
-  ],
   "compaction": {
     "enabled": true,
     "reserveTokens": 100000,

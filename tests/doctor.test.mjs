@@ -91,7 +91,11 @@ test("startup preflight reads startup-facing config from the project root even w
   assert.equal(report.ok, false);
   assert.equal(report.checks.find((item) => item.name === "Unified config").detail.includes("profile=full"), true);
   assert.equal(report.checks.find((item) => item.name === "Extension contracts").status, false);
-  assert.equal(report.checks.find((item) => item.name === "Provider credential").status, false);
+  // Provider credential is a diagnostic, not a startup gate: a fresh install
+  // must be able to launch and pick a provider via /login.
+  assert.equal(report.checks.some((item) => item.name === "Provider credential"), false);
+  const doctor = runDoctor({ projectRoot: root, cwd, env: {}, nodeVersion: "22.19.0" });
+  assert.equal(doctor.checks.find((item) => item.name === "Provider credential").status, false);
 });
 
 test("doctor checks protocol tool declarations", (t) => {
