@@ -92,3 +92,38 @@ test("safety arrays union-merge instead of replacing defaults", (t) => {
   assert.ok(config.reliability.approval.externalEditRoots.includes("<workspace>"), "custom externalEditRoot kept");
   assert.ok(config.reliability.commandAllowlist.extraCommands.includes("equaxis"), "custom extraCommand kept");
 });
+
+test("reliability.checkpoints is configurable and advisor.mode follows the validator", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-layers-cp-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".pi"), { recursive: true });
+
+  // default: checkpoints enabled
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    runtime: { profile: "standard" },
+    extensions: { manifest: ".pi/extensions/contracts.json", enabled: [], disabled: [] }
+  }), "utf8");
+  assert.equal(loadEquaxisConfig(root).reliability.checkpoints.enabled, true);
+
+  // explicitly disabled is a legal key now (previously rejected as unknown)
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    runtime: { profile: "standard" },
+    extensions: { manifest: ".pi/extensions/contracts.json", enabled: [], disabled: [] },
+    reliability: { checkpoints: { enabled: false } },
+    advisor: { mode: "block_on_negative" }
+  }), "utf8");
+  const config = loadEquaxisConfig(root);
+  assert.equal(config.reliability.checkpoints.enabled, false, "checkpoints can be turned off");
+  assert.equal(config.advisor.mode, "block_on_negative", "validator-accepted advisor mode loads");
+
+  // the schema's old advisor.mode value ("review") must not load
+  fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
+    schemaVersion: 1,
+    runtime: { profile: "standard" },
+    extensions: { manifest: ".pi/extensions/contracts.json", enabled: [], disabled: [] },
+    advisor: { mode: "review" }
+  }), "utf8");
+  assert.throws(() => loadEquaxisConfig(root), /advisor\.mode/);
+});

@@ -30,6 +30,7 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
   reliability: {
     mode: "enforce",
     traceDir: ".pi/runtime",
+    checkpoints: { enabled: true },
     trace: { maxFileBytes: 5 * 1024 * 1024, maxFiles: 3 },
     protectPaths: [".env", ".git/", "node_modules/", "*.pem", "*.key"],
     eval: {
@@ -321,7 +322,7 @@ export function mergeConfig(base, custom) {
   const SUB_SECTIONS = [
     ["runtime", "services"], ["runtime", "gates"],
     ["reliability", "trace"], ["reliability", "approval"], ["reliability", "limits"], ["reliability", "toolRouting"], ["reliability", "eval"],
-    ["reliability", "costBrake"], ["reliability", "commandAllowlist"],
+    ["reliability", "costBrake"], ["reliability", "commandAllowlist"], ["reliability", "checkpoints"],
     ["protocols", "lsp"], ["protocols", "dap"],
     ["memory", "governance"], ["memory", "dream"], ["memory", "segmentation"],
     ["goalState", "defaultQuota"], ["goalState", "autoWake"],
@@ -357,6 +358,7 @@ export function mergeConfig(base, custom) {
       toolRouting: { ...base.reliability.toolRouting, ...(custom.reliability?.toolRouting ?? {}) },
       eval: { ...base.reliability.eval, ...(custom.reliability?.eval ?? {}) },
       costBrake: { ...base.reliability.costBrake, ...(custom.reliability?.costBrake ?? {}) },
+      checkpoints: { ...base.reliability.checkpoints, ...(custom.reliability?.checkpoints ?? {}) },
       commandAllowlist: {
         ...base.reliability.commandAllowlist,
         ...(custom.reliability?.commandAllowlist ?? {}),
@@ -467,6 +469,8 @@ export function validateEquaxisConfig(config, configPath = UNIFIED_CONFIG_FILE) 
   if (!Array.isArray(config.reliability.commandAllowlist.extraCommands) || config.reliability.commandAllowlist.extraCommands.some((item) => typeof item !== "string" || !item.trim())) {
     throw configError(configPath, "reliability.commandAllowlist.extraCommands", "must be an array of non-empty strings");
   }
+  assertRecord(config.reliability.checkpoints, configPath, "reliability.checkpoints");
+  assertBoolean(config.reliability.checkpoints.enabled, configPath, "reliability.checkpoints.enabled");
   assertRecord(config.reliability.costBrake, configPath, "reliability.costBrake");
   assertBoolean(config.reliability.costBrake.enabled, configPath, "reliability.costBrake.enabled");
   if (!Number.isFinite(config.reliability.costBrake.maxSessionCostUsd) || config.reliability.costBrake.maxSessionCostUsd < 0.01) {

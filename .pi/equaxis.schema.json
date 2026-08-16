@@ -336,6 +336,18 @@
               }
             }
           }
+        },
+        "checkpoints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
         }
       }
     },
@@ -462,12 +474,10 @@
               "maximum": 500
             },
             "provider": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "model": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             }
           }
         }
@@ -905,7 +915,7 @@
         },
         "mode": {
           "type": "string",
-          "enum": ["recommend", "review"]
+          "enum": ["recommend", "block_on_negative"]
         },
         "triggers": {
           "type": "array",
