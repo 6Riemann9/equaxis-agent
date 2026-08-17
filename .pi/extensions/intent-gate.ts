@@ -39,7 +39,7 @@ const DEFAULT_PATTERNS: IntentPattern[] = [
 export default function equaxisIntentGate(pi: ExtensionAPI): void {
   const services = createExtensionRuntimeServices({ cwd: process.cwd(), extensionId: "intent-gate", pi });
   const config = services.config.intentGate as IntentGateConfig | undefined;
-  const compiled = (config?.patterns ?? DEFAULT_PATTERNS)
+  const compiled = (config?.patterns?.length ? config.patterns : DEFAULT_PATTERNS)
     .filter((pattern) => config?.enabled !== false && pattern?.regex && pattern?.inject)
     // Bounded: regex length cap plus prompt-length cap keep pathological
     // user patterns (catastrophic backtracking) from stalling a turn.

@@ -348,6 +348,18 @@
               "type": "boolean"
             }
           }
+        },
+        "eval": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cohort": {
+              "type": "string"
+            },
+            "versionId": {
+              "type": "string"
+            }
+          }
         }
       }
     },
@@ -478,6 +490,25 @@
             },
             "model": {
               "type": "string"
+            }
+          }
+        },
+        "segmentation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "threshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "maxSegmentChars": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 100000
             }
           }
         }
@@ -821,6 +852,15 @@
               "type": "boolean"
             }
           }
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
         }
       }
     },
@@ -927,6 +967,38 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        }
+      }
+    },
+    "intentGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["regex", "inject"],
+            "properties": {
+              "regex": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "inject": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     }

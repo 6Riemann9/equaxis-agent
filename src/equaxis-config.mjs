@@ -397,8 +397,10 @@ export function mergeConfig(base, custom) {
       ...(custom.subagents ?? {}),
       budgets: { ...base.subagents.budgets, ...(custom.subagents?.budgets ?? {}) },
       persistence: { ...base.subagents.persistence, ...(custom.subagents?.persistence ?? {}) },
-      isolation: { ...base.subagents.isolation, ...(custom.subagents?.isolation ?? {}) }
-    }
+      isolation: { ...base.subagents.isolation, ...(custom.subagents?.isolation ?? {}) },
+      evidence: { ...base.subagents.evidence, ...(custom.subagents?.evidence ?? {}) }
+    },
+    intentGate: { ...base.intentGate, ...(custom.intentGate ?? {}) }
   };
 }
 

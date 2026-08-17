@@ -235,7 +235,11 @@ if (modelArgs.length === 0 && !hasOption("--model") && !hasOption("--provider") 
 
 const result = spawnSync(
   process.execPath,
-  [piEntry, ...extensionArgs, ...modelArgs, ...cliArgs],
+  // --no-extensions disables Pi's auto-discovery of .pi/extensions/*.ts
+  // so that only the explicit --extension paths from the manifest filter
+  // are loaded. Without this, runtime.profile and extensions.disabled
+  // have no effect on direct-mount extensions.
+  [piEntry, "--no-extensions", ...extensionArgs, ...modelArgs, ...cliArgs],
   {
     cwd: process.cwd(),
     env: process.env,
