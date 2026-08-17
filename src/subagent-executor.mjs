@@ -54,6 +54,9 @@ export function createPiJsonExecutor(options = {}) {
       worktreeCwd = await prepareWorktreeSandbox(projectRoot, task.id, { execImpl: options.gitImpl });
     }
     const runCwd = worktreeCwd ?? cwd;
+    // Track kill promise so we can await it before removing the worktree.
+    // Without this, removeWorktree can race against a dying process tree.
+    let killPromise = null;
     try {
       return await new Promise((resolve, reject) => {
         const spawnOptions = isolation.enabled === false
@@ -83,22 +86,25 @@ export function createPiJsonExecutor(options = {}) {
       let stdout = "";
       let stderr = "";
       let settled = false;
-      const done = (error, { kill = true } = {}) => {
+      const done = (error, { kill = true, spill = false } = {}) => {
         if (settled) return;
         settled = true;
         // Only kill the process tree on error/cancel/timeout paths.
         // On normal exit (code === 0) the child has already terminated and
         // its PID may have been recycled — killing it could hit an unrelated
         // process (Windows taskkill) or process group (POSIX -pid).
-        if (kill && child?.pid) void killProcessTree(child.pid);
+        if (kill && child?.pid) {
+          killPromise = killProcessTree(child.pid);
+        }
+        if (spill && (stdout || stderr)) spillFailure(task, { code: "aborted", stdout, stderr });
         if (error) return reject(error);
         resolve({ ok: true, id: task.id, label: task.label, output: stdout.trim(), stderr: stderr.trim() });
       };
       child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
       child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-      child.on("error", (error) => done(error));
+      child.on("error", (error) => done(error, { spill: true }));
       child.on("close", (code) => {
-        if (signal?.aborted) return done(new Error("cancelled"));
+        if (signal?.aborted) return done(new Error("cancelled"), { spill: true });
         if (code === 0) return done(undefined, { kill: false });
         const artifact = spillFailure(task, { code, stdout, stderr });
         const tail = stderr.trim().slice(-400);
@@ -109,14 +115,23 @@ export function createPiJsonExecutor(options = {}) {
         error.code = "SUBAGENT_EXIT";
         done(error);
       });
-        if (signal) {
+      if (signal) {
+        // If the signal is already aborted, the abort event already fired
+        // and addEventListener will never trigger — handle immediately.
+        if (signal.aborted) {
+          done(new Error("cancelled"), { spill: true });
+        } else {
           signal.addEventListener("abort", () => {
             if (child?.pid) void killProcessTree(child.pid, { signal: "SIGTERM" });
-            done(new Error("cancelled"));
+            done(new Error("cancelled"), { spill: true });
           }, { once: true });
         }
+      }
       });
     } finally {
+      // Await the kill promise before removing the worktree so the process
+      // tree is fully terminated and files are not locked (Windows).
+      if (killPromise) await killPromise;
       if (worktreeCwd) await removeWorktree(projectRoot, task.id, { execImpl: options.gitImpl });
     }
   };

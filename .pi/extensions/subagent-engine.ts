@@ -82,6 +82,7 @@ export default function subagentEngine(pi: ExtensionAPI): void {
     executor: createPiJsonExecutor({
       piEntry: config?.piEntry || defaultPiEntry,
       args: config?.jsonArgs ?? [],
+      projectRoot: services.paths.workspace,
       isolation: {
         enabled: config?.isolation?.enabled !== false,
         scrubEnv: config?.isolation?.scrubEnv,

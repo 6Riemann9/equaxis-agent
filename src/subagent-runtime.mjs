@@ -527,6 +527,9 @@ export class SubagentRuntime {
       }, reviewTimeoutMs);
     });
     try {
+      // Count the reviewer toward the concurrency cap so a burst of
+      // reviews cannot spawn unbounded child processes beyond maxConcurrent.
+      this.active += 1;
       const reviewResult = await Promise.race([
         this.executor(reviewTask, { signal: reviewController.signal }),
         timeoutPromise
@@ -548,8 +551,11 @@ export class SubagentRuntime {
       if (task.controller.signal.aborted) throw abortError(task.controller.signal.reason);
       return { status: "error", verdict: null, issues: [`review failed: ${String(error?.message ?? error)}`] };
     } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      clearTimeout(timeoutHandle);
       task.controller.signal.removeEventListener("abort", onParentAbort);
+      // Release the concurrency slot the reviewer occupied.
+      this.active = Math.max(0, this.active - 1);
+      this.#drain();
     }
   }
 
