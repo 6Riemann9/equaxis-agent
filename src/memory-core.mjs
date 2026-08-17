@@ -23,6 +23,28 @@ export const MEMORY_CORE_VERSION = "0.2.0-native";
 export const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 export const HALL_TYPES = ["hall_general", "hall_facts", "hall_events", "hall_discoveries", "hall_preferences", "hall_advice"];
 
+// Charset validation matching the Python bridge's validate_wing_room (validation.py:29-51).
+// Enforced at the native entry point so illegal values are rejected early rather than
+// silently persisted and causing cross-backend incompatibilities.
+export const MEMORY_SECTION_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+export const HALL_RE = /^hall_[a-zA-Z0-9_-]{1,32}$/;
+
+function validateSection(name, label) {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed || !MEMORY_SECTION_RE.test(trimmed)) {
+    throw new Error(`Invalid ${label}: "${name}" must match ${MEMORY_SECTION_RE}`);
+  }
+  return trimmed;
+}
+
+function validateHall(hall) {
+  const trimmed = String(hall ?? "").trim();
+  if (!HALL_RE.test(trimmed) || !HALL_TYPES.includes(trimmed)) {
+    throw new Error(`Invalid hall: "${hall}" must be one of ${HALL_TYPES.join(", ")}`);
+  }
+  return trimmed;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -69,6 +91,8 @@ function overlapScore(queryTokens, content) {
 }
 
 export class NativeMemoryCore {
+  #cachedMaxCursor;
+
   constructor({ rootDir, model = EMBEDDING_MODEL }) {
     this.rootDir = path.resolve(rootDir);
     this.model = model;
@@ -82,6 +106,7 @@ export class NativeMemoryCore {
     this.embedderPromise = null;
     this.embeddingReady = false;
     this.embeddingError = null;
+    this.#cachedMaxCursor = undefined;
     this.#ensureLayout();
     this.#loadDrawers();
   }
@@ -138,10 +163,18 @@ export class NativeMemoryCore {
   }
 
   appendHistory(sessionId, content) {
-    const entries = this.readHistory();
-    const maxCursor = entries.reduce((max, entry) => Math.max(max, Number(entry.cursor) || 0), 0);
-    const stored = this.#readInt(this.cursorPath);
-    const cursor = Math.max(stored, maxCursor) + 1;
+    // Cache maxCursor in memory: full readHistory() only on first call to
+    // calibrate, then increment locally.  Prevents O(n²) re-reads when
+    // many entries accumulate and avoids concurrent cursor collisions
+    // (each process tracks its own monotonic counter after the initial scan).
+    if (this.#cachedMaxCursor === undefined) {
+      const entries = this.readHistory();
+      const maxFromHistory = entries.reduce((max, entry) => Math.max(max, Number(entry.cursor) || 0), 0);
+      const stored = this.#readInt(this.cursorPath);
+      this.#cachedMaxCursor = Math.max(stored, maxFromHistory);
+    }
+    this.#cachedMaxCursor += 1;
+    const cursor = this.#cachedMaxCursor;
     const entry = { cursor, timestamp: nowIso(), content, session_id: sessionId, metadata: {} };
     fs.appendFileSync(this.historyPath, `${JSON.stringify(entry)}\n`, "utf8");
     this.#writeInt(this.cursorPath, cursor);
@@ -390,14 +423,17 @@ export class NativeMemoryCore {
 
   async remember({ wing, room, content, source_file = "equaxis", hall = "hall_general", metadata = {} }) {
     if (!wing || !room) throw new Error("wing and room are required");
-    const id = drawerId(wing, room, content);
+    const cleanWing = validateSection(wing, "wing");
+    const cleanRoom = validateSection(room, "room");
+    const cleanHall = validateHall(hall);
+    const id = drawerId(cleanWing, cleanRoom, content);
     const existing = this.drawers.find((drawer) => drawer.id === id);
     const embedding = await this.#embed(content);
     const record = {
       id,
-      wing,
-      room,
-      hall,
+      wing: cleanWing,
+      room: cleanRoom,
+      hall: cleanHall,
       content,
       source_file,
       chunk_index: 0,
@@ -501,10 +537,10 @@ export class NativeMemoryCore {
   updateMemory({ drawer_id, content, wing, room, hall, source_file }) {
     const drawer = this.drawers.find((entry) => entry.id === drawer_id);
     if (!drawer) throw new Error(`Unknown drawer: ${drawer_id}`);
+    if (wing !== undefined) drawer.wing = validateSection(wing, "wing");
+    if (room !== undefined) drawer.room = validateSection(room, "room");
+    if (hall !== undefined) drawer.hall = validateHall(hall);
     drawer.content = content ?? drawer.content;
-    drawer.wing = wing ?? drawer.wing;
-    drawer.room = room ?? drawer.room;
-    drawer.hall = hall ?? drawer.hall;
     drawer.source_file = source_file ?? drawer.source_file;
     this.#persistDrawers();
     return { updated: true, record: this.#publicDrawer(drawer) };

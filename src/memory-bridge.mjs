@@ -175,7 +175,12 @@ export class MemoryBridge {
       return;
     }
     const pending = this.pending.get(String(response.id));
-    if (!pending) return;
+    if (!pending) {
+      // Response arrived after timeout/cancel already discarded the pending entry.
+      // Log for diagnostics so late responses are visible during troubleshooting.
+      this.onDiagnostic(`Late memory response for id=${response.id} (already timed out or cancelled)`);
+      return;
+    }
     this.pending.delete(String(response.id));
     if (response.ok) pending.resolve(response.result);
     else pending.reject(new Error(response.error?.message ?? "Memory request failed"));
