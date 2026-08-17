@@ -476,15 +476,12 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
           repairAllowed: repair.allowed,
           input: compactInput(event, true)
         });
-        if (state.mode === "enforce") {
-          state.blockedCalls += 1;
-          updateStatus(ctx);
-          return { block: true, reason: `Reliability Harness: ${reason}` };
-        }
-        // Audit mode lets the call through but still counts it so the
-        // per-turn tool limit applies to repeated invalid calls too.
-        // The single increment below (after classification) covers this
-        // call exactly once — do not count twice here.
+        // Validation violations (malformed input, stale edit) are input-quality
+        // issues, not risk decisions — they block in both enforce and audit modes.
+        // Only the risk classification that follows is mode-sensitive.
+        state.blockedCalls += 1;
+        updateStatus(ctx);
+        return { block: true, reason: `Reliability Harness: ${reason}` };
       }
       classification = classifyToolCall(event.toolName, event.input, config, ctx.cwd);
     } catch (error) {

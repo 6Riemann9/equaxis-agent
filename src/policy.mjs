@@ -40,6 +40,9 @@ const HIGH_RISK_BASH = [
   { pattern: /\bRemove-Item\b[^\r\n]*-Recurse\b/i, reason: "recursive deletion" },
   { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+(?:-[a-z]*f|--force)|git\s+(?:checkout\s+--\s+\S+|restore\s+\S+))/i, reason: "destructive git operation" },
   { pattern: /\b(format|mkfs|diskpart)\b/i, reason: "disk modification" },
+  { pattern: /\b(dd)\b[^\r\n]*\bof=/i, reason: "raw disk write" },
+  { pattern: /\b(shred|wipe)\b/i, reason: "secure file destruction" },
+  { pattern: /\b(truncate)\b[^\r\n]*-[sS]/i, reason: "file truncation" },
   { pattern: /\b(shutdown|reboot|Stop-Computer|Restart-Computer)\b/i, reason: "system shutdown" },
   { pattern: /\b(sudo|runas)\b/i, reason: "privilege escalation" },
   { pattern: /\b(chmod|chown)\b.*\b777\b/i, reason: "unsafe permissions" },
@@ -87,7 +90,11 @@ export function matchesProtectedPath(targetPath, patterns) {
 }
 
 function shellMayWrite(command) {
-  return /(?:^|[;&|]\s*|\b)(?:echo\b[^\r\n]*>|(?:Set|Add)-Content\b|Out-File\b|tee\b|(?:cp|mv|copy|move)\b|(?:New-Item|ni)\b|printf\b[^\r\n]*>|cat\b[^\r\n]*>|sed\b[^\r\n]*\s-i\b|find\b[^\r\n]*-delete\b)/i.test(command);
+  return /(?:^|[;&|]\s*|\b)(?:echo\b[^\r\n]*>|(?:Set|Add)-Content\b|Out-File\b|tee\b|(?:cp|mv|copy|move)\b|(?:New-Item|ni)\b|printf\b[^\r\n]*>|cat\b[^\r\n]*>|sed\b[^\r\n]*\s-i\b|find\b[^\r\n]*-delete\b)/i.test(command) ||
+    // Generic output redirect: > or >> to a file (not >& which redirects fd to fd)
+    /[^0-9&]>>(?!&)/.test(command) || /[^0-9&]>(?!&)/.test(command) ||
+    // Interpreter with embedded code: node -e, python -c, ruby -e, perl -e
+    /\b(?:node|python[3]?|ruby|perl)\b[^\r\n]*-[ec]\b/.test(command);
 }
 
 function protectedShellReference(command, patterns) {
@@ -243,7 +250,7 @@ export function classifyToolCall(toolName, input, config, cwd) {
 
   if (
     (toolName === "memory_add_fact" || toolName === "learn") &&
-    /^(?:api[_-]?key|password|secret|token|access[_-]?token|auth[_-]?token)$/i.test(String(input?.predicate ?? "")) &&
+    /^(?:api[_-]?key|password|secret|token|access[_-]?token|auth[_-]?token|private[_-]?key)$/i.test(String(input?.predicate ?? "")) &&
     String(input?.object ?? "").trim().length >= 8
   ) {
     return { risk: RISK.BLOCKED, reason: "possible raw secret in knowledge-graph fact", approval: false, redactInput: true };

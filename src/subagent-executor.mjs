@@ -83,12 +83,14 @@ export function createPiJsonExecutor(options = {}) {
       let stdout = "";
       let stderr = "";
       let settled = false;
-      const done = (error) => {
+      const done = (error, { kill = true } = {}) => {
         if (settled) return;
         settled = true;
-        // Kill the whole process tree so grandchildren (shells, servers)
-        // cannot outlive the subagent on cancel/timeout/exit.
-        if (child?.pid) void killProcessTree(child.pid);
+        // Only kill the process tree on error/cancel/timeout paths.
+        // On normal exit (code === 0) the child has already terminated and
+        // its PID may have been recycled — killing it could hit an unrelated
+        // process (Windows taskkill) or process group (POSIX -pid).
+        if (kill && child?.pid) void killProcessTree(child.pid);
         if (error) return reject(error);
         resolve({ ok: true, id: task.id, label: task.label, output: stdout.trim(), stderr: stderr.trim() });
       };
@@ -97,7 +99,7 @@ export function createPiJsonExecutor(options = {}) {
       child.on("error", (error) => done(error));
       child.on("close", (code) => {
         if (signal?.aborted) return done(new Error("cancelled"));
-        if (code === 0) return done(undefined);
+        if (code === 0) return done(undefined, { kill: false });
         const artifact = spillFailure(task, { code, stdout, stderr });
         const tail = stderr.trim().slice(-400);
         const detail = artifact ? ` (full output: ${artifact})` : "";

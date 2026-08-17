@@ -5,9 +5,9 @@
 // instead of silently passing as read-only.
 
 const READ_COMMANDS = new Set([
-  "ls", "dir", "cat", "type", "head", "tail", "wc", "grep", "rg", "find",
-  "where", "which", "sort", "uniq", "cut", "tr", "echo", "printf",
-  "pwd", "cd", "date", "env", "stat", "file", "du", "df", "free", "basename",
+  "ls", "dir", "cat", "type", "head", "tail", "wc", "grep", "rg",
+  "where", "which", "uniq", "cut", "tr", "echo", "printf",
+  "pwd", "cd", "date", "stat", "file", "du", "df", "free", "basename",
   "dirname", "realpath", "readlink", "expr", "test", "[", "true", "false"
 ]);
 
@@ -34,6 +34,25 @@ function isReadOnlyGit(command) {
   return false;
 }
 
+/** `find` is read-only unless it uses -delete, -exec, -execdir, -ok, -okdir, -fprint*, or output redirects. */
+function isReadOnlyFind(command) {
+  const args = String(command ?? "").trim();
+  return !/-delete\b|-exec\b|-execdir\b|-ok\b|-okdir\b|-fprint\b/.test(args);
+}
+
+/** `sort` is read-only unless -o/--output is present (which writes to a file). */
+function isReadOnlySort(command) {
+  const args = String(command ?? "").trim();
+  return !/(?:^|\s)-(?:o\b|-output\b)/.test(args);
+}
+
+/**
+ * Detect shell metacharacters that imply execution of arbitrary sub-commands
+ * or output redirection, making the command unsafe to classify as read-only.
+ * Covers: &&, ||, ;, |, newline, backtick, $(), <(), >, >>
+ */
+const CHAIN_OR_REDIRECT_RE = /&&|\|\||[;|]|\n|`|\$\(|<\(|[^0-9&]>>(?!&)|[^0-9&]>(?!&)/;
+
 /**
  * Extract the leading executable token, normalized to a bare command name.
  * Handles quotes, parentheses, and absolute/relative paths.
@@ -52,12 +71,19 @@ export function leadingCommandToken(command) {
 
 /** True when the command's leading token is a known safe read-only command. */
 export function isAllowlistedCommand(command, extraCommands = []) {
-  // Chained commands (&& || ; |) are not auto-allowlisted: a safe prefix could
-  // hide an unsafe suffix. They default to MEDIUM and are audited.
-  if (/&&|\|\||[;|]/.test(String(command ?? ""))) return false;
+  // Chained commands, redirects, and shell metacharacters are not auto-allowlisted:
+  // a safe prefix could hide an unsafe suffix or write to a file. They default to
+  // MEDIUM and are audited.
+  if (CHAIN_OR_REDIRECT_RE.test(String(command ?? ""))) return false;
   const token = leadingCommandToken(command);
   if (!token) return false;
   if (READ_COMMANDS.has(token)) return true;
+  // Commands with mutating variants: only allowlisted in their read-only forms.
+  if (token === "find" && isReadOnlyFind(command)) return true;
+  if (token === "sort" && isReadOnlySort(command)) return true;
+  // `env` without arguments prints the environment (read-only);
+  // `env VAR=val cmd` or `env cmd args` executes a command — not read-only.
+  if (token === "env" && String(command ?? "").trim().split(/\s+/).length <= 1) return true;
   if (Array.isArray(extraCommands) && extraCommands.some((name) => String(name).toLowerCase() === token)) return true;
   if (token === "git") {
     const parts = String(command ?? "").trim().split(/\s+/);

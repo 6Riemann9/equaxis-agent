@@ -32,7 +32,7 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
     traceDir: ".pi/runtime",
     checkpoints: { enabled: true },
     trace: { maxFileBytes: 5 * 1024 * 1024, maxFiles: 3 },
-    protectPaths: [".env", ".git/", "node_modules/", "*.pem", "*.key"],
+    protectPaths: [".env", ".git/", "node_modules/", "*.pem", "*.key", ".pi/runtime/approvals/"],
     eval: {
       cohort: "",
       versionId: ""
