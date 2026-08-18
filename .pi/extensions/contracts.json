@@ -555,6 +555,27 @@
         "tools": 3,
         "notes": "文档索引按需构建/查询,零注入;TencentDB llm_wiki 确定性切片"
       }
+    },
+    {
+      "id": "settings-panel",
+      "entry": "settings-panel.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0",
+      "failureMode": "degrade",
+      "services": [
+        "config",
+        "trace"
+      ],
+      "requires": [],
+      "provides": [
+        "tool:settings_panel",
+        "command:settings"
+      ],
+      "promptImpact": {
+        "systemPromptChars": 0,
+        "tools": 1,
+        "notes": "Settings panel for viewing and modifying Equaxis configuration"
+      }
     }
   ]
 }

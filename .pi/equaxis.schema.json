@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "schemaVersion",
+    "providers",
     "runtime",
     "extensions",
     "reliability",
@@ -17,11 +18,74 @@
     "wiki",
     "evaluation",
     "subagents",
-    "protocols"
+    "protocols",
+    "compaction"
   ],
   "properties": {
     "schemaVersion": {
       "const": 1
+    },
+    "providers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "fallback", "thinking"],
+      "properties": {
+        "default": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fallback": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "deepseek": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "apiKey": { "type": "string" },
+            "model": { "type": "string" }
+          }
+        },
+        "openai": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "apiKey": { "type": "string" },
+            "model": { "type": "string" }
+          }
+        },
+        "anthropic": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "apiKey": { "type": "string" },
+            "model": { "type": "string" }
+          }
+        },
+        "thinking": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["defaultLevel", "budgets"],
+          "properties": {
+            "defaultLevel": {
+              "type": "string",
+              "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+            },
+            "budgets": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "minimal": { "type": "integer", "minimum": 0 },
+                "low": { "type": "integer", "minimum": 0 },
+                "medium": { "type": "integer", "minimum": 0 },
+                "high": { "type": "integer", "minimum": 0 },
+                "xhigh": { "type": "integer", "minimum": 0 },
+                "max": { "type": "integer", "minimum": 0 }
+              }
+            }
+          }
+        }
+      }
     },
     "runtime": {
       "type": "object",
@@ -862,6 +926,23 @@
             }
           }
         }
+      }
+    },
+    "compaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "strategy"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "strategy": {
+          "type": "string",
+          "enum": ["snapcompact", "context-full", "handoff", "shake", "off"]
+        },
+        "thresholdPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "reserveTokens": { "type": "integer", "minimum": 0 },
+        "keepRecentTokens": { "type": "integer", "minimum": 0 },
+        "midTurnEnabled": { "type": "boolean" },
+        "autoContinue": { "type": "boolean" }
       }
     },
     "protocols": {

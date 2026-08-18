@@ -10,6 +10,24 @@ export const EQUAXIS_CONFIG_SCHEMA_VERSION = 1;
 
 export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
   schemaVersion: EQUAXIS_CONFIG_SCHEMA_VERSION,
+  providers: {
+    default: "deepseek",
+    fallback: ["openai", "anthropic"],
+    deepseek: { apiKey: "", model: "deepseek-v4-flash" },
+    openai: { apiKey: "", model: "gpt-4o" },
+    anthropic: { apiKey: "", model: "claude-sonnet-4-5" },
+    thinking: {
+      defaultLevel: "high",
+      budgets: {
+        minimal: 1024,
+        low: 2048,
+        medium: 8192,
+        high: 16384,
+        xhigh: 32768,
+        max: 32768
+      }
+    }
+  },
   runtime: {
     profile: "standard",
     services: { config: true, diagnostics: true, trace: true, status: true },
@@ -89,6 +107,15 @@ export const DEFAULT_EQUAXIS_CONFIG = Object.freeze({
       threshold: 0.75,
       maxSegmentChars: 3000
     }
+  },
+  compaction: {
+    enabled: true,
+    strategy: "snapcompact",
+    thresholdPercent: 80,
+    reserveTokens: 16384,
+    keepRecentTokens: 20000,
+    midTurnEnabled: true,
+    autoContinue: true
   },
   skills: {
     enabled: true,
@@ -318,8 +345,11 @@ function unionArrays(baseArray, customArray) {
 export function mergeConfig(base, custom) {
   // DSH-style discipline: unknown keys in custom config are rejected so a
   // typo surfaces at load time instead of being silently merged away.
-  const SECTIONS = ["runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "goalState", "refine", "wiki", "evaluation", "subagents", "intentGate"];
+  const SECTIONS = ["providers", "runtime", "extensions", "reliability", "advisor", "protocols", "memory", "skills", "codeGraph", "goalState", "refine", "wiki", "evaluation", "subagents", "intentGate", "compaction"];
   const SUB_SECTIONS = [
+    ["providers", "thinking"],
+    ["providers", "thinking", "budgets"],
+    ["providers", "deepseek"], ["providers", "openai"], ["providers", "anthropic"],
     ["runtime", "services"], ["runtime", "gates"],
     ["reliability", "trace"], ["reliability", "approval"], ["reliability", "limits"], ["reliability", "toolRouting"], ["reliability", "eval"],
     ["reliability", "costBrake"], ["reliability", "commandAllowlist"], ["reliability", "checkpoints"],
@@ -337,6 +367,18 @@ export function mergeConfig(base, custom) {
   return {
     ...structuredClone(base),
     ...custom,
+    providers: {
+      ...base.providers,
+      ...(custom.providers ?? {}),
+      thinking: {
+        ...base.providers.thinking,
+        ...(custom.providers?.thinking ?? {}),
+        budgets: { ...base.providers.thinking.budgets, ...(custom.providers?.thinking?.budgets ?? {}) }
+      },
+      deepseek: { ...base.providers.deepseek, ...(custom.providers?.deepseek ?? {}) },
+      openai: { ...base.providers.openai, ...(custom.providers?.openai ?? {}) },
+      anthropic: { ...base.providers.anthropic, ...(custom.providers?.anthropic ?? {}) }
+    },
     runtime: {
       ...base.runtime,
       ...(custom.runtime ?? {}),
@@ -400,7 +442,8 @@ export function mergeConfig(base, custom) {
       isolation: { ...base.subagents.isolation, ...(custom.subagents?.isolation ?? {}) },
       evidence: { ...base.subagents.evidence, ...(custom.subagents?.evidence ?? {}) }
     },
-    intentGate: { ...base.intentGate, ...(custom.intentGate ?? {}) }
+    intentGate: { ...base.intentGate, ...(custom.intentGate ?? {}) },
+    compaction: { ...base.compaction, ...(custom.compaction ?? {}) }
   };
 }
 
