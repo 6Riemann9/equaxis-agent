@@ -46,7 +46,22 @@ function view(cwd) {
     // no project settings yet
   }
   process.stdout.write(JSON.stringify({
-    sections: CONFIG_SECTIONS,
+    sections: CONFIG_SECTIONS.map((section) => ({
+      ...section,
+      keys: section.keys.map((key) => ({
+        ...key,
+        // Per-key layer file: logical sections can mix equaxis.json keys
+        // with .pi/settings.json keys, so consumers must look at the key's
+        // own file, never the section's.
+        file: key.file ?? section.file,
+        // Full dot-path into the layer object: logical-section keys already
+        // carry it ("runtime.profile"); legacy section-scoped keys ("enabled")
+        // are prefixed with the section id. settings.json keys stay bare
+        // (they live at the top level of .pi/settings.json). Consumers must
+        // use `path`, never re-derive it from section.id.
+        path: key.path ?? (key.file === "settings" ? key.key : (key.key.includes(".") ? key.key : `${section.id}.${key.key}`))
+      }))
+    })),
     layers: {
       defaults: layers.defaults,
       global: layers.global,

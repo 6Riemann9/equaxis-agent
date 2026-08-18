@@ -263,6 +263,10 @@ type Tab = "overview" | "events" | "files" | "eval" | "harbor" | "approvals" | "
 
 interface ConfigKeyMeta {
   key: string;
+  /** Full dot-path into the layer object, supplied by config-edit view. */
+  path?: string;
+  /** Which file this key lives in: "settings" = .pi/settings.json, else equaxis.json. */
+  file?: string;
   label?: string;
   type?: string;
   options?: string[];
@@ -324,7 +328,7 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
   const [approvals, setApprovals] = useState<{ pending: ApprovalItem[]; history: ApprovalItem[] } | null>(null);
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [configView, setConfigView] = useState<ConfigView | null>(null);
-  const [configSection, setConfigSection] = useState<string>("agent");
+  const [configSection, setConfigSection] = useState<string>("");
   const [configBusy, setConfigBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -916,25 +920,28 @@ export function HarnessDashboard({ cwd, onClose }: { cwd: string | null; onClose
                 <div className="harness-settings-main">
                   {!configView ? null : (() => {
                     const section = configView.sections.find((item) => item.id === configSection) ?? configView.sections[0];
-                    const source = section.file === "settings" ? configView.piSettings : configView.effective;
                     return (
                       <>
                         <div className="harness-section-title">
                           {section.label}
                           <span className="harness-settings-desc">{section.description}</span>
                         </div>
-                        {section.keys.map((meta) => (
-                          <ConfigKeyRow
-                            key={meta.key}
-                            meta={meta}
-                            path={section.file === "settings" ? meta.key : `${section.id}.${meta.key}`}
-                            source={source}
-                            layers={configView.layers}
-                            file={section.file}
-                            busy={configBusy}
-                            onSave={saveConfigKey}
-                          />
-                        ))}
+                        {section.keys.map((meta) => {
+                          const keyFile = meta.file ?? section.file;
+                          const keySource = keyFile === "settings" ? configView.piSettings : configView.effective;
+                          return (
+                            <ConfigKeyRow
+                              key={meta.key}
+                              meta={meta}
+                              path={meta.path ?? (keyFile === "settings" ? meta.key : `${section.id}.${meta.key}`)}
+                              source={keySource}
+                              layers={configView.layers}
+                              file={keyFile}
+                              busy={configBusy}
+                              onSave={saveConfigKey}
+                            />
+                          );
+                        })}
                       </>
                     );
                   })()}
