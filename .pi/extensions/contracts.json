@@ -386,7 +386,8 @@
         "tool:subagent_list",
         "tool:subagent_cancel",
         "tool:subagent_message",
-        "tool:subagent_messages"
+        "tool:subagent_messages",
+        "tool:subagent_check"
       ],
       "promptImpact": {
         "systemPromptChars": 0,

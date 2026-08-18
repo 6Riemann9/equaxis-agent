@@ -69,6 +69,7 @@ export default function equaxisGoalState(pi: ExtensionAPI): void {
   const services = createExtensionRuntimeServices({ cwd: process.cwd(), extensionId: "goal-state", pi });
   let config = services.config.goalState as GoalStateConfig;
   let store: GoalStore | null = null;
+  let stopSettledListener: (() => void) | null = null;
 
   function trace(ctx: ExtensionContext, event: string, data: Record<string, unknown> = {}): void {
     services.trace.record(ctx, event, data);
@@ -97,6 +98,32 @@ export default function equaxisGoalState(pi: ExtensionAPI): void {
       openGates: status.active?.openGates.map((gate) => gate.name) ?? [],
       file: status.file
     });
+
+    // Unsubscribe from any previous session's listener before subscribing again.
+    stopSettledListener?.();
+    stopSettledListener = pi.events.on("subagent:settled", (data: unknown) => {
+      try {
+        const event = data as { id?: string; label?: string; status?: string; error?: string | null; evidence?: unknown } | null;
+        if (!event?.id || !event?.label || !event?.status) return;
+        const s = store ?? current;
+        const active = s.activeGoal();
+        if (!active) return;
+        s.appendEvidence(active.id, {
+          kind: "subagent",
+          detail: `${event.label}: ${event.status}${event.status === "failed" && event.error ? ` (${event.error})` : ""}`,
+          artifactPath: undefined
+        });
+        trace(ctx, "goal_subagent_evidence", { taskId: event.id, label: event.label, status: event.status });
+      } catch {
+        // best effort — goal evidence must not break subagent flow
+      }
+    });
+  });
+
+  pi.on("session_shutdown", () => {
+    stopSettledListener?.();
+    stopSettledListener = null;
+    store = null;
   });
 
   pi.registerTool({

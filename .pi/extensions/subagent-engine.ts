@@ -9,6 +9,7 @@ import { SubagentStateStore } from "../../src/subagent-state-store.mjs";
 import { createFileEvidenceVerifier } from "../../src/subagent-evidence.mjs";
 import { recordWisdom, wisdomPreamble } from "../../src/wisdom-store.mjs";
 import { buildRolePrompt } from "../../src/role-templates.mjs";
+import { createDeferredResultDelivery } from "../../src/deferred-result-delivery.mjs";
 
 interface SubagentEngineConfig {
   enabled: boolean;
@@ -42,9 +43,10 @@ const resultSchemaParameter = Type.Optional(Type.Object({}, {
   description: "Optional JSON result schema checked after the subagent finishes"
 }));
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+// packageRoot: resolves the bundled Pi CLI entry point (always from this file's location).
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const defaultPiEntry = path.join(
-  projectRoot,
+  packageRoot,
   "node_modules",
   "@earendil-works",
   "pi-coding-agent",
@@ -52,16 +54,50 @@ const defaultPiEntry = path.join(
   "cli.js"
 );
 
+// Content truncation limit matching vendored subagent extension.
+const RESULT_OUTPUT_MAX_BYTES = 24000;
+
+interface SubagentResultSnap {
+  id: string;
+  label: string;
+  status: string;
+  error?: string | null;
+  result?: unknown;
+  evidence?: unknown;
+  review?: unknown;
+}
+
+function truncateOutput(text: string | null | undefined): string {
+  if (!text) return "";
+  return text.length > RESULT_OUTPUT_MAX_BYTES
+    ? `${text.slice(0, RESULT_OUTPUT_MAX_BYTES)}\n... [truncated, ${text.length} chars total]`
+    : text;
+}
+
+function buildResultContent(snap: { label: string; status: string; error?: string | null; result?: unknown }): string {
+  const statusLine = `Subagent "${snap.label}" ${snap.status}.`;
+  const errorLine = snap.status === "failed" && snap.error ? `\nError: ${snap.error}` : "";
+  const output = snap.result != null
+    ? truncateOutput(typeof snap.result === "string" ? snap.result : JSON.stringify(snap.result, null, 2))
+    : "";
+  return `${statusLine}${errorLine}${output ? `\n${output}` : ""}`;
+}
+
 export default function subagentEngine(pi: ExtensionAPI): void {
-  const services = createExtensionRuntimeServices({
-    cwd: process.cwd(),
-    extensionId: "subagent-engine",
-    pi
-  });
+  const services = createExtensionRuntimeServices({ cwd: process.cwd(), extensionId: "subagent-engine", pi });
   const config = services.config.subagents as SubagentEngineConfig | undefined;
+
+  // workspaceRoot: resolved at session_start from the actual working directory.
+  // Used for stateStore, evidence, wisdom, and goal integration — never for
+  // locating the bundled Pi CLI (that's packageRoot).
+  let workspaceRoot = process.cwd();
+
   const stateStore = config?.persistence?.enabled === false
     ? null
-    : new SubagentStateStore({ projectRoot, rootDir: config?.persistence?.rootDir ?? ".pi/runtime/subagents" });
+    : new SubagentStateStore({ projectRoot: workspaceRoot, rootDir: config?.persistence?.rootDir ?? ".pi/runtime/subagents" });
+  const resultDelivery = createDeferredResultDelivery();
+  let sessionCtx: ExtensionContext | null = null;
+
   const runtime = new SubagentRuntime({
     maxConcurrent: config?.maxConcurrent ?? 2,
     defaultTimeoutMs: config?.budgets?.timeoutMs === undefined ? undefined : config.budgets.timeoutMs,
@@ -69,14 +105,36 @@ export default function subagentEngine(pi: ExtensionAPI): void {
     modelConcurrency: config?.modelConcurrency,
     categoryRoutes: config?.categoryRoutes,
     stateStore,
-    verifyEvidence: config?.evidence?.enabled === false ? null : createFileEvidenceVerifier({ projectRoot }),
-    onTaskComplete: (task: { id: string; label: string; status: string; result?: unknown }) => {
+    verifyEvidence: config?.evidence?.enabled === false ? null : createFileEvidenceVerifier({ projectRoot: workspaceRoot }),
+    onTaskComplete: (task: { id: string; label: string; status: string; result?: unknown; error?: string | null; evidence?: unknown; review?: unknown }) => {
       // Wisdom accumulation: persist a compact summary so later DAG batches
       // (and later sessions) reuse what this node learned.
       try {
-        recordWisdom({ projectRoot, taskId: task.id, label: task.label, status: task.status, result: task.result });
+        recordWisdom({ projectRoot: workspaceRoot, taskId: task.id, label: task.label, status: task.status, result: task.result ?? task.error ?? null });
       } catch {
         // best effort
+      }
+      // Publish settled event for goal-state integration (Step 3).
+      try {
+        pi.events.emit("subagent:settled", { id: task.id, label: task.label, status: task.status, error: task.error ?? null, evidence: task.evidence ?? null });
+      } catch {
+        // best effort
+      }
+      // Buffer result for automatic delivery to the main agent (Step 2).
+      try {
+        const snap = {
+          id: task.id,
+          label: task.label,
+          status: task.status,
+          error: task.error ?? null,
+          result: task.result ?? null,
+          evidence: task.evidence ?? null,
+          review: task.review ?? null,
+        };
+        resultDelivery.defer(snap);
+        if (sessionCtx?.isIdle?.()) flushResults();
+      } catch {
+        // best effort — delivery failure must not break task finalization
       }
     },
     executor: createPiJsonExecutor({
@@ -98,6 +156,67 @@ export default function subagentEngine(pi: ExtensionAPI): void {
     services.trace.record(ctx, event, data);
   }
 
+  /** Deliver a single result to the parent agent as a follow-up message. */
+  function deliverResult(snap: SubagentResultSnap): void {
+    try {
+      pi.sendMessage(
+        {
+          customType: "subagent-result",
+          content: buildResultContent(snap),
+          display: true,
+          details: { id: snap.id, label: snap.label, status: snap.status },
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      );
+    } catch {
+      // Session may be shutting down — swallow.
+    }
+  }
+
+  /** Flush all buffered results to the parent agent. */
+  function flushResults(): void {
+    for (const snap of resultDelivery.drain() as SubagentResultSnap[]) {
+      deliverResult(snap);
+    }
+  }
+
+  // --- Lifecycle hooks ---
+
+  pi.on("session_start", (_event, ctx) => {
+    sessionCtx = ctx;
+    workspaceRoot = services.paths.workspace;
+  });
+
+  pi.on("agent_settled", () => {
+    flushResults();
+  });
+
+  pi.on("session_shutdown", async () => {
+    // Cancel all running/blocked/queued subagents so they don't orphan.
+    try {
+      const tasks = runtime.list();
+      const cancellable = tasks.filter((t) => t && ["running", "blocked", "queued"].includes(t.status));
+      const promises: Promise<unknown>[] = [];
+      for (const task of cancellable) {
+        if (!task) continue;
+        const status = runtime.cancel(task.id, "session ended");
+        // cancel returns the status; the task's promise will settle shortly.
+      }
+      // Give cancelled tasks a moment to settle their process cleanup.
+      // eslint-disable-next-line no-restricted-syntax -- timeout requires executor form
+      await Promise.race([
+        Promise.allSettled(promises),
+        new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    } catch {
+      // best effort
+    }
+    sessionCtx = null;
+    resultDelivery.clear();
+  });
+
+  // --- Tools ---
+
   pi.registerTool({
     name: "subagent_schedule",
     label: "Subagent Schedule",
@@ -106,7 +225,8 @@ export default function subagentEngine(pi: ExtensionAPI): void {
     promptGuidelines: [
       "Use subagent_schedule when multiple subagents should run, some in parallel and some depending on others.",
       "Each node has a name, prompt, and optional dependsOn referencing sibling names. Children run in isolated Pi JSON subprocesses.",
-      "Dependent nodes wait until their dependency nodes complete; independent nodes run concurrently (bounded by maxConcurrent)."
+      "Dependent nodes wait until their dependency nodes complete; independent nodes run concurrently (bounded by maxConcurrent).",
+      "Results are delivered automatically when the parent agent is idle. Use subagent_check to peek at progress, or subagent_wait to block until done."
     ],
     parameters: Type.Object({
       nodes: Type.Array(Type.Object({
@@ -126,7 +246,7 @@ export default function subagentEngine(pi: ExtensionAPI): void {
       const routedNodes = params.nodes.map((node) => node.role
         ? { ...node, prompt: buildRolePrompt(node.role, node.prompt) }
         : node);
-      const spawned = runtime.schedule(routedNodes, { wisdomRoot: projectRoot }).map((status) => status!);
+      const spawned = runtime.schedule(routedNodes, { wisdomRoot: workspaceRoot }).map((status) => status!);
       trace({} as ExtensionContext, "subagent_schedule", { count: spawned.length });
       return {
         content: [{ type: "text", text: JSON.stringify(spawned, null, 2) }],
@@ -175,13 +295,15 @@ export default function subagentEngine(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "subagent_wait",
     label: "Wait for Subagents",
-    description: "Wait for one or more subagents to settle and return their final statuses and results.",
+    description: "Wait for one or more subagents to settle and return their final statuses and results. Consumes buffered auto-delivery so results are not delivered twice.",
     promptSnippet: "Wait for subagents to finish",
     parameters: Type.Object({
       ids: Type.Array(Type.String({ minLength: 1 }), { description: "Subagent ids to wait for" })
     }),
     async execute(_toolCallId, params) {
       const statuses = (await runtime.waitAll(params.ids)).map((status) => status!);
+      // Consume from delivery buffer so agent_settled won't re-deliver.
+      resultDelivery.consume(params.ids);
       return {
         content: [{ type: "text", text: JSON.stringify(statuses, null, 2) }],
         details: statuses
@@ -252,6 +374,29 @@ export default function subagentEngine(pi: ExtensionAPI): void {
       return {
         content: [{ type: "text", text: JSON.stringify(messages, null, 2) }],
         details: { id: params.id, messages }
+      };
+    }
+  });
+
+  pi.registerTool({
+    name: "subagent_check",
+    label: "Check Subagent",
+    description: "Non-blocking check on a subagent's current status, attempts, and recent error. Use this to peek at progress without blocking on subagent_wait.",
+    promptSnippet: "Check subagent progress",
+    parameters: Type.Object({
+      id: Type.String({ minLength: 1, description: "Subagent id to check" })
+    }),
+    async execute(_toolCallId, params) {
+      const status = runtime.status(params.id);
+      if (!status) {
+        return {
+          content: [{ type: "text", text: `Unknown subagent: ${params.id}` }],
+          details: { id: params.id, found: false, status: null as unknown }
+        };
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(status, null, 2) }],
+        details: { id: params.id, found: true, status: status as unknown }
       };
     }
   });
