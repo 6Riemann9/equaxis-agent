@@ -1,6 +1,6 @@
 {
   "name": "equaxis-agent",
-  "version": "0.3.6",
+  "version": "0.4.10",
   "private": false,
   "license": "MIT",
   "type": "module",
@@ -43,6 +43,7 @@
     "harbor_eval/benchmark-tasks/",
     "harbor_eval/tasks/",
     "docs/",
+    "tests/",
     "pi-web/package.json",
     "pi-web/package-lock.json",
     "pi-web/next.config.ts",
@@ -89,17 +90,23 @@
     "exercise:equaxis": "node scripts/equaxis-product.mjs exercise",
     "mcp:eval": "node scripts/mcp-eval-server.mjs",
     "setup:memory": "python -m pip install -e ./vendor/agent-memory",
-    "test:memory": "python bridge/run_memory_tests.py",
+    "test:memory": "node scripts/memory-tests.mjs",
     "eval:cycle": "python -B -m harbor_eval.cycle",
     "test:eval": "python -B -m unittest discover -s harbor_eval -p \"test_*.py\"",
-    "check": "tsc --noEmit",
+    "check": "node scripts/check-types.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:protocols": "node scripts/test-protocols.mjs",
     "verify": "npm run check && npm test",
-    "verify:full": "npm run verify && npm run test:protocols && npm run test:memory && npm run test:eval"
+    "verify:full": "npm run verify && npm run test:protocols && npm run test:memory && npm run test:eval",
+    "test:protocols:live": "node scripts/test-protocols-live.mjs",
+    "eval:local": "node scripts/benchmark-local.mjs",
+    "smoke:web": "node scripts/smoke-piweb.mjs",
+    "setup:python": "node scripts/setup-python.mjs",
+    "companion": "node scripts/companion.mjs",
+    "companion:backends": "node scripts/companion-backend-smoke.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.83.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
     "@huggingface/transformers": "^4.2.0",
     "acorn": "^8.17.0",
     "effect": "^2.4.19",
@@ -110,8 +117,8 @@
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.83.0",
     "@earendil-works/pi-tui": "^0.83.0",
-    "@types/node": "24.12.4",
-    "typescript": "5.9.3",
+    "@types/node": "^24.12.4",
+    "typescript": "^5.9.3",
     "typescript-language-server": "^5.3.0"
   },
   "engines": {

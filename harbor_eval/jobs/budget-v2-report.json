@@ -1,0 +1,60 @@
+{
+  "generatedAt": "2026-10-19T08:46:54.551Z",
+  "runner": "scripts/benchmark-local.mjs",
+  "tasks": [
+    "atomic-write",
+    "bounded-concurrency",
+    "csv-quotes",
+    "dedupe-stable",
+    "deep-freeze",
+    "dependency-order",
+    "env-boolean",
+    "flatten-record",
+    "group-counts",
+    "json-pointer",
+    "mask-email",
+    "merge-intervals",
+    "normalize-path",
+    "paginate",
+    "parse-duration",
+    "redact-secrets",
+    "retry-after",
+    "slugify",
+    "sort-semver",
+    "top-k"
+  ],
+  "arms": [
+    "equaxis",
+    "pi_control"
+  ],
+  "equaxis": {
+    "passAt1": 0.9,
+    "tasksAttempted": 20,
+    "tasksEvaluated": 20,
+    "tasksPassed": 18,
+    "avgLatencyMs": 64630,
+    "totalTokens": 251377,
+    "failures": [
+      "json-pointer",
+      "mask-email"
+    ],
+    "throttled": []
+  },
+  "pi_control": {
+    "passAt1": 0.95,
+    "tasksAttempted": 20,
+    "tasksEvaluated": 20,
+    "tasksPassed": 19,
+    "avgLatencyMs": 132067,
+    "totalTokens": 612378,
+    "failures": [
+      "mask-email"
+    ],
+    "throttled": []
+  },
+  "gain": {
+    "passAt1Delta": -0.04999999999999993,
+    "latencyRatio": 0.49,
+    "tokenRatio": 0.41
+  }
+}

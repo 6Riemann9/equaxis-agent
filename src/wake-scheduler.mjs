@@ -47,13 +47,66 @@ export function buildWakePlan({ goal, config = {}, now = () => new Date().toISOS
  * runs scripts/equaxis-wake.mjs --scheduled every `intervalMinutes`.
  * Returns the schtasks create string (run it in an admin shell).
  *
+ * On Linux the equivalent is a systemd user timer (no root needed):
+ * `scheduledTaskCommand` returns the shell snippet that writes the service
+ * and timer units to ~/.config/systemd/user/ and enables the timer. The
+ * snippet only prints what to run — registration stays explicit.
+ *
  * @param {{ projectRoot: string, intervalMinutes?: number, taskName?: string, nodeCmd?: string }} options
  */
 export function scheduledTaskCommand({ projectRoot, intervalMinutes = 30, taskName = "EquaxisWake", nodeCmd = process.execPath } = {}) {
   const script = path.join(path.resolve(projectRoot), "scripts", "equaxis-wake.mjs");
+  if (process.platform !== "win32") {
+    return systemdUserTimerSnippet({ projectRoot, intervalMinutes, taskName, nodeCmd, script });
+  }
   const winPath = (value) => String(value).replaceAll("/", "\\");
   const task = `"${winPath(nodeCmd)}" "${winPath(script)}" --scheduled`;
   return `schtasks /Create /TN "${taskName}" /TR ${task} /SC MINUTE /MO ${Math.max(1, Math.floor(intervalMinutes))} /F`;
+}
+
+/** Linux/macOS slice: systemd --user oneshot service + calendar timer.
+ * Returns a single copy-pasteable shell snippet (heredoc writes both unit
+ * files, then daemon-reload + enable --now). Unit names are derived from the
+ * task name (lowercased, sanitized) so several projects can register their
+ * own wake timers side by side. */
+function systemdUserTimerSnippet({ projectRoot, intervalMinutes, taskName, nodeCmd, script }) {
+  const unit = String(taskName).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "equaxis-wake";
+  const minutes = Math.max(1, Math.floor(intervalMinutes));
+  // OnCalendar=*:0/N fires every N minutes on the wall clock.
+  const service = [
+    "[Unit]",
+    `Description=Equaxis scheduled wake probe (${taskName})`,
+    "",
+    "[Service]",
+    "Type=oneshot",
+    `ExecStart=${nodeCmd} ${script} --scheduled`,
+    `WorkingDirectory=${path.resolve(projectRoot)}`
+  ].join("\n");
+  const timer = [
+    "[Unit]",
+    `Description=Run the Equaxis wake probe every ${minutes} minutes`,
+    "",
+    "[Timer]",
+    `OnCalendar=*:0/${minutes}`,
+    "Persistent=true",
+    "Unit=" + unit + ".service",
+    "",
+    "[Install]",
+    "WantedBy=timers.target"
+  ].join("\n");
+  const base = "~/.config/systemd/user";
+  const asPrintf = (content) => content.replaceAll("\\", "\\\\").replaceAll("'", "\\'" ).replaceAll("\n", "\\n");
+  return [
+    "# Linux wake registration (systemd user timer, no root needed):",
+    `mkdir -p ${base} \\`,
+    `&& printf '${asPrintf(service)}' > ${base}/${unit}.service \\`,
+    `&& printf '${asPrintf(timer)}' > ${base}/${unit}.timer \\`,
+    "&& systemctl --user daemon-reload \\",
+    `&& systemctl --user enable --now ${unit}.timer`,
+    "",
+    `# verify: systemctl --user list-timers ${unit}.timer; journalctl --user -u ${unit}.service -f`,
+    `# remove: systemctl --user disable --now ${unit}.timer && rm ${base}/${unit}.{service,timer} && systemctl --user daemon-reload`
+  ].join("\n");
 }
 
 /**

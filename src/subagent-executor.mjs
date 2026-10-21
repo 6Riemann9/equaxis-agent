@@ -28,6 +28,9 @@ export function createPiJsonExecutor(options = {}) {
   // error message carries the tail plus the artifact path so diagnosis does
   // not require keeping unbounded output in memory.
   const artifactDir = options.artifactDir ?? path.join(projectRoot, ".pi", "runtime", "subagents", "artifacts");
+  // Live output hook: the companion worker streams the JSON-mode stream to a
+  // per-task log file so a running task is observable instead of a black box.
+  const onOutput = typeof options.onOutput === "function" ? options.onOutput : null;
 
   function spillFailure(task, { code, stdout, stderr }) {
     try {
@@ -100,7 +103,16 @@ export function createPiJsonExecutor(options = {}) {
         if (error) return reject(error);
         resolve({ ok: true, id: task.id, label: task.label, output: stdout.trim(), stderr: stderr.trim() });
       };
-      child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+        if (onOutput) {
+          try {
+            onOutput(chunk);
+          } catch {
+            // an observer must never break the run
+          }
+        }
+      });
       child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
       child.on("error", (error) => done(error, { spill: true }));
       child.on("close", (code) => {

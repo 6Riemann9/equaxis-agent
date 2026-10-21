@@ -114,6 +114,26 @@ npm run build
 
 `npm run setup` 会自动完成安装与构建。
 
+## 命名约定：wing / room / hall
+
+存储位置：`<memory root>/long_term/drawers.json`（native）或 ChromaDB（python）。每条记忆（drawer）带三个命名空间字段，约定如下：
+
+| 字段 | 含义 | 取值约定 |
+|---|---|---|
+| `wing` | 顶层命名空间（"记忆大厦的翼"），按**领域/项目**划分 | 小写 kebab-case，如 `project/equaxis_harness`、`system/noctalia`、`personal/preferences`。一台机器通常 5–15 个 wing |
+| `room` | wing 内的主题房间，按**子话题**细分 | 小写 kebab-case，如 `memory-config`、`wake-scheduling`。同一条记忆只属于一个 room |
+| `hall` | 记忆的**性质**维度（跨 wing 的横向分类），枚举值 | `hall_facts`（稳定事实）、`hall_events`（事件/里程碑）、`hall_discoveries`（发现/结论）、`hall_preferences`（用户偏好）、`hall_advice`（经验教训）、`hall_general`（兜底） |
+
+归类标准：
+
+1. **先问"会不会过期"**：永真事实 → `hall_facts`；带时间点的一次性进展 → `hall_events`；调试得出的结论/坑 → `hall_discoveries`。
+2. **wing 看归属**：属于哪个项目/领域就进哪个 wing；个人习惯类进 `personal/*`。
+3. **room 看检索路径**：想象"未来的我会用什么关键词搜它"，room 名就用那个关键词。
+4. **不要为单条记忆开新 room**：一个 room 至少值得 3–5 条记忆；太碎会伤检索聚合。
+5. **`hall_general` 是懒人兜底**，长期堆积会让横向过滤失效——写之前先确认真的不属于其他 hall。
+
+约定检查：`memory-core` 的 schema 校验（`memory/validation.py` 对应 native 校验）会拒绝空 wing/room；语义上的一致性靠上面约定维护，统计/过滤（pi-web 按 wing 过滤、hall 徽标）依赖它。
+
 ## 数据安全
 
 - `.equaxis/memory/` 默认不进入 Git。

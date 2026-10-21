@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { beforeAgentStartText } from "../../src/pi-event-utils.mjs";
 
 type Level = "info" | "warn" | "error" | "ok";
 
@@ -118,7 +119,7 @@ export default function harnessPanelExtension(pi: ExtensionAPI) {
 	pi.on("session_tree", async (_event, ctx) => add(ctx, "session_tree", "branch navigation", "ok"));
 
 	pi.on("input", async (event, ctx) => add(ctx, "input", `${event.source}: ${compact(event.text, 96)}`));
-	pi.on("before_agent_start", async (event, ctx) => add(ctx, "before_agent_start", compact(event.prompt, 96)));
+	pi.on("before_agent_start", async (event, ctx) => add(ctx, "before_agent_start", compact(beforeAgentStartText(event), 96)));
 	pi.on("agent_start", async (_event, ctx) => add(ctx, "agent_start"));
 	pi.on("agent_end", async (_event, ctx) => add(ctx, "agent_end", "model turn finished", "ok"));
 	pi.on("agent_settled", async (_event, ctx) => add(ctx, "agent_settled", "idle", "ok"));

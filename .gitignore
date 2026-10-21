@@ -1,20 +1,37 @@
 node_modules/
+pi-versions/
+pi-web/node_modules/
+pi-web/.next/
+*.tgz
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.tsbuildinfo
+.venv/
 .pi/runtime/
+.pi/companion/
+
+# Provider credentials: never commit a real key.
+.pi/auth.json
+
+# Memory runtime state: session history and the knowledge graph are local data.
+.equaxis/memory/
+
+# Benchmark run artifacts (large, machine-specific).
+harbor_eval/jobs/raw/
+
 .pi/sessions/
 .pi/npm/
 .pi/trust.json
 .pi/models-store.json
 .pi/models.json
-.pi/auth.json
 .pi/oauth.json
 .pi-test-home/
 # vendored extension trees: never track deps or nested VCS metadata
 .pi/extensions/vendor/**/node_modules/
 .pi/extensions/vendor/**/.git/
 .equaxis/
-__pycache__/
 vendor/**/.pytest_cache/
-*.py[cod]
 *.log
 *.code
 *.out
@@ -23,7 +40,6 @@ nul
 .codex-tmp/
 harbor_eval/jobs/
 .env
-
 # Personal notes and roadmap — never commit
 Equaxis-后续开发路线图.md
 Subagent设计与Agent通信一页速记.md

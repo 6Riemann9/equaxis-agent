@@ -64,12 +64,13 @@ function view(cwd) {
     })),
     layers: {
       defaults: layers.defaults,
+      bundled: layers.bundled,
       global: layers.global,
       project: layers.project
     },
     effective: layers.effective,
     piSettings,
-    paths: { global: layers.globalPath, project: layers.projectPath },
+    paths: { bundled: layers.bundledPath, global: layers.globalPath, project: layers.projectPath },
     schemaVersion: layers.effective.schemaVersion
   }, null, 2));
 }

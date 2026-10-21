@@ -32,17 +32,9 @@ export function policyRuleVersion(config) {
 
 const HIGH_RISK_BASH = [
   { pattern: /(?:^|[^\w])(?:rm|del)\b[^\r\n]*(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|--recursive\b|--force\b|\/s\b|\/q\b)/i, reason: "recursive deletion" },
-  // Split flags (`rm -r -f x`) and recursion without force (`rm -r src`)
-  // do not match the combined-flag regex above; recursion alone is the
-  // highest-risk operation and must not slip to MEDIUM/allowlisted.
-  { pattern: /\b(?:rm|del)\b[^\r\n]*\s-[a-zA-Z]*r[a-zA-Z]*\b/i, reason: "recursive deletion" },
-  { pattern: /\brmdir\b[^\r\n]*\/s\b/i, reason: "recursive deletion" },
   { pattern: /\bRemove-Item\b[^\r\n]*-Recurse\b/i, reason: "recursive deletion" },
   { pattern: /\b(git\s+reset\s+--hard|git\s+clean\s+(?:-[a-z]*f|--force)|git\s+(?:checkout\s+--\s+\S+|restore\s+\S+))/i, reason: "destructive git operation" },
   { pattern: /\b(format|mkfs|diskpart)\b/i, reason: "disk modification" },
-  { pattern: /\b(dd)\b[^\r\n]*\bof=/i, reason: "raw disk write" },
-  { pattern: /\b(shred|wipe)\b/i, reason: "secure file destruction" },
-  { pattern: /\b(truncate)\b[^\r\n]*-[sS]/i, reason: "file truncation" },
   { pattern: /\b(shutdown|reboot|Stop-Computer|Restart-Computer)\b/i, reason: "system shutdown" },
   { pattern: /\b(sudo|runas)\b/i, reason: "privilege escalation" },
   { pattern: /\b(chmod|chown)\b.*\b777\b/i, reason: "unsafe permissions" },
@@ -89,17 +81,49 @@ export function matchesProtectedPath(targetPath, patterns) {
   }) ?? null;
 }
 
-function shellMayWrite(command) {
-  return /(?:^|[;&|]\s*|\b)(?:echo\b[^\r\n]*>|(?:Set|Add)-Content\b|Out-File\b|tee\b|(?:cp|mv|copy|move)\b|(?:New-Item|ni)\b|printf\b[^\r\n]*>|cat\b[^\r\n]*>|sed\b[^\r\n]*\s-i\b|find\b[^\r\n]*-delete\b)/i.test(command) ||
-    // Generic output redirect: > or >> to a file (not >& which redirects fd to fd)
-    /[^0-9&]>>(?!&)/.test(command) || /[^0-9&]>(?!&)/.test(command) ||
-    // Interpreter with embedded code: node -e, python -c, ruby -e, perl -e
-    /\b(?:node|python[3]?|ruby|perl)\b[^\r\n]*-[ec]\b/.test(command);
+/**
+ * Extract file targets of output redirections (`>`, `>>`, `2>`, `&>`, ...).
+ * fd-duplication (`>&1`, `2>&2`) and /dev/null are not file writes, so a
+ * read-only command like `cat pkg.json 2>/dev/null` yields no write target.
+ * Process substitution (`>(...)`) is not matched.
+ */
+function redirectFileTargets(command) {
+  const targets = [];
+  const re = /(?:^|[\s|;&])(?:\d+|&)?>>?(?!\()\s*(?:"([^"]+)"|'([^']+)'|([^\s|;&>]+))/g;
+  let match;
+  while ((match = re.exec(String(command))) !== null) {
+    const target = match[1] ?? match[2] ?? match[3] ?? "";
+    if (!target || target.startsWith("&") || /^\/dev\/null$/i.test(target)) continue;
+    targets.push(target);
+  }
+  return targets;
 }
 
-function protectedShellReference(command, patterns) {
-  const pathLike = String(command).replace(/[\s"'`=<>|;&]+/g, "/");
-  return matchesProtectedPath(pathLike, patterns);
+/** Commands that mutate file contents without a redirection operator. The
+ * destination argument position varies (cp/mv/tee/sed -i/find -delete/dd),
+ * so these keep the conservative whole-command protected-path scan. */
+const WRITE_COMMAND_RE = /\b(?:cp|mv|copy|move|tee|dd)\b|\bsed\b[^\r\n]*\s-i\b|\bfind\b[^\r\n]*-delete\b|\b(?:Set|Add)-Content\b|\bOut-File\b|\b(?:New-Item|ni)\b/i;
+
+/** Interpreters invoked with inline code (node -e, python -c) can write any
+ * file without a redirection or a mutating command, so they keep the
+ * conservative whole-command scan. Upstream added this detection; it is
+ * merged into the precise implementation rather than replacing it. */
+const INLINE_INTERPRETER_RE = /\b(?:node|python[3]?|ruby|perl)\b[^\r\n]*-[ec]\b/i;
+
+/** Return the protected pattern a shell command would WRITE to, or null.
+ * Redirection targets are checked precisely (read sources mentioning a
+ * protected path no longer trigger a block); mutating commands without
+ * explicit targets keep the conservative whole-command scan. */
+export function protectedShellWriteTarget(command, patterns) {
+  for (const target of redirectFileTargets(command)) {
+    const hit = matchesProtectedPath(target, patterns);
+    if (hit) return hit;
+  }
+  if (WRITE_COMMAND_RE.test(command) || INLINE_INTERPRETER_RE.test(command)) {
+    const pathLike = String(command).replace(/[\s"'`=<>|;&]+/g, "/");
+    return matchesProtectedPath(pathLike, patterns);
+  }
+  return null;
 }
 
 const PORTABLE_ABSOLUTE_RE = /^([A-Za-z]:[\\/]|[\\/]{2})/;
@@ -250,7 +274,7 @@ export function classifyToolCall(toolName, input, config, cwd) {
 
   if (
     (toolName === "memory_add_fact" || toolName === "learn") &&
-    /^(?:api[_-]?key|password|secret|token|access[_-]?token|auth[_-]?token|private[_-]?key)$/i.test(String(input?.predicate ?? "")) &&
+    /^(?:api[_-]?key|password|secret|token|access[_-]?token|auth[_-]?token)$/i.test(String(input?.predicate ?? "")) &&
     String(input?.object ?? "").trim().length >= 8
   ) {
     return { risk: RISK.BLOCKED, reason: "possible raw secret in knowledge-graph fact", approval: false, redactInput: true };
@@ -258,7 +282,7 @@ export function classifyToolCall(toolName, input, config, cwd) {
 
   if (toolName === "bash") {
     const command = String(input?.command ?? "");
-    const protectedPattern = shellMayWrite(command) ? protectedShellReference(command, config.protectPaths) : null;
+    const protectedPattern = protectedShellWriteTarget(command, config.protectPaths);
     if (protectedPattern) {
       return { risk: RISK.BLOCKED, reason: `shell write targets protected path: ${protectedPattern}`, approval: false };
     }

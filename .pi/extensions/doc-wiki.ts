@@ -71,7 +71,7 @@ export default function equaxisDocWiki(pi: ExtensionAPI): void {
   }
 
   function buildFromPaths(paths: string[]): DocIndex {
-    const docs = [];
+    const docs: Array<{ text: string; path: string }> = [];
     for (const relativePath of paths) {
       const absolute = path.resolve(services.paths.workspace, relativePath);
       assertInside(services.paths.workspace, absolute, "wiki ingest path");

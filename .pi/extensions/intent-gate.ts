@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
+import { beforeAgentStartText } from "../../src/pi-event-utils.mjs";
 
 /**
  * IntentGate — lightweight regex keyword → mode-instruction injection
@@ -59,7 +60,7 @@ export default function equaxisIntentGate(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event, ctx) => {
     if (!compiled.length) return;
-    const prompt = String(event.prompt ?? "").slice(0, 20000); // bound regex work
+    const prompt = beforeAgentStartText(event).slice(0, 20000); // bound regex work
     const hits = compiled.filter(({ regex }) => regex.test(prompt));
     if (!hits.length) return;
     const blocks = hits.map(({ inject }) => inject).join("\n");

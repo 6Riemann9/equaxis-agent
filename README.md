@@ -12,7 +12,7 @@
 
 ![Node](https://img.shields.io/badge/node-%3E%3D22.19-339933?logo=node.js&logoColor=white)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB?logo=python&logoColor=white)
-![Pi](https://img.shields.io/badge/pi-0.83.0-111111)
+![Pi](https://img.shields.io/badge/pi-1.3.0-111111)
 ![CI](https://img.shields.io/github/actions/workflow/status/6Riemann9/equaxis-agent/verify.yml?branch=main&label=CI)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -20,7 +20,7 @@
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│                        Pi Kernel 0.83                        │
+│                        Pi Kernel 1.3                        │
 │               models · sessions · TUI · tools                │
 └──────────────────────────────┬───────────────────────────────┘
                                │  extension events

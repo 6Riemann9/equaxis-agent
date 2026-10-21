@@ -114,10 +114,72 @@ Harness 面板 Overview 的 **Session costs** 段从项目 session 文件聚合�
 | 层 | 位置 | 作用域 |
 |---|---|---|
 | `default` | 代码内 `DEFAULT_EQUAXIS_CONFIG` | 兜底 |
+| `bundled` | 包内 `.pi/equaxis.json` | 本安装（安装默认值，如 profile=full） |
 | `global` | `~/.equaxis/config.json` | 所有项目 |
-| `project` | `.pi/equaxis.json` | 当前项目 |
+| `project` | `<工作区>/.pi/equaxis.json` | 当前项目 |
+
+**项目根 vs 运行时根**：project root 是最近的 `.pi/equaxis.json` 携带者（配置与状态）；runtime root 携带 `.pi/extensions` + `scripts/`（仓库检出=自身，全局安装=包）。只有配置、没有运行时的 data-only 工作区（如家目录）会从包装载扩展与脚本——`src/runtime-root.mjs` 统一解析，doctor 以 `Project: <root> (data-only; runtime from package)` 明示。
 
 `loadEquaxisConfigLayers(cwd)` 返回 `{defaults, global, project, effective}`；`scripts/config-edit.mjs` 提供 `view / set / unset`（写入前对**被编辑层单独校验**，非法值不落盘并回滚）。pi-web Harness 面板的 **Settings** tab 按分区展示（Agent/Governance/Memory/Skills/Subagents/Evaluation/Protocols/Runtime/Extensions/…），每个键显示当前生效值 + 来源徽标（default/global/project），可内联编辑（写入 project 层）或 Reset（回退下层默认）。Agent 分区只读展示 `.pi/settings.json`（provider/model 走 pi-web Models 面板管理）。
+
+## pi-web 运行时产物优先级（source cache vs 根仓库）
+
+`.pi/extensions/pi-web.ts` 的 `piWebLauncher()` 按以下顺序选择启动目标，**前者命中即短路**：
+
+1. **开发者 override**（`PI_WEB_HOME` 环境变量 或 `~/.equaxis/config.json` 的 `piWeb.home`）——用于指向仓库外的开发副本；要求 `bin/pi-web.js` 和 `.next/BUILD_ID` 同时存在。
+2. **仓库内 `pi-web/`**（源码编辑区）——源码在但从未构建（缺 `.next/BUILD_ID`）时**不会静默回退**，而是显式报错并给出修复命令：`cd pi-web && npm ci && npm run build`。
+3. **`.pi/runtime/source-cache/agegr-pi-web/`**（运行时产物区，legacy）——上游 fork 的缓存构建产物。
+4. **全局安装 / PATH 查找**（`pi-web`）。
+
+要点：
+
+- **"改了代码但没生效"** 的第一嫌疑是优先级：override / source-cache 里的旧产物盖过了你在 `pi-web/` 里的新代码。启动日志里的 `via: ...` 字段标明实际用的是哪一层。
+- 修改 pi-web 源码后的标准顺序是 **build → restart → verify**：
+  1. `cd pi-web && npm run build`（Next 生产构建；注意 Next SWC 排除规则不允许在 `node_modules` 路径下构建——全局安装内的 pi-web 不能原地 build，需 override 指向仓库副本）
+  2. 重启 pi / 重新打开 pi-web 页面（扩展重启后才重新探测 launcher 目标）
+  3. 验证：页面加载后检查 `/api/home` 200，且启动日志 `via:` 指向你刚构建的那一层。
+- 生产安装不应携带 source-cache；仓库开发时优先方案 2（仓库内构建），方案 1 仅用于跨仓库开发副本。
+
+## 已知启动告警与依赖公告（Known Warnings）
+
+### `builtin:tool-search` 被替换告警（良性，无需处理）
+
+启动时可能出现：
+
+```
+Warning: Extension package "builtin:tool-search": Extension .../tool-catalog.ts
+registers tool `tool_search`, so built-in extension `tool-search` was not loaded.
+```
+
+**结论：这是预期行为，不是错误。**
+
+- Pi 1.3.0 的可替换扩展机制（`omitReplacedExtensions`）检测到 equaxis 的
+  `tool-catalog.ts` 注册了同名工具 `tool_search`，于是**主动跳过**内置
+  `builtin:tool-search`，避免重复注册。equaxis 的版本是超集（合并 deferred MCP
+  工具发现 + `setActiveTools` 激活语义），本就应当胜出。
+- 告警无法从扩展侧消除：它只在“可替换的内置扩展被非 replaceable 扩展替换”时由
+  Pi 输出，没有 per-run 开关。
+- **消除告警的唯一方式**是在 settings 里禁用内置版（`"extensions": ["-builtin:tool-search"]`）。
+  由于 Pi 没有 per-session settings，该设置会作用于**所有** Pi 会话，包括裸 `pi`
+  ——裸 `pi` 将失去内置 `tool_search`（默认虽为 inactive，但用 `-t tool_search`
+  或 `defaultTools` 显式启用时会不可用）。
+- 因此 equaxis 默认**保留告警、保留内置版**：不为了消除一条纯信息提示而牺牲裸
+  `pi` 的能力。若你只使用 `equaxis`，可自行按上式禁用内置版消除提示。
+
+### vendored `effect` 依赖公告（GHSA-38f7-945m-qr2g / CVE-2026-32887）
+
+- 公告范围：`effect < 3.20.0`（OSV：introduced `0` → fixed `3.20.0`）。根
+  `package.json` 目前声明 `effect@^2.4.19`，因此**在受影响范围内**。
+- 触发条件：Effect fiber 在**并发负载 + `@effect/rpc`** 下 `AsyncLocalStorage`
+  上下文串扰（CVSS `AC:H`，需 RPC 服务端并发）。
+- equaxis 现状：`effect` 仅被 `.pi/extensions/vendor/my-pi-setup` 下的 vendored
+  扩展（`file-search`、`subagents`）使用，**不使用 `@effect/rpc`**，也不在并发 RPC
+  服务端路径上，属于**低危、非可利用**。
+- 处理决策：**接受并记录**，不强行升级。原因：vendored 树内部存在版本漂移
+  （顶层 `effect@^2.4.19` + `@effect/platform@^0.48`，而 `file-search` 子包已声明
+  `@effect/platform-node@^4.0.0-beta`，对应 effect 4.x）；把根 `effect` 升到 3.20+
+  需要同步迁移 vendored 第三方代码（API 破坏性变更），风险高于收益。
+  正确修法是**刷新 vendored my-pi-setup 上游副本来对齐 effect 4.x**，排在后续。
 
 ## Shared Runtime Services
 

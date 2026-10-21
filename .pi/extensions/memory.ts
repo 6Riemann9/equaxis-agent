@@ -9,6 +9,7 @@ import { NativeMemoryBackend, NativeMemoryCore } from "../../src/memory-core.mjs
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { MEMORY_EXTRACTION_SYSTEM_PROMPT, consolidateMemoryHistory } from "../../src/memory-consolidate.mjs";
 import { containsSecretLikeInput } from "../../src/policy.mjs";
+import { beforeAgentStartText, isBeforeAgentStartUserRun } from "../../src/pi-event-utils.mjs";
 import { reflectRun } from "../../src/reflection.mjs";
 
 interface MemoryDreamConfig {
@@ -427,13 +428,17 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event, ctx) => {
     lastContext = ctx;
     if (!config.enabled) return;
+    // Pi 1.2+: custom-message runs (pi.sendMessage with triggerTurn) carry no
+    // user prompt. Memory recall/recording stays scoped to real user prompts —
+    // machine-injected runs must not leak user context nor pollute history.
+    // (0.83 events have no messageType and always carry a prompt: user runs.)
+    if (!isBeforeAgentStartUserRun(event)) return;
+    const promptText = beforeAgentStartText(event);
     const sessionId = ctx.sessionManager.getSessionId();
     let context = "";
     if (config.autoRecall) {
-      // Only autoRecall needs the bridge up front for context retrieval.
-      // Prompt recording is NOT gated on it: dream consolidation needs the
-      // user side of history even when autoRecall is off, and the native
-      // backend is in-process (no spawn cost).
+      // Only autoRecall needs the bridge up front. Without it, the Python
+      // bridge stays dormant until a memory tool or /memory command is used.
       try {
         const memory = await ensureBridge(ctx);
         // NOTE: the context action composes the full memory snapshot; the
@@ -441,7 +446,7 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
         // building (maxContextChars caps the injected snapshot instead).
         const result = await memory.request("context", {
           session_id: sessionId,
-          query: event.prompt,
+          query: promptText,
           wing: undefined,
           room: undefined
         }, { signal: ctx.signal });
@@ -455,25 +460,25 @@ export default function equaxisMemory(pi: ExtensionAPI): void {
         lastDiagnostic = String(error);
         trace(ctx, "memory_context_failed", { error: String(error) });
       }
-    }
 
-    const promptKey = `${sessionId}:${ctx.sessionManager.getLeafId() ?? "root"}:${event.prompt}`;
-    if (promptKey !== lastRecordedPromptKey && !containsSecretLikeInput({ content: event.prompt })) {
-      try {
-        // ensureBridge is idempotent: the bridge is already running here.
-        const memory = await ensureBridge(ctx);
-        await memory.request("record_user", {
-          session_id: sessionId,
-          content: event.prompt.slice(0, config.maxStoredMessageChars)
-        }, { signal: ctx.signal });
-        lastRecordedPromptKey = promptKey;
-        trace(ctx, "memory_user_recorded", { chars: Math.min(event.prompt.length, config.maxStoredMessageChars) });
-      } catch (error) {
-        lastDiagnostic = String(error);
-        trace(ctx, "memory_user_record_failed", { error: String(error) });
+      const promptKey = `${sessionId}:${ctx.sessionManager.getLeafId() ?? "root"}:${promptText}`;
+      if (promptKey !== lastRecordedPromptKey && !containsSecretLikeInput({ content: promptText })) {
+        try {
+          // ensureBridge is idempotent: the bridge is already running here.
+          const memory = await ensureBridge(ctx);
+          await memory.request("record_user", {
+            session_id: sessionId,
+            content: promptText.slice(0, config.maxStoredMessageChars)
+          }, { signal: ctx.signal });
+          lastRecordedPromptKey = promptKey;
+          trace(ctx, "memory_user_recorded", { chars: Math.min(promptText.length, config.maxStoredMessageChars) });
+        } catch (error) {
+          lastDiagnostic = String(error);
+          trace(ctx, "memory_user_record_failed", { error: String(error) });
+        }
+      } else if (promptKey !== lastRecordedPromptKey) {
+        trace(ctx, "memory_user_record_skipped", { reason: "possible_raw_secret" });
       }
-    } else if (promptKey !== lastRecordedPromptKey) {
-      trace(ctx, "memory_user_record_skipped", { reason: "possible_raw_secret" });
     }
 
     const memoryInstructions = `
@@ -524,15 +529,33 @@ ${context || "No relevant stored memory was retrieved."}
     const entries = pending.entries ?? [];
     if (entries.length === 0) return { processed: 0, memories: [], facts: [] };
 
-    const provider = dream.provider || ctx.model?.provider;
-    const modelId = dream.model || ctx.model?.id;
-    if (!provider || !modelId) {
-      throw new Error("No model available for dream consolidation (set memory.dream.provider/model in .pi/equaxis.json)");
+    const provider = dream.provider ?? ctx.model?.provider;
+    const modelId = dream.model ?? ctx.model?.id;
+    // Automatic fallback: an unavailable configured model (provider removed
+    // from models.json, typo'd id, missing credentials) must not kill
+    // consolidation — fall back to the session/main model instead.
+    const tryModel = async (candidateProvider, candidateId) => {
+      if (!candidateProvider || !candidateId) return null;
+      const candidate = ctx.modelRegistry.find(candidateProvider, candidateId);
+      if (!candidate) return null;
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(candidate);
+      return auth.ok ? { model: candidate, auth } : null;
+    };
+    let resolved = await tryModel(provider, modelId);
+    if (!resolved && ctx.model && (dream.provider || dream.model)) {
+      const fallback = await tryModel(ctx.model.provider, ctx.model.id);
+      if (fallback) {
+        trace(ctx, "memory_dream_model_fallback", {
+          configured: `${provider ?? "?"}/${modelId ?? "?"}`,
+          fallback: `${ctx.model.provider}/${ctx.model.id}`
+        });
+        resolved = fallback;
+      }
     }
-    const model = ctx.modelRegistry.find(provider, modelId);
-    if (!model) throw new Error(`Dream model unavailable: ${provider}/${modelId}`);
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) throw new Error(auth.error);
+    if (!resolved) {
+      throw new Error("No model available for dream consolidation (set memory.dream.provider/model in .pi/equaxis.json, or check provider credentials)");
+    }
+    const { model, auth } = resolved;
 
     const signal = AbortSignal.timeout(config.requestTimeoutMs);
     return consolidateMemoryHistory({

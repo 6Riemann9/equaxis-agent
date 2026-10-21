@@ -281,6 +281,20 @@ export function AppShell() {
     setActiveTopPanel("session");
   }, [isMobile]);
 
+  // Alt+M opens the Equaxis Memory dashboard from anywhere (not while typing).
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.key !== "m" && event.key !== "M") return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      event.preventDefault();
+      setMemoryDashboardOpen(true);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const handleSidebarToggle = useCallback(() => {
     if (isMobile) {
       setActiveTopPanel(null);
@@ -898,6 +912,10 @@ export function AppShell() {
     return () => observer.disconnect();
   }, [windowTitle]);
 
+  const MEMORY_SIDEBAR_ICON = (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0-2 5.2A4 4 0 0 0 9 20h3" /><path d="M12 3a4 4 0 0 1 4 4v1a3 3 0 0 1 2 5.2A4 4 0 0 1 15 20h-3" /><path d="M12 3v17M8 9h4M12 14h5" /></svg>
+  );
+
   const sidebarContent = (
     <>
       <SessionSidebar
@@ -933,6 +951,14 @@ export function AppShell() {
                 <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
                 <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
               </svg>
+            ),
+          },
+          {
+            label: translate("common.memory"),
+            onClick: () => setMemoryDashboardOpen(true),
+            disabled: !activeCwd,
+            icon: (
+              MEMORY_SIDEBAR_ICON
             ),
           },
           {
@@ -1788,7 +1814,7 @@ export function AppShell() {
             <>
               {renderThemeButton(false)}
               {renderLanguageButton(false)}
-              <button type="button" onClick={() => setMemoryDashboardOpen(true)} disabled={!activeCwd} title="Equaxis Memory" aria-label="Equaxis Memory" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: memoryDashboardOpen ? "var(--bg-selected)" : "none", border: "none", borderRight: "1px solid var(--border)", color: activeCwd ? "var(--text-muted)" : "var(--text-dim)", cursor: activeCwd ? "pointer" : "not-allowed", flexShrink: 0 }}>
+              <button type="button" onClick={() => setMemoryDashboardOpen(true)} disabled={!activeCwd} title={activeCwd ? translate("memory.shortcutHint") : translate("memory.openProjectFirst")} aria-label={translate("memory.shortcutHint")} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: memoryDashboardOpen ? "var(--bg-selected)" : "none", border: "none", borderRight: "1px solid var(--border)", color: activeCwd ? "var(--text-muted)" : "var(--text-dim)", cursor: activeCwd ? "pointer" : "not-allowed", flexShrink: 0 }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3a4 4 0 0 0-4 4v1a3 3 0 0 0-2 5.2A4 4 0 0 0 9 20h3" /><path d="M12 3a4 4 0 0 1 4 4v1a3 3 0 0 1 2 5.2A4 4 0 0 1 15 20h-3" /><path d="M12 3v17M8 9h4M12 14h5" /></svg>
               </button>
               <button type="button" onClick={() => setHarnessDashboardOpen(true)} disabled={!activeCwd} title="Equaxis Harness" aria-label="Equaxis Harness" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: harnessDashboardOpen ? "var(--bg-selected)" : "none", border: "none", borderRight: "1px solid var(--border)", color: activeCwd ? "var(--text-muted)" : "var(--text-dim)", cursor: activeCwd ? "pointer" : "not-allowed", flexShrink: 0 }}>

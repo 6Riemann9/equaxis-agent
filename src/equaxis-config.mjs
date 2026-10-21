@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ownPackageRoot } from "./runtime-root.mjs";
 
 const UNIFIED_CONFIG_FILE = ".pi/equaxis.json";
 const LEGACY_RELIABILITY_FILE = ".pi/reliability.json";
@@ -669,7 +670,7 @@ export function globalEquaxisConfigPath() {
 
 /**
  * Load all config layers for a project and report provenance:
- *   defaults (bundled) → global (~/.equaxis/config.json) → project (.pi/equaxis.json)
+ *   defaults → bundled (package .pi/equaxis.json) → global (~/.equaxis/config.json) → project (.pi/equaxis.json)
  * The effective config is the fully merged and validated result the runtime
  * uses; the UI shows each layer so users can see where a value comes from.
  *
@@ -688,17 +689,34 @@ export function loadEquaxisConfigLayers(cwd, options = {}) {
         reliability: readOptionalJson(cwd, LEGACY_RELIABILITY_FILE),
         memory: readOptionalJson(cwd, LEGACY_MEMORY_FILE)
       };
+  // The bundled package config (.pi/equaxis.json inside the installed
+  // package) carries installation defaults such as runtime.profile=full. For
+  // global installs serving a data-only workspace, the workspace's own
+  // .pi/equaxis.json is the PROJECT layer — without the bundled layer in
+  // between, those installation defaults would silently drop out.
+  const bundledPath = path.join(ownPackageRoot(import.meta.url), UNIFIED_CONFIG_FILE);
+  const sameAsProject = path.resolve(bundledPath) === path.resolve(projectPath);
+  const bundledCustom = !sameAsProject && fs.existsSync(bundledPath) ? parseJson(bundledPath) : {};
+  const bundledMigrated = migrateEquaxisConfig(bundledCustom ?? {}, bundledPath);
   const globalMigrated = migrateEquaxisConfig(globalCustom ?? {}, globalPath);
   const projectMigrated = migrateEquaxisConfig(projectCustom ?? {}, projectPath);
   const effective = validateEquaxisConfig(
-    mergeConfig(mergeConfig(DEFAULT_EQUAXIS_CONFIG, globalMigrated ?? {}), projectMigrated ?? {}),
+    mergeConfig(
+      mergeConfig(
+        mergeConfig(DEFAULT_EQUAXIS_CONFIG, bundledMigrated ?? {}),
+        globalMigrated ?? {}
+      ),
+      projectMigrated ?? {}
+    ),
     projectPath
   );
   return {
     defaults: DEFAULT_EQUAXIS_CONFIG,
+    bundled: bundledCustom,
     global: globalCustom,
     project: projectCustom,
     effective,
+    bundledPath,
     globalPath,
     projectPath
   };

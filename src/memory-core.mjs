@@ -23,9 +23,16 @@ export const MEMORY_CORE_VERSION = "0.2.0-native";
 export const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 export const HALL_TYPES = ["hall_general", "hall_facts", "hall_events", "hall_discoveries", "hall_preferences", "hall_advice"];
 
-// Charset validation matching the Python bridge's validate_wing_room (validation.py:29-51).
-// Enforced at the native entry point so illegal values are rejected early rather than
-// silently persisted and causing cross-backend incompatibilities.
+const AUDIT_MAX_BYTES = 2 * 1024 * 1024;
+
+function previewOf(value, max = 160) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+// Charset validation matching the Python bridge's validate_wing_room.
+// Enforced at the native entry point so illegal values are rejected early
+// rather than silently persisted and causing cross-backend incompatibilities.
 export const MEMORY_SECTION_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 export const HALL_RE = /^hall_[a-zA-Z0-9_-]{1,32}$/;
 
@@ -91,8 +98,6 @@ function overlapScore(queryTokens, content) {
 }
 
 export class NativeMemoryCore {
-  #cachedMaxCursor;
-
   constructor({ rootDir, model = EMBEDDING_MODEL }) {
     this.rootDir = path.resolve(rootDir);
     this.model = model;
@@ -102,11 +107,11 @@ export class NativeMemoryCore {
     this.dreamCursorPath = path.join(this.historyDir, ".dream_cursor");
     this.drawersPath = path.join(this.rootDir, "long_term", "drawers.json");
     this.knowledgeGraphPath = path.join(this.rootDir, "knowledge_graph.sqlite3");
+    this.auditPath = path.join(this.rootDir, "audit.jsonl");
     this.drawers = [];
     this.embedderPromise = null;
     this.embeddingReady = false;
     this.embeddingError = null;
-    this.#cachedMaxCursor = undefined;
     this.#ensureLayout();
     this.#loadDrawers();
   }
@@ -133,6 +138,37 @@ export class NativeMemoryCore {
     const tmp = `${this.drawersPath}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(this.drawers), "utf8");
     fs.renameSync(tmp, this.drawersPath);
+  }
+
+  /** CRUD audit trail: one JSONL entry per mutation in <rootDir>/audit.jsonl.
+   * Auditing must never break a memory operation, so every failure is
+   * swallowed. Bounded at AUDIT_MAX_BYTES by keeping the newest half. */
+  #audit(action, details) {
+    try {
+      const entry = JSON.stringify({ ts: nowIso(), action, ...details });
+      fs.appendFileSync(this.auditPath, `${entry}\n`, "utf8");
+      const stat = fs.statSync(this.auditPath);
+      if (stat.size > AUDIT_MAX_BYTES) {
+        const lines = fs.readFileSync(this.auditPath, "utf8").split(/\r?\n/).filter(Boolean);
+        fs.writeFileSync(this.auditPath, `${lines.slice(Math.floor(lines.length / 2)).join("\n")}\n`, "utf8");
+      }
+    } catch { /* audit is best-effort */ }
+  }
+
+  auditLog({ limit = 50, offset = 0 } = {}) {
+    const rawLimit = Number(limit);
+    const pageSize = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 50;
+    const rawOffset = Number(offset);
+    const pageOffset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+    let entries = [];
+    try {
+      entries = fs.readFileSync(this.auditPath, "utf8").split(/\r?\n/).filter(Boolean)
+        .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        .filter(Boolean);
+    } catch { /* no audit file yet */ }
+    entries.reverse(); // newest first
+    const total = entries.length;
+    return { entries: entries.slice(pageOffset, pageOffset + pageSize), total, limit: pageSize, offset: pageOffset };
   }
 
   #readInt(filePath) {
@@ -163,18 +199,10 @@ export class NativeMemoryCore {
   }
 
   appendHistory(sessionId, content) {
-    // Cache maxCursor in memory: full readHistory() only on first call to
-    // calibrate, then increment locally.  Prevents O(n²) re-reads when
-    // many entries accumulate and avoids concurrent cursor collisions
-    // (each process tracks its own monotonic counter after the initial scan).
-    if (this.#cachedMaxCursor === undefined) {
-      const entries = this.readHistory();
-      const maxFromHistory = entries.reduce((max, entry) => Math.max(max, Number(entry.cursor) || 0), 0);
-      const stored = this.#readInt(this.cursorPath);
-      this.#cachedMaxCursor = Math.max(stored, maxFromHistory);
-    }
-    this.#cachedMaxCursor += 1;
-    const cursor = this.#cachedMaxCursor;
+    const entries = this.readHistory();
+    const maxCursor = entries.reduce((max, entry) => Math.max(max, Number(entry.cursor) || 0), 0);
+    const stored = this.#readInt(this.cursorPath);
+    const cursor = Math.max(stored, maxCursor) + 1;
     const entry = { cursor, timestamp: nowIso(), content, session_id: sessionId, metadata: {} };
     fs.appendFileSync(this.historyPath, `${JSON.stringify(entry)}\n`, "utf8");
     this.#writeInt(this.cursorPath, cursor);
@@ -341,99 +369,21 @@ export class NativeMemoryCore {
     };
   }
 
-  /**
-   * Associative recall (RippleMem structural channel): anchors from the
-   * plain search rank first, then same-source neighbors (source_file edge)
-   * are appended by raw score, up to `limit` extra matches. Absolute-score
-   * re-ranking with a fixed penalty can never surface a non-anchor item
-   * (it would already rank above the anchor tail), so provenance expansion
-   * is additive: anchors stay first by construction, scattered same-source
-   * evidence gets recollected. Reading-side soft enhancement: expansion
-   * errors only affect ranking.
-   */
-  async associativeSearchAsync({ query, wing, room, limit = 5, anchorMultiplier = 3 } = {}) {
-    const queryTokens = tokenize(query);
-    const inScope = (drawer) => (!wing || drawer.wing === wing) && (!room || drawer.room === room);
-    const scoped = (await this.#scoreDrawers(query, queryTokens)).filter(({ drawer }) => inScope(drawer));
-    if (scoped.length === 0) return { matches: [] };
-    const ranked = [...scoped].sort((left, right) => right.score - left.score);
-    const anchors = ranked.slice(0, Math.min(limit * anchorMultiplier, 30));
-    const matches = anchors.map(({ drawer, score }) => ({
-      id: drawer.id, content: drawer.content, metadata: this.#matchMetadata(drawer), score: Math.max(0, score)
-    }));
-    const seen = new Set(matches.map((match) => match.id));
-    const sourceOf = new Set(anchors.map(({ drawer }) => drawer.source_file).filter(Boolean));
-    const expansions = ranked
-      .filter(({ drawer }) => !seen.has(drawer.id) && sourceOf.has(drawer.source_file))
-      .slice(0, Math.min(limit, 20))
-      .map(({ drawer, score }) => ({
-        id: drawer.id, content: drawer.content, metadata: this.#matchMetadata(drawer), score: Math.max(0, score)
-      }));
-    return { matches: [...matches, ...expansions] };
-  }
-
-  #matchMetadata(drawer) {
-    return { wing: drawer.wing, room: drawer.room, hall: drawer.hall, source_file: drawer.source_file, filed_at: drawer.filed_at };
-  }
-
-  /**
-   * Multi-hop graph retrieval: BFS from seed entities over current facts,
-   * undirected, per-hop score decay, visited-node cap and min-score cutoff.
-   * Mirrors the Python knowledge-graph graph_search (TencentDB wiki analog).
-   */
-  graphSearch({ seeds = [], max_hops: maxHops = 2, hop_decay: hopDecay = 0.5, min_score: minScore = 0.05, max_nodes: maxNodes = 100 } = {}) {
-    const seedNames = [...new Set((seeds ?? []).map((seed) => normalizeEntity(seed)).filter(Boolean))];
-    if (seedNames.length === 0) return { nodes: [], edges: [], visited: 0 };
-    const db = this.#kg();
-    try {
-      this.#kgInitialize(db);
-      const rows = db.prepare("SELECT subject, predicate, object FROM triples WHERE valid_to IS NULL").all();
-      const byName = new Map();
-      for (const row of rows) {
-        for (const name of [row.subject, row.object]) {
-          if (!byName.has(name)) byName.set(name, []);
-          byName.get(name).push(row);
-        }
-      }
-      const visited = new Map();
-      const edges = [];
-      const queue = seedNames.map((name) => [name, 0]);
-      while (queue.length > 0 && visited.size < maxNodes) {
-        const [name, depth] = queue.shift();
-        if (visited.has(name) || depth > maxHops) continue;
-        const score = hopDecay ** depth;
-        if (score < minScore) continue;
-        visited.set(name, { name, score: Math.round(score * 10000) / 10000, depth });
-        for (const triple of byName.get(name) ?? []) {
-          edges.push({ from: triple.subject, predicate: triple.predicate, to: triple.object, depth: depth + 1 });
-          const neighbor = triple.subject === name ? triple.object : triple.subject;
-          if (!visited.has(neighbor)) queue.push([neighbor, depth + 1]);
-        }
-      }
-      const cappedEdges = edges.slice(0, maxNodes * 8);
-      return {
-        nodes: [...visited.values()].sort((left, right) => right.score - left.score || String(left.name).localeCompare(String(right.name))),
-        edges: cappedEdges.sort((left, right) => left.depth - right.depth || String(left.from).localeCompare(String(left.predicate))),
-        visited: visited.size
-      };
-    } finally {
-      db.close();
-    }
-  }
-
   async remember({ wing, room, content, source_file = "equaxis", hall = "hall_general", metadata = {} }) {
     if (!wing || !room) throw new Error("wing and room are required");
-    const cleanWing = validateSection(wing, "wing");
-    const cleanRoom = validateSection(room, "room");
-    const cleanHall = validateHall(hall);
-    const id = drawerId(cleanWing, cleanRoom, content);
+    // Same charset contract as the Python bridge: reject illegal sections and
+    // halls at the entry point instead of persisting them.
+    wing = validateSection(wing, "wing");
+    room = validateSection(room, "room");
+    hall = validateHall(hall);
+    const id = drawerId(wing, room, content);
     const existing = this.drawers.find((drawer) => drawer.id === id);
     const embedding = await this.#embed(content);
     const record = {
       id,
-      wing: cleanWing,
-      room: cleanRoom,
-      hall: cleanHall,
+      wing,
+      room,
+      hall,
       content,
       source_file,
       chunk_index: 0,
@@ -446,6 +396,14 @@ export class NativeMemoryCore {
     if (index >= 0) this.drawers[index] = record;
     else this.drawers.push(record);
     this.#persistDrawers();
+    this.#audit(index >= 0 ? "remember.refresh" : "remember", {
+      actor: source_file,
+      drawer_id: id,
+      wing,
+      room,
+      hall,
+      preview: previewOf(content)
+    });
     return { record: this.#publicDrawer(record) };
   }
 
@@ -475,10 +433,7 @@ export class NativeMemoryCore {
     const objectName = normalizeEntity(object);
     const predicateName = String(predicate ?? "").trim();
     if (!subjectName || !predicateName || !objectName) throw new Error("subject, predicate and object are required");
-    // Deterministic id from (s, p, o): re-adding the same fact is a no-op,
-    // so at-least-once dream retries can never mint duplicate triples
-    // (mirrors the Python core's (s,p,o) idempotency).
-    const tripleId = `t_${sha256(`${subjectName}\u0000${predicateName}\u0000${objectName}`).slice(0, 24)}`;
+    const tripleId = `t_${sha256(`${subjectName}\u0000${predicateName}\u0000${objectName}\u0000${nowIso()}`).slice(0, 24)}`;
     const db = this.#kg();
     try {
       this.#kgInitialize(db);
@@ -492,13 +447,19 @@ export class NativeMemoryCore {
       upsertEntity.run(subjectName, subjectName, now);
       upsertEntity.run(objectName, objectName, now);
       const insert = db.prepare(
-        "INSERT INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, metadata, extracted_at) VALUES (?, ?, ?, ?, NULL, NULL, 1.0, ?, ?) " +
-        "ON CONFLICT(id) DO NOTHING"
+        "INSERT INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, metadata, extracted_at) VALUES (?, ?, ?, ?, NULL, NULL, 1.0, ?, ?)"
       );
       insert.run(tripleId, subjectName, predicateName, objectName, JSON.stringify(metadata), now);
     } finally {
       db.close();
     }
+    this.#audit("add_fact", {
+      actor: typeof metadata.source === "string" ? metadata.source : "equaxis-native",
+      triple_id: tripleId,
+      subject: subjectName,
+      predicate: predicateName,
+      preview: previewOf(objectName)
+    });
     return { triple: { triple_id: tripleId, subject: subjectName, predicate: predicateName, object: objectName, valid_from: null, valid_to: null, confidence: 1.0, metadata } };
   }
 
@@ -529,25 +490,48 @@ export class NativeMemoryCore {
   deleteMemory(drawerId) {
     const index = this.drawers.findIndex((drawer) => drawer.id === drawerId);
     if (index < 0) throw new Error(`Unknown drawer: ${drawerId}`);
-    this.drawers.splice(index, 1);
+    const [removed] = this.drawers.splice(index, 1);
     this.#persistDrawers();
+    this.#audit("delete", {
+      actor: removed.source_file,
+      drawer_id: drawerId,
+      before: { wing: removed.wing, room: removed.room, hall: removed.hall, preview: previewOf(removed.content) }
+    });
     return { deleted: true, drawer_id: drawerId };
   }
 
   updateMemory({ drawer_id, content, wing, room, hall, source_file }) {
     const drawer = this.drawers.find((entry) => entry.id === drawer_id);
     if (!drawer) throw new Error(`Unknown drawer: ${drawer_id}`);
-    if (wing !== undefined) drawer.wing = validateSection(wing, "wing");
-    if (room !== undefined) drawer.room = validateSection(room, "room");
-    if (hall !== undefined) drawer.hall = validateHall(hall);
+    // Validate before mutating: a rejected value must not leave the drawer
+    // half-updated, and the audit before-image must show the real prior state.
+    const nextWing = wing === undefined || wing === null ? undefined : validateSection(wing, "wing");
+    const nextRoom = room === undefined || room === null ? undefined : validateSection(room, "room");
+    const nextHall = hall === undefined || hall === null ? undefined : validateHall(hall);
+    const before = { wing: drawer.wing, room: drawer.room, hall: drawer.hall, preview: previewOf(drawer.content) };
     drawer.content = content ?? drawer.content;
+    if (nextWing !== undefined) drawer.wing = nextWing;
+    if (nextRoom !== undefined) drawer.room = nextRoom;
+    if (nextHall !== undefined) drawer.hall = nextHall;
     drawer.source_file = source_file ?? drawer.source_file;
     this.#persistDrawers();
+    this.#audit("update", {
+      actor: source_file ?? drawer.source_file,
+      drawer_id,
+      before,
+      after: { wing: drawer.wing, room: drawer.room, hall: drawer.hall, preview: previewOf(drawer.content) }
+    });
     return { updated: true, record: this.#publicDrawer(drawer) };
   }
 
-  visualize({ limit = 500 }) {
-    const drawers = this.drawers.slice(0, Math.min(limit, 500)).map((drawer) => ({
+  visualize({ limit = 500, offset = 0 } = {}) {
+    // Non-positive or non-numeric paging params fall back to the first
+    // full-size page rather than slicing to an arbitrary sliver.
+    const rawLimit = Number(limit);
+    const pageSize = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 500;
+    const rawOffset = Number(offset);
+    const pageOffset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+    const drawers = this.drawers.slice(pageOffset, pageOffset + pageSize).map((drawer) => ({
       id: drawer.id,
       content: drawer.content,
       wing: drawer.wing,
@@ -559,9 +543,11 @@ export class NativeMemoryCore {
     }));
     const db = this.#kg();
     let facts = [];
+    let totalFacts = 0;
     try {
       this.#kgInitialize(db);
-      facts = db.prepare("SELECT * FROM triples ORDER BY extracted_at DESC LIMIT ?").all(Math.min(limit, 500)).map((row) => ({
+      totalFacts = db.prepare("SELECT COUNT(*) AS n FROM triples").get().n;
+      facts = db.prepare("SELECT * FROM triples ORDER BY extracted_at DESC LIMIT ? OFFSET ?").all(pageSize, pageOffset).map((row) => ({
         id: row.id,
         subject: row.subject,
         predicate: row.predicate,
@@ -575,8 +561,10 @@ export class NativeMemoryCore {
     } finally {
       db.close();
     }
+    // Room counts describe the whole store, not just the current page, so the
+    // dashboard sidebar stays correct while paging.
     const rooms = {};
-    for (const drawer of drawers) {
+    for (const drawer of this.drawers) {
       rooms[drawer.wing] ??= {};
       rooms[drawer.wing][drawer.room] = (rooms[drawer.wing][drawer.room] ?? 0) + 1;
     }
@@ -586,7 +574,8 @@ export class NativeMemoryCore {
       rooms,
       drawers,
       facts,
-      truncated: { drawers: this.drawers.length > drawers.length, facts: false }
+      page: { limit: pageSize, offset: pageOffset, total_drawers: this.drawers.length, total_facts: totalFacts },
+      truncated: { drawers: pageOffset + drawers.length < this.drawers.length, facts: pageOffset + facts.length < totalFacts }
     };
   }
 
@@ -680,11 +669,8 @@ export class NativeMemoryCore {
 
   setDreamCursor(cursor) {
     if (!Number.isInteger(cursor) || cursor < 0) throw new Error("cursor must be a non-negative integer");
-    // Monotonic: a stale writer must never roll the cursor back, or pending
-    // history would grow and re-process already-dreamed entries.
-    const next = Math.max(this.#readInt(this.dreamCursorPath), cursor);
-    this.#writeInt(this.dreamCursorPath, next);
-    return { ok: true, dream_cursor: next };
+    this.#writeInt(this.dreamCursorPath, cursor);
+    return { ok: true, dream_cursor: cursor };
   }
 }
 
@@ -705,8 +691,6 @@ export async function dispatchMemoryAction(core, action, payload = {}) {
     case "record_assistant": return core.recordAssistant(payload.session_id, payload.content);
     case "context": return core.buildContext(payload);
     case "search": return core.searchAsync(payload);
-    case "associative_search": return core.associativeSearchAsync(payload);
-    case "graph_search": return core.graphSearch(payload);
     case "remember": return core.remember(payload);
     case "recall": return core.recall(payload);
     case "add_fact": return core.addFact(payload);
@@ -714,6 +698,7 @@ export async function dispatchMemoryAction(core, action, payload = {}) {
     case "delete_memory": return core.deleteMemory(payload.drawer_id);
     case "update_memory": return core.updateMemory(payload);
     case "visualize": return core.visualize(payload);
+    case "audit_log": return core.auditLog(payload);
     case "export": return core.exportMemory(payload);
     case "import": return core.importExport(payload);
     case "repair": return core.repair(payload);

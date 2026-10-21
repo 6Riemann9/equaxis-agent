@@ -5,6 +5,7 @@ import type {
   ToolResultEvent
 } from "@earendil-works/pi-coding-agent";
 import { createEvalEvent } from "../../src/eval-loop.mjs";
+import { beforeAgentStartText } from "../../src/pi-event-utils.mjs";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -416,11 +417,15 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    trace(ctx, "agent_requested", { promptLength: event.prompt.length });
+    // Pi 1.2+: the event is a union; user runs carry `prompt`, custom runs
+    // carry a custom `message`. Normalize to text so mission tracking and
+    // secret scanning cover both.
+    const promptText = beforeAgentStartText(event);
+    trace(ctx, "agent_requested", { promptLength: promptText.length, messageType: event.messageType });
     // Track the current objective as a lightweight mission so long-running
     // work keeps a progress picture across turns and forks.
-    if (!containsSecretLikeInput({ content: event.prompt })) {
-      const objective = event.prompt.trim().slice(0, 160);
+    if (!containsSecretLikeInput({ content: promptText })) {
+      const objective = promptText.trim().slice(0, 160);
       if (objective && objective !== state.mission.objective) {
         state.mission.objective = objective;
         state.mission.startedAt = new Date().toISOString();
@@ -859,6 +864,87 @@ export default function reliabilityHarness(pi: ExtensionAPI): void {
         `Mode=${state.mode}; protected=${config.protectPaths.join(", ")}; maxTools/turn=${config.limits.maxToolCallsPerTurn}; maxHighRisk/turn=${config.limits.maxHighRiskCallsPerTurn}`,
         "info"
       );
+    }
+  });
+
+  pi.registerCommand("equaxis-model", {
+    description: "Feature model slots: [list] | set <slot> <provider> <model> | main <provider> <model> | unset <slot>",
+    handler: async (args, ctx) => {
+      const cwd = services.paths.workspace;
+      const tokens = args.trim().split(/\s+/).filter(Boolean);
+      const { loadEquaxisConfigLayers } = await import("../../src/equaxis-config.mjs");
+      const { applyModelSlot, describeProviderModels, hasCredentials, listModelSlots, loadModelCatalog } = await import("../../src/model-slots.mjs");
+      try {
+        const layers = loadEquaxisConfigLayers(cwd);
+        let piSettings: Record<string, unknown> = {};
+        try {
+          piSettings = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "settings.json"), "utf8"));
+        } catch {
+          // no project settings yet
+        }
+        const catalog = loadModelCatalog();
+        if (tokens.length === 0 || tokens[0] === "list") {
+          const slots = listModelSlots({ effective: layers.effective, piSettings, catalog });
+          const lines = slots.map((slot) => {
+            const status = !slot.configured
+              ? "— follows the session model"
+              : slot.error
+                ? `BROKEN: ${slot.error}`
+                : "ok";
+            return `${slot.slot.padEnd(8)} ${slot.resolved ?? "-"}  ${status}\n         ${slot.label}; fallback: ${slot.fallback}`;
+          });
+          ctx.ui.notify(`Model slots (${cwd}):\n${lines.join("\n")}`, "info");
+          return;
+        }
+        if (tokens[0] === "catalog") {
+          const providerName = tokens[1];
+          if (!providerName) {
+            const providers = [...catalog.entries()]
+              .map(([name, models]) => ({ name, count: models.size, creds: hasCredentials(name) }))
+              .sort((a, b) => (Number(b.creds.ok) - Number(a.creds.ok)) || a.name.localeCompare(b.name));
+            ctx.ui.notify(
+              `Providers (usable first, \u2713 = local key):\n${providers.map((p) => `  ${p.name.padEnd(24)} ${p.count} models  ${p.creds.ok ? "\u2713 " + p.creds.source : "no local key"}`).join("\n")}`,
+              "info"
+            );
+            return;
+          }
+          const models = describeProviderModels(catalog, providerName);
+          if (!models) {
+            ctx.ui.notify(`unknown provider "${providerName}" — /equaxis-model catalog`, "error");
+            return;
+          }
+          const creds = hasCredentials(providerName);
+          ctx.ui.notify(
+            `${providerName} — ${models.length} models  ${creds.ok ? "\u2713 key via " + creds.source : "no local key (env vars may still apply)"}\n${models.map((m) => `  ${m.id.padEnd(36)} ${m.name ?? ""}`).join("\n")}`,
+            "info"
+          );
+          return;
+        }
+        let result;
+        if (tokens[0] === "set" && tokens.length === 4) {
+          result = applyModelSlot({ slotId: tokens[1], provider: tokens[2], model: tokens[3], cwd, layers });
+        } else if (tokens[0] === "main" && tokens.length === 3) {
+          result = applyModelSlot({ slotId: "main", provider: tokens[1], model: tokens[2], cwd, layers });
+        } else if (tokens[0] === "unset" && tokens.length === 2) {
+          result = applyModelSlot({ slotId: tokens[1], clear: true, cwd, layers });
+        } else {
+          ctx.ui.notify(
+            "usage: /equaxis-model [list] | set <slot> <provider> <model> | main <provider> <model> | unset <slot> | catalog [provider]  (slots: main, dream, advisor)",
+            "error"
+          );
+          return;
+        }
+        trace(ctx, "model_slot_updated", { slot: result.slot, provider: result.provider, model: result.model });
+        const target = path.relative(cwd, result.file) || result.file;
+        ctx.ui.notify(
+          result.provider
+            ? `${result.slot}: ${result.provider}/${result.model} → ${target}`
+            : `${result.slot}: cleared → follows the session model (${target})`,
+          "info"
+        );
+      } catch (error) {
+        ctx.ui.notify(`equaxis-model: ${String((error as Error)?.message ?? error)}`, "error");
+      }
     }
   });
 

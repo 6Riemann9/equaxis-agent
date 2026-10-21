@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { createExtensionRuntimeServices } from "../../src/extension-runtime-services.mjs";
 import { containsSecretLikeInput } from "../../src/policy.mjs";
+import { beforeAgentStartText } from "../../src/pi-event-utils.mjs";
 import {
   deriveSkillFromRun,
   loadSkillsFromDirectory,
@@ -31,6 +32,15 @@ interface LoadedSkill {
   baseDir: string;
   score?: number;
   estimatedTokens?: number;
+  mcpServers?: Array<{
+    name?: string;
+    command?: string;
+    args?: string[];
+    url?: string;
+    env?: Record<string, string>;
+    exposure?: string;
+    description?: string;
+  }>;
 }
 
 interface SkillView {
@@ -78,19 +88,83 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    runGoal.current = event.prompt.slice(0, 120);
+    const promptText = beforeAgentStartText(event);
+    runGoal.current = promptText.slice(0, 120);
     if (!config.enabled || !config.autoInject) return;
     const skills = loadSkills();
     if (!skills.length) return;
-    const { selected } = selectRelevantSkills(skills, event.prompt, {
+    const { selected } = selectRelevantSkills(skills, promptText, {
       maxTokens: config.maxContextTokens,
       requiredNames: config.requiredNames
     });
     if (!selected.length) return;
+    const mcpRegistered = await ensureSkillMcpServers(pi, selected, (detail) => services.trace.record(ctx, "skill_mcp_registered", detail));
     const blocks = selected.map(renderSkillBlock).join("\n\n");
-    services.trace.record(ctx, "skills_injected", { count: selected.length, names: selected.map((s) => s.name) });
+    services.trace.record(ctx, "skills_injected", { count: selected.length, names: selected.map((s) => s.name), mcpRegistered });
     return { systemPrompt: `${event.systemPrompt}${SKILLS_PROMPT}\n${blocks}` };
   });
+
+  /**
+ * Skill-embedded MCP: register the MCP servers a skill declares when that
+ * skill becomes active (auto-injection or skill_search). Registration is
+ * idempotent per name, guarded for kernels without the dynamic MCP API
+ * (Pi < 1.x), and never fails the surrounding skill injection: a broken
+ * server declaration degrades to a trace line. mcp.json entries with the
+ * same name take precedence (kernel behavior), so re-registering a
+ * file-configured server is a no-op override that keeps the file's config.
+ */
+const registeredSkillServers = new Set<string>();
+
+async function ensureSkillMcpServers(
+  pi: ExtensionAPI,
+  skills: Array<{ name: string; mcpServers?: unknown[] }>,
+  trace: (detail: Record<string, unknown>) => void
+): Promise<number> {
+  const register = (pi as unknown as { registerMcpServer?: (name: string, config: Record<string, unknown>) => void }).registerMcpServer;
+  if (typeof register !== "function") return 0;
+  let count = 0;
+  for (const skill of skills) {
+    const declarations = Array.isArray(skill.mcpServers) ? skill.mcpServers : [];
+    for (const raw of declarations) {
+      const declaration = raw as { name?: unknown; command?: unknown; args?: unknown; url?: unknown; env?: unknown; exposure?: unknown; description?: unknown };
+      const name = typeof declaration.name === "string" ? declaration.name.trim() : "";
+      if (!/^[A-Za-z0-9_-]+$/.test(name)) continue;
+      if (registeredSkillServers.has(name)) continue;
+      const hasCommand = typeof declaration.command === "string" && declaration.command.trim();
+      const hasUrl = typeof declaration.url === "string" && /^https?:\/\//.test(declaration.url.trim());
+      if (!hasCommand && !hasUrl) continue;
+      const config: Record<string, unknown> = {
+        // deferred: reachable through tool_search after discovery, keeping the
+        // system-prompt budget flat — the same philosophy as skill injection.
+        exposure: "deferred"
+      };
+      if (hasCommand) {
+        config.command = declaration.command;
+        if (Array.isArray(declaration.args)) config.args = declaration.args.map(String);
+        if (declaration.env && typeof declaration.env === "object") {
+          config.env = Object.fromEntries(Object.entries(declaration.env as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
+        }
+      } else {
+        config.url = declaration.url;
+      }
+      if (typeof declaration.exposure === "string" && ["codemode", "deferred", "direct", "hidden", "codemode-deferred"].includes(declaration.exposure)) {
+        config.exposure = declaration.exposure;
+      }
+      if (typeof declaration.description === "string" && declaration.description.trim()) {
+        config.description = declaration.description.slice(0, 200);
+      }
+      try {
+        register.call(pi, name, config);
+        registeredSkillServers.add(name);
+        count += 1;
+        trace({ server: name, skill: skill.name, exposure: config.exposure });
+      } catch (error) {
+        trace({ server: name, skill: skill.name, error: String(error).slice(0, 200) });
+      }
+    }
+  }
+  return count;
+}
 
   pi.on("turn_start", async () => {
     turnSteps.length = 0;
@@ -146,6 +220,10 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
     async execute(_toolCallId, params) {
       const skills = loadSkills();
       const { selected, omitted } = selectRelevantSkills(skills, params.query, { maxTokens: params.maxTokens ?? 3000 });
+      // Skills surfaced by search become active too: bring up any MCP servers
+      // they declare so the model can use them in the same turn.
+      const mcpEvents: Array<Record<string, unknown>> = [];
+      const mcpRegistered = await ensureSkillMcpServers(pi, selected, (detail) => mcpEvents.push(detail));
       return {
         content: [
           {
@@ -157,6 +235,8 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
         ],
         details: {
           query: params.query,
+          mcpRegistered,
+          mcpEvents,
           matches: selected.map((s: SkillView) => ({
             name: s.name,
             description: s.description,
@@ -182,7 +262,12 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
         name: s.name,
         description: s.description,
         triggers: s.triggers ?? [],
-        filePath: s.filePath
+        filePath: s.filePath,
+        mcpServers: (s.mcpServers ?? []).map((m: { name?: unknown; command?: unknown; url?: unknown; exposure?: unknown }) => ({
+          name: m?.name,
+          kind: typeof m?.command === "string" ? "stdio" : typeof m?.url === "string" ? "http" : "invalid",
+          exposure: m?.exposure ?? "deferred"
+        }))
       }));
       return {
         content: [{ type: "text", text: views.length ? JSON.stringify(views, null, 2) : "No skills found." }],
@@ -199,7 +284,15 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
       name: Type.String({ minLength: 1, description: "Unique skill name (lowercase, hyphens)" }),
       description: Type.String({ minLength: 1, description: "When to use this skill" }),
       body: Type.String({ minLength: 1, description: "Procedure or guidance body (Markdown)" }),
-      triggers: Type.Optional(Type.Array(Type.String(), { description: "Optional trigger keywords" }))
+      triggers: Type.Optional(Type.Array(Type.String(), { description: "Optional trigger keywords" })),
+      mcp: Type.Optional(Type.Array(Type.Object({
+        name: Type.String({ minLength: 1, maxLength: 64, description: "MCP server name (letters, digits, _ -)" }),
+        command: Type.Optional(Type.String({ description: "Stdio server executable" })),
+        args: Type.Optional(Type.Array(Type.String(), { description: "Stdio server arguments" })),
+        url: Type.Optional(Type.String({ description: "HTTP server URL (https://...)" })),
+        exposure: Type.Optional(Type.String({ description: "direct | deferred | codemode | hidden (default deferred)" })),
+        description: Type.Optional(Type.String({ description: "One sentence: what the server offers" }))
+      }), { description: "Optional MCP servers this skill should bring up when it becomes active" })),
     }),
     async execute(_toolCallId, params, signal) {
       const secret = containsSecretLikeInput({ name: params.name, body: params.body, description: params.description });
@@ -208,7 +301,8 @@ export default function equaxisSkills(pi: ExtensionAPI): void {
         name: params.name,
         description: params.description,
         triggers: params.triggers ?? [],
-        body: params.body
+        body: params.body,
+        mcpServers: params.mcp ?? []
       };
       const candidate = createSkillCandidate({
         projectRoot: services.paths.workspace,

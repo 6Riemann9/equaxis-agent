@@ -1,128 +1,168 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
 import { DapClient, createMemoryDapTransport } from "../src/dap-client.mjs";
 
-function respond(transport, request, body = {}) {
-  transport.server.send({
-    seq: 1000 + request.seq,
-    type: "response",
-    request_seq: request.seq,
-    command: request.command,
-    success: true,
-    body
-  });
+const ROOT = "/workspace";
+
+function connect(handler, options = {}) {
+  const transport = createMemoryDapTransport();
+  const client = new DapClient(transport.client, { rootPath: ROOT, requestTimeoutMs: 250, ...options });
+  transport.server.onMessage((message) => handler(message, transport.server));
+  return { client, transport };
 }
 
-test("initializes a debug adapter and tracks initialized events", async () => {
-  const received = [];
-  const transport = createMemoryDapTransport();
-  transport.server.onMessage((message) => {
-    received.push(message.command);
-    assert.equal(message.type, "request");
-    if (message.command === "initialize") {
-      assert.equal(message.arguments.clientID, "equaxis-dap");
-      respond(transport, message, { supportsConfigurationDoneRequest: true });
-      transport.server.send({ seq: 2000, type: "event", event: "initialized", body: {} });
+/** Reply to every request with a success body the caller supplies. */
+function autoRespond(bodyFor = () => ({})) {
+  return (message, server) => {
+    if (message.type !== "request") return;
+    server.send({ seq: message.seq, type: "response", request_seq: message.seq, command: message.command, success: true, body: bodyFor(message) });
+  };
+}
+
+// ---------------------------------------------------------------------------
+// handshake / requests
+// ---------------------------------------------------------------------------
+
+test("initialize negotiates capabilities and accepts the initialized event", async () => {
+  const seen = [];
+  const { client, transport } = connect((message, server) => {
+    seen.push(message);
+    if (message.type === "request" && message.command === "initialize") {
+      server.send({ seq: 1, type: "response", request_seq: message.seq, command: "initialize", success: true, body: { supportsConfigurationDoneRequest: true } });
     }
   });
 
-  const client = new DapClient(transport.client, { rootPath: "/repo" });
   const capabilities = await client.initialize();
-  assert.deepEqual(received, ["initialize"]);
   assert.equal(capabilities.supportsConfigurationDoneRequest, true);
+  assert.deepEqual(client.capabilities, { supportsConfigurationDoneRequest: true });
+
+  const initialize = seen.find((message) => message.command === "initialize");
+  assert.equal(initialize.arguments.adapterID, "equaxis-dap");
+
+  transport.server.send({ seq: 2, type: "event", event: "initialized" });
   assert.equal(client.initialized, true);
+  assert.equal(client.getSessionState().phase, "initialized");
 });
 
-test("sets breakpoints and caches returned adapter breakpoints", async () => {
-  const transport = createMemoryDapTransport();
-  transport.server.onMessage((message) => {
-    assert.equal(message.command, "setBreakpoints");
-    assert.deepEqual(message.arguments.source, { path: "/repo/app.js" });
-    assert.deepEqual(message.arguments.breakpoints, [{ line: 3 }]);
-    respond(transport, message, { breakpoints: [{ verified: true, line: 3, id: 1 }] });
+test("launch and configurationDone round-trip their arguments", async () => {
+  const seen = [];
+  const { client } = connect((message, server) => {
+    seen.push(message);
+    autoRespond(() => ({ ok: true }))(message, server);
   });
-
-  const client = new DapClient(transport.client);
-  const result = await client.setBreakpoints("/repo/app.js", [{ line: 3 }]);
-  assert.deepEqual(result.breakpoints, [{ verified: true, line: 3, id: 1 }]);
-  assert.deepEqual(client.getBreakpoints("/repo/app.js"), [{ verified: true, line: 3, id: 1 }]);
+  await client.configurationDone({ foo: 1 });
+  await client.launch({ program: "/workspace/main.py" });
+  const launch = seen.find((message) => message.command === "launch");
+  assert.deepEqual(launch.arguments, { program: "/workspace/main.py" });
+  assert.ok(seen.some((message) => message.command === "configurationDone"));
 });
 
-test("requests threads, stack frames, scopes, variables and evaluation", async () => {
-  const transport = createMemoryDapTransport();
-  transport.server.onMessage((message) => {
-    if (message.command === "threads") respond(transport, message, { threads: [{ id: 7, name: "main" }] });
-    else if (message.command === "stackTrace") respond(transport, message, { stackFrames: [{ id: 9, name: "fn", line: 1, column: 1 }], totalFrames: 1 });
-    else if (message.command === "scopes") respond(transport, message, { scopes: [{ name: "locals", variablesReference: 11 }] });
-    else if (message.command === "variables") respond(transport, message, { variables: [{ name: "x", value: "1", variablesReference: 0 }] });
-    else if (message.command === "evaluate") respond(transport, message, { result: "2", variablesReference: 0 });
+test("an unsuccessful response rejects with the adapter message", async () => {
+  const { client } = connect((message, server) => {
+    server.send({ seq: 1, type: "response", request_seq: message.seq, command: message.command, success: false, message: "no such thread" });
   });
-
-  const client = new DapClient(transport.client);
-  await client.threadsRequest();
-  await client.stackTrace(7);
-  await client.scopes(9);
-  await client.variables(11);
-  const evaluation = await client.evaluate("1 + 1", { frameId: 9 });
-
-  assert.deepEqual(client.getThreads(), [{ id: 7, name: "main" }]);
-  assert.deepEqual(client.getStackFrames(7), [{ id: 9, name: "fn", line: 1, column: 1 }]);
-  assert.deepEqual(client.getScopes(9), [{ name: "locals", variablesReference: 11 }]);
-  assert.deepEqual(client.getVariables(11), [{ name: "x", value: "1", variablesReference: 0 }]);
-  assert.deepEqual(evaluation, { result: "2", variablesReference: 0 });
-  assert.deepEqual(client.lastEvaluation, { result: "2", variablesReference: 0 });
+  await assert.rejects(() => client.continue(7), /no such thread/);
 });
 
-test("tracks stopped output thread termination and exit events", () => {
-  const transport = createMemoryDapTransport();
-  const client = new DapClient(transport.client);
-  transport.server.send({ seq: 1, type: "event", event: "thread", body: { reason: "started", threadId: 5 } });
-  transport.server.send({ seq: 2, type: "event", event: "stopped", body: { reason: "breakpoint", threadId: 5, allThreadsStopped: true } });
-  transport.server.send({ seq: 3, type: "event", event: "output", body: { category: "stdout", output: "hello\n" } });
-  transport.server.send({ seq: 4, type: "event", event: "continued", body: { threadId: 5 } });
-  transport.server.send({ seq: 5, type: "event", event: "thread", body: { reason: "exited", threadId: 5 } });
-  transport.server.send({ seq: 6, type: "event", event: "exited", body: { exitCode: 2 } });
-  transport.server.send({ seq: 7, type: "event", event: "terminated", body: {} });
+test("an unanswered request rejects on timeout", async () => {
+  const { client } = connect(() => {});
+  await assert.rejects(() => client.threadsRequest(), /timed out after 250ms/);
+});
 
-  assert.deepEqual(client.getThreads(), []);
-  assert.deepEqual(client.getOutput(), [{ category: "stdout", output: "hello\n" }]);
+// ---------------------------------------------------------------------------
+// events and session state
+// ---------------------------------------------------------------------------
+
+test("thread lifecycle events update the tracked thread set", async () => {
+  const { client, transport } = connect(autoRespond(() => ({})));
+  transport.server.send({ seq: 1, type: "event", event: "thread", body: { reason: "started", threadId: 1, name: "main" } });
+  transport.server.send({ seq: 2, type: "event", event: "thread", body: { reason: "started", threadId: 2, name: "worker" } });
+  assert.equal(client.getThreads().length, 2);
+  assert.equal(client.getThread(1).name, "main");
+
+  transport.server.send({ seq: 3, type: "event", event: "thread", body: { reason: "exited", threadId: 2 } });
+  assert.deepEqual(client.getThreads().map((thread) => thread.id), [1]);
+  assert.equal(client.getThread(2), null);
+});
+
+test("stopped, continued, output, terminated and exited events drive session state", () => {
+  const { client, transport } = connect(autoRespond(() => ({})));
+
+  transport.server.send({ seq: 1, type: "event", event: "thread", body: { reason: "started", threadId: 1 } });
+  assert.equal(client.getSessionState().phase, "running");
+
+  transport.server.send({ seq: 2, type: "event", event: "stopped", body: { reason: "breakpoint", threadId: 1, allThreadsStopped: true } });
+  assert.equal(client.getSessionState().phase, "stopped");
+  assert.deepEqual(client.getStoppedEvent(), { reason: "breakpoint", threadId: 1, allThreadsStopped: true });
+
+  transport.server.send({ seq: 3, type: "event", event: "continued", body: { threadId: 1 } });
   assert.equal(client.getStoppedEvent(), null);
-  assert.equal(client.exitedCode, 2);
+  assert.equal(client.getSessionState().phase, "running");
+
+  transport.server.send({ seq: 4, type: "event", event: "output", body: { category: "stdout", output: "hello\n" } });
+  assert.deepEqual(client.getOutput(), [{ category: "stdout", output: "hello\n" }]);
+
+  transport.server.send({ seq: 5, type: "event", event: "exited", body: { exitCode: 3 } });
+  assert.equal(client.getSessionState().phase, "exited");
+  assert.equal(client.getSessionState().exitedCode, 3);
+
+  transport.server.send({ seq: 6, type: "event", event: "terminated" });
+  assert.equal(client.getSessionState().phase, "terminated");
   assert.equal(client.terminated, true);
 });
 
-test("rejects failed DAP responses", async () => {
-  const transport = createMemoryDapTransport();
-  transport.server.onMessage((message) => {
-    transport.server.send({
-      seq: 99,
-      type: "response",
-      request_seq: message.seq,
-      command: message.command,
-      success: false,
-      message: "adapter failed"
-    });
-  });
-  const client = new DapClient(transport.client);
-  await assert.rejects(() => client.launch({ program: "app.js" }), /adapter failed/);
+// ---------------------------------------------------------------------------
+// caches fed by requests
+// ---------------------------------------------------------------------------
+
+test("threads, stack frames, scopes and variables are cached for later inspection", async () => {
+  const { client } = connect(autoRespond((message) => {
+    if (message.command === "threads") return { threads: [{ id: 1, name: "main" }] };
+    if (message.command === "stackTrace") return { stackFrames: [{ id: 100, name: "main", line: 3, column: 1 }] };
+    if (message.command === "scopes") return { scopes: [{ name: "Locals", variablesReference: 200 }] };
+    if (message.command === "variables") return { variables: [{ name: "x", value: "1", variablesReference: 0 }] };
+    return {};
+  }));
+
+  await client.threadsRequest();
+  assert.equal(client.getThread(1).name, "main");
+
+  await client.stackTrace(1);
+  assert.equal(client.getStackFrames(1)[0].name, "main");
+
+  await client.scopes(100);
+  assert.equal(client.getScopes(100)[0].name, "Locals");
+
+  await client.variables(200);
+  assert.equal(client.getVariables(200)[0].value, "1");
 });
 
-test("times out an unresponsive DAP request", async () => {
-  const transport = createMemoryDapTransport();
-  transport.server.onMessage(() => {});
-  const client = new DapClient(transport.client, { requestTimeoutMs: 10 });
-  await assert.rejects(() => client.threadsRequest(), /DAP request timed out.*threads/);
-  assert.equal(client.pending.size, 0);
+test("evaluate records the last result for the caller", async () => {
+  const { client } = connect(autoRespond(() => ({ result: "42", variablesReference: 0 })));
+  const result = await client.evaluate("6 * 7");
+  assert.equal(result.result, "42");
+  assert.equal(client.lastEvaluation.result, "42");
 });
 
-test("reports a structured session state", () => {
-  const transport = createMemoryDapTransport();
-  const client = new DapClient(transport.client);
-  assert.equal(client.getSessionState().phase, "created");
-  transport.server.send({ seq: 1, type: "event", event: "initialized", body: {} });
-  assert.equal(client.getSessionState().phase, "initialized");
-  transport.server.send({ seq: 2, type: "event", event: "stopped", body: { reason: "breakpoint", threadId: 1 } });
-  assert.equal(client.getSessionState().phase, "stopped");
-  transport.server.send({ seq: 3, type: "event", event: "terminated", body: {} });
-  assert.equal(client.getSessionState().phase, "terminated");
+test("setBreakpoints caches the adapter's resolution per source", async () => {
+  const { client } = connect(autoRespond(() => ({ breakpoints: [{ verified: true, line: 5 }] })));
+  await client.setBreakpoints("/workspace/main.py", [{ line: 5 }]);
+  assert.deepEqual(client.getBreakpoints("/workspace/main.py"), [{ verified: true, line: 5 }]);
+  assert.deepEqual(client.getBreakpoints(pathToFileURL("/workspace/main.py").href), [{ verified: true, line: 5 }]);
+  assert.deepEqual(client.getBreakpoints("/workspace/other.py"), []);
+});
+
+test("setBreakpoints rejects an empty source", async () => {
+  const { client } = connect(autoRespond(() => ({})));
+  assert.throws(() => client.setBreakpoints("   "), /source path is required/);
+});
+
+test("events are retained in order for auditing", () => {
+  const { client, transport } = connect(autoRespond(() => ({})));
+  for (const event of ["initialized", "stopped", "continued"]) {
+    transport.server.send({ seq: 1, type: "event", event });
+  }
+  assert.deepEqual(client.events.map((event) => event.event), ["initialized", "stopped", "continued"]);
+  assert.equal(client.getSessionState().eventCount, 3);
 });

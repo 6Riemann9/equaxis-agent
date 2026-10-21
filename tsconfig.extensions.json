@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@earendil-works/pi-coding-agent": ["pi-versions/v130/package/dist/index.d.ts"],
+      "@earendil-works/pi-agent-core": ["pi-versions/deps/agent-core/package/dist/index.d.ts"],
+      "@earendil-works/pi-ai": ["pi-versions/deps/ai/package/dist/index.d.ts"],
+      "@earendil-works/pi-ai/*": ["pi-versions/deps/ai/package/dist/*"],
+      "@earendil-works/pi-codemode": ["pi-versions/deps/codemode/package/dist/index.d.ts"],
+      "@earendil-works/pi-mcp": ["pi-versions/deps/mcp/package/dist/index.d.ts"],
+      "@earendil-works/pi-tui": ["pi-versions/deps/tui/package/dist/index.d.ts"]
+    }
+  },
+  "include": [".pi/extensions/*.ts"]
+}

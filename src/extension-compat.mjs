@@ -54,16 +54,32 @@ function rangePredicates(range) {
 
 export function satisfiesVersion(version, range) {
   const parsedVersion = parseVersion(version);
-  const predicates = rangePredicates(range);
-  if (!parsedVersion || predicates === undefined) return false;
-  return predicates.every(({ operator, version: target }) => {
-    const comparison = compareVersions(parsedVersion, target);
-    if (operator === ">=") return comparison >= 0;
-    if (operator === ">") return comparison > 0;
-    if (operator === "<=") return comparison <= 0;
-    if (operator === "<") return comparison < 0;
-    return comparison === 0;
+  if (!parsedVersion) return false;
+  // Union ranges (`a b || c d`, semver-style) admit a version when any
+  // alternative conjunction matches; empty alternatives are dropped.
+  const alternatives = String(range ?? "").split("||").map((part) => part.trim()).filter(Boolean);
+  if (!alternatives.length) return true; // empty/"*" admits everything (unchanged)
+  return alternatives.some((alternative) => {
+    const predicates = rangePredicates(alternative);
+    if (predicates === undefined) return false;
+    return predicates.every(({ operator, version: target }) => {
+      const comparison = compareVersions(parsedVersion, target);
+      if (operator === ">=") return comparison >= 0;
+      if (operator === ">") return comparison > 0;
+      if (operator === "<=") return comparison <= 0;
+      if (operator === "<") return comparison < 0;
+      return comparison === 0;
+    });
   });
+}
+
+/** A range is syntactically valid when every `||` alternative parses. */
+export function isValidVersionRange(range) {
+  const value = String(range ?? "").trim();
+  if (!value || value === "*") return true;
+  const alternatives = value.split("||").map((part) => part.trim()).filter(Boolean);
+  if (!alternatives.length) return false;
+  return alternatives.every((part) => rangePredicates(part) !== undefined);
 }
 
 function issue(severity, message, extra = {}) {
@@ -119,7 +135,7 @@ export function validateExtensionManifest(manifest, options = {}) {
       }
     }
   }
-  if (!satisfiesVersion("0.0.0", normalized.piRange ?? "*") && !rangePredicates(normalized.piRange ?? "*")) {
+  if (!isValidVersionRange(normalized.piRange ?? "*")) {
     errors.push(issue("error", `invalid global Pi version range: ${String(normalized.piRange)}`));
   }
   if (!contracts.length) errors.push(issue("error", "extension contract manifest has no extensions"));
@@ -139,7 +155,7 @@ export function validateExtensionManifest(manifest, options = {}) {
     if (!FAILURE_MODES.has(contract?.failureMode)) {
       errors.push(issue("error", `invalid failureMode for ${id || entry}`));
     }
-    if (contract?.piRange !== undefined && rangePredicates(contract.piRange) === undefined) {
+    if (contract?.piRange !== undefined && !isValidVersionRange(contract.piRange)) {
       errors.push(issue("error", `invalid Pi version range for ${id || entry}: ${String(contract.piRange)}`));
     }
     if (contract?.services !== undefined && (!Array.isArray(contract.services) || contract.services.some((service) => !RUNTIME_SERVICES.has(service)))) {

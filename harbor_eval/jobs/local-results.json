@@ -1,0 +1,300 @@
+{
+  "equaxis|atomic-write": {
+    "task": "atomic-write",
+    "pass": true,
+    "durationMs": 69641,
+    "tokens": 27145,
+    "model": "deepworks/DeepSeek-V4.1-Flash"
+  },
+  "equaxis|bounded-concurrency": {
+    "task": "bounded-concurrency",
+    "pass": true,
+    "durationMs": 44217,
+    "tokens": 23616,
+    "model": "deepworks/DeepSeek-V4.1-Flash"
+  },
+  "equaxis|csv-quotes": {
+    "task": "csv-quotes",
+    "pass": true,
+    "durationMs": 43695,
+    "tokens": 23222,
+    "model": "deepworks/DeepSeek-V4.1-Flash"
+  },
+  "equaxis|dedupe-stable": {
+    "task": "dedupe-stable",
+    "pass": true,
+    "durationMs": 35457,
+    "tokens": 19472,
+    "model": "deepworks/DeepSeek-V4.1-Flash"
+  },
+  "equaxis|deep-freeze": {
+    "task": "deep-freeze",
+    "pass": true,
+    "durationMs": 33015,
+    "tokens": 21691,
+    "model": "deepworks/DeepSeek-V4.1-Flash"
+  },
+  "equaxis|dependency-order": {
+    "task": "dependency-order",
+    "pass": true,
+    "durationMs": 46554,
+    "tokens": 25427,
+    "model": "deepworks/DeepSeek-V4.1-Flash"
+  },
+  "equaxis|env-boolean": {
+    "task": "env-boolean",
+    "pass": true,
+    "durationMs": 33139,
+    "tokens": 22016,
+    "model": "deepworks/DeepSeek-V4.1-Flash"
+  },
+  "equaxis|flatten-record": {
+    "task": "flatten-record",
+    "pass": true,
+    "durationMs": 134037,
+    "tokens": 33540,
+    "model": "deepworks/DeepSeek-V4.1-Flash"
+  },
+  "equaxis|group-counts": {
+    "task": "group-counts",
+    "pass": true,
+    "durationMs": 43444,
+    "tokens": 11825,
+    "model": "deepworks/GLM-5.3"
+  },
+  "equaxis|json-pointer": {
+    "task": "json-pointer",
+    "pass": false,
+    "durationMs": 105343,
+    "tokens": 7716,
+    "model": "deepworks/GLM-5.3",
+    "error": "(node:internal/modules/esm/module_job:569:25)\n    at async node:internal/modules/esm/loader:650:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:105:5)\n\nNode.js v26.10.0",
+    "diagnostic": {
+      "stdoutTail": "protected `PROTECTED_POLICY.md` was left untouched.\"}],\"api\":\"openai-completions\",\"provider\":\"magpie\",\"model\":\"deepworks/GLM-5.3\",\"usage\":{\"input\":467,\"output\":280,\"cacheRead\":13696,\"cacheWrite\":0,\"reasoning\":0,\"totalTokens\":14443,\"cost\":{\"input\":0.0006538,\"output\":0.001232,\"cacheRead\":0.00356096,\"cacheWrite\":0,\"total\":0.00544676}},\"stopReason\":\"stop\",\"timestamp\":1792395362978,\"responseId\":\"0217923953632553587b81e5d6fed80d7b8fbd8e8cb3fa698c993\",\"responseModel\":\"GLM-5.3\",\"rawStopReason\":\"stop\",\"durationMs\":10950,\"thinkingLevel\":\"low\"}],\"willRetry\":false}\n{\"type\":\"agent_settled\",\"aborted\":false}",
+      "stderrTail": "Warning: Extension package \"builtin:tool-search\": Extension /home/mizu/equaxis-dev/src/.pi/extensions/tool-catalog.ts registers tool `tool_search`, so built-in extension `tool-search` was not loaded. To use `tool-search`, run `pi config` and make sure it is enabled under Built-in extensions, then disable or remove the existing extension. We recommend only having one or the other loaded at a time.",
+      "errorMessages": []
+    }
+  },
+  "equaxis|mask-email": {
+    "task": "mask-email",
+    "pass": false,
+    "durationMs": 40248,
+    "tokens": 1833,
+    "model": "deepworks/GLM-5.3",
+    "error": "verify.mjs:1:119 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 'a****@example.com',\n  expected: 'a***@example.com',\n  operator: 'deepStrictEqual',\n  diff: 'simple'\n}\n\nNode.js v26.10.0",
+    "diagnostic": {
+      "stdoutTail": "      => ERR: Invalid email: nope\\n```\"}],\"api\":\"openai-completions\",\"provider\":\"magpie\",\"model\":\"deepworks/GLM-5.3\",\"usage\":{\"input\":234,\"output\":175,\"cacheRead\":10944,\"cacheWrite\":0,\"reasoning\":0,\"totalTokens\":11353,\"cost\":{\"input\":0.0003276,\"output\":0.0007700000000000001,\"cacheRead\":0.00284544,\"cacheWrite\":0,\"total\":0.00394304}},\"stopReason\":\"stop\",\"timestamp\":1792395407812,\"responseId\":\"021792395408106b045cd2f7c61da91e37e7e70760c22daec9654\",\"responseModel\":\"GLM-5.3\",\"rawStopReason\":\"stop\",\"durationMs\":10395,\"thinkingLevel\":\"low\"}],\"willRetry\":false}\n{\"type\":\"agent_settled\",\"aborted\":false}",
+      "stderrTail": "Warning: Extension package \"builtin:tool-search\": Extension /home/mizu/equaxis-dev/src/.pi/extensions/tool-catalog.ts registers tool `tool_search`, so built-in extension `tool-search` was not loaded. To use `tool-search`, run `pi config` and make sure it is enabled under Built-in extensions, then disable or remove the existing extension. We recommend only having one or the other loaded at a time.",
+      "errorMessages": []
+    }
+  },
+  "equaxis|merge-intervals": {
+    "task": "merge-intervals",
+    "pass": true,
+    "durationMs": 34519,
+    "tokens": 2075,
+    "model": "deepworks/GLM-5.3"
+  },
+  "equaxis|normalize-path": {
+    "task": "normalize-path",
+    "pass": true,
+    "durationMs": 70484,
+    "tokens": 5169,
+    "model": "deepworks/GLM-5.3"
+  },
+  "equaxis|paginate": {
+    "task": "paginate",
+    "pass": true,
+    "durationMs": 62118,
+    "tokens": 3375,
+    "model": "deepworks/GLM-5.3"
+  },
+  "equaxis|parse-duration": {
+    "task": "parse-duration",
+    "pass": true,
+    "durationMs": 55432,
+    "tokens": 2201,
+    "model": "deepworks/GLM-5.3"
+  },
+  "equaxis|redact-secrets": {
+    "task": "redact-secrets",
+    "pass": true,
+    "durationMs": 217717,
+    "tokens": 6738,
+    "model": "deepworks/GLM-5.3"
+  },
+  "equaxis|retry-after": {
+    "task": "retry-after",
+    "pass": true,
+    "durationMs": 52525,
+    "tokens": 4249,
+    "model": "deepworks/GLM-5.3"
+  },
+  "equaxis|slugify": {
+    "task": "slugify",
+    "pass": true,
+    "durationMs": 46624,
+    "tokens": 2057,
+    "model": "deepworks/GLM-5.3"
+  },
+  "equaxis|sort-semver": {
+    "task": "sort-semver",
+    "pass": true,
+    "durationMs": 85222,
+    "tokens": 5881,
+    "model": "deepworks/GLM-5.3"
+  },
+  "equaxis|top-k": {
+    "task": "top-k",
+    "pass": true,
+    "durationMs": 39172,
+    "tokens": 2129,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|atomic-write": {
+    "task": "atomic-write",
+    "pass": true,
+    "durationMs": 226664,
+    "tokens": 35426,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|bounded-concurrency": {
+    "task": "bounded-concurrency",
+    "pass": true,
+    "durationMs": 66647,
+    "tokens": 14024,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|csv-quotes": {
+    "task": "csv-quotes",
+    "pass": true,
+    "durationMs": 60206,
+    "tokens": 13584,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|dedupe-stable": {
+    "task": "dedupe-stable",
+    "pass": true,
+    "durationMs": 65139,
+    "tokens": 11117,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|deep-freeze": {
+    "task": "deep-freeze",
+    "pass": true,
+    "durationMs": 74070,
+    "tokens": 19945,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|dependency-order": {
+    "task": "dependency-order",
+    "pass": true,
+    "durationMs": 148295,
+    "tokens": 31026,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|env-boolean": {
+    "task": "env-boolean",
+    "pass": true,
+    "durationMs": 68714,
+    "tokens": 15752,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|flatten-record": {
+    "task": "flatten-record",
+    "pass": true,
+    "durationMs": 306956,
+    "tokens": 86285,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|group-counts": {
+    "task": "group-counts",
+    "pass": true,
+    "durationMs": 103380,
+    "tokens": 22270,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|json-pointer": {
+    "task": "json-pointer",
+    "pass": true,
+    "durationMs": 185247,
+    "tokens": 49840,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|mask-email": {
+    "task": "mask-email",
+    "pass": false,
+    "durationMs": 96363,
+    "tokens": 31560,
+    "model": "deepworks/GLM-5.3",
+    "error": "verify.mjs:1:119 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 'a****@example.com',\n  expected: 'a***@example.com',\n  operator: 'deepStrictEqual',\n  diff: 'simple'\n}\n\nNode.js v26.10.0",
+    "diagnostic": {
+      "stdoutTail": "`node --test solution.test.mjs` → **10/10 passing**.\"}],\"api\":\"openai-completions\",\"provider\":\"magpie\",\"model\":\"deepworks/GLM-5.3\",\"usage\":{\"input\":7831,\"output\":402,\"cacheRead\":0,\"cacheWrite\":0,\"reasoning\":58,\"totalTokens\":8233,\"cost\":{\"input\":0.0109634,\"output\":0.0017688,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0.012732199999999999}},\"stopReason\":\"stop\",\"timestamp\":1792397580254,\"responseId\":\"021792397580545953f584df703753d1068e2d4c6b117bc240b8f\",\"responseModel\":\"GLM-5.3\",\"rawStopReason\":\"stop\",\"durationMs\":10463,\"thinkingLevel\":\"max\"}],\"willRetry\":false}\n{\"type\":\"agent_settled\",\"aborted\":false}",
+      "stderrTail": "",
+      "errorMessages": []
+    }
+  },
+  "pi_control|merge-intervals": {
+    "task": "merge-intervals",
+    "pass": true,
+    "durationMs": 49150,
+    "tokens": 6415,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|normalize-path": {
+    "task": "normalize-path",
+    "pass": true,
+    "durationMs": 76055,
+    "tokens": 16484,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|paginate": {
+    "task": "paginate",
+    "pass": true,
+    "durationMs": 184969,
+    "tokens": 44742,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|parse-duration": {
+    "task": "parse-duration",
+    "pass": true,
+    "durationMs": 103290,
+    "tokens": 23938,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|retry-after": {
+    "task": "retry-after",
+    "pass": true,
+    "durationMs": 263684,
+    "tokens": 61978,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|slugify": {
+    "task": "slugify",
+    "pass": true,
+    "durationMs": 89646,
+    "tokens": 24298,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|sort-semver": {
+    "task": "sort-semver",
+    "pass": true,
+    "durationMs": 147548,
+    "tokens": 37796,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|top-k": {
+    "task": "top-k",
+    "pass": true,
+    "durationMs": 36674,
+    "tokens": 5370,
+    "model": "deepworks/GLM-5.3"
+  },
+  "pi_control|redact-secrets": {
+    "task": "redact-secrets",
+    "pass": true,
+    "durationMs": 288640,
+    "tokens": 60528,
+    "model": "deepworks/GLM-5.3"
+  }
+}

@@ -2,6 +2,314 @@
 
 All notable changes to Equaxis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [Unreleased] — companion/grok-bot-m0 (M17: Claude-style visual design)
+
+### Changed (M17: the look)
+- **Rebuilt the visual language** of the web app on a warm paper palette instead of the dark neon console: `#faf9f5` paper, `#f0eee6` sidebar, warm ink `#1f1e1d`, Claude coral `#c96442` as the single accent, serif for the brand and pane titles, generous line height and spacing, and a full warm **dark mode** via `prefers-color-scheme`.
+- **Assistant turns are no longer bubbles**: they render as plain text on the page with a small uppercase author line, a hairline rule for reasoning, and quiet tool lines — the user's message is the only bubble, right-aligned on a soft sunken surface. The composer became one rounded card with the send button inside it.
+- Manifest theme/background and the icon were re-cut for the light palette.
+
+### Fixed
+- `#chatpane` / `#sidebar` used `display: flex`, which silently overrode the `hidden` attribute — the desktop layout would show an empty conversation pane before any teammate was selected. A global `[hidden] { display: none !important; }` rule now wins.
+
+### Verified without a browser
+No headless browser exists on this host, so the design was checked mechanically instead of by eye: every `var(--x)` is defined (22/22), the stylesheet's braces balance, and each text/background pair meets WCAG AA in both themes (body 15.8:1 light / 13.7:1 dark, muted 4.97:1 / 5.94:1, accent links 5.54:1 / 6.53:1, white-on-accent 3.90:1 / 3.12:1).
+
+Total 285 tests.
+
+## [Unreleased] — companion/grok-bot-m0 (M16: the app)
+
+### Added (M16: a chat application, not a dashboard)
+- **New web app** (`src/companion-pwa.mjs`, rewritten): sidebar of teammates with live status and spend, a conversation pane with bubbles, a composer, and slide-over panels for approvals, routines, connection and the raw log. Mobile layout is single-column with a back button. Still zero-build.
+- **Live progress**: `GET /progress/<taskId>` turns the teammate's own stream log into `{ text, thinking, tools, settled }` (`src/companion-stream.mjs`), so the chat shows what it is thinking, writing and running *while* it runs (polled at 1.2 s) instead of a silent wait.
+- Cancel from the chat (pending turns) and stop a running task from its live bubble; both go through `POST /cancel/<id>` and report `cancelling` honestly.
+
+### Fixed (found by running the app against a live server)
+- **A long-running `serve` never saw work queued by the CLI.** Each process kept its own in-memory copy of the state files, so `companion task` from a terminal sat invisible (and would have been overwritten by the server's next flush). `CompanionStore.sync()` now re-validates teammates/queue/messages/routines against each file's mtime+size on every public read and mutation, marking stamps after our own writes so there is no churn. Verified: a task queued from the CLI is claimed, run and completed by a `serve` that was already running.
+- The rewrite dropped the cancel affordance; pending and running turns now both expose it (caught by the M4 test, not by eye).
+
+`tests/companion-m11.test.mjs` gained three cross-process tests. Total 285.
+
+## [Unreleased] — companion/grok-bot-m0 (M15: in-session surface)
+
+### Added (M15: the session sees what the CLI can do)
+- **Seven new session tools**: `companion_logs` (task stream, works while running), `companion_artifacts` (changed files and a file's diff), `companion_routines` (add/list/remove schedules), `companion_credentials` (issue/rotate/revoke/list with expiry warnings), `companion_approvals` (list and decide parked high-risk requests), `companion_backends` (what this host supports), `companion_template` (export/import). The extension had stayed at the M0 five-tool surface while M1–M14 landed.
+- **`/companion` grew matching subcommands**: `logs`, `files`, `routines`, `creds`, `approvals`, `backends`, `export`, `reset`.
+- The tools import the same modules the CLI uses, so queueing/rotation/approval semantics cannot drift between surfaces; `tests/companion-m15.test.mjs` pins the tool list, the schemas, the subcommands and the approval gate (a decision always requires an explicit id).
+
+### Fixed
+- Two tools initially returned inconsistent `details` shapes across branches, which the extension type contract rejects; detail shapes are now built by small factories.
+
+Total 282 tests; `equaxis doctor` READY.
+
+## [Unreleased] — companion/grok-bot-m0 (M14: artifacts)
+
+### Added (M14: the deliverable, not just the claim)
+- **Workspace artifacts**: the worker snapshots the teammate workspace before each run and compares afterwards, so a task reports `{added, modified, deleted}` with sizes. Small text files (≤64 KB) are copied into `.pi/companion/artifacts/<taskId>/before/`, which makes diffs real rather than reconstructed. Failed and cancelled tasks capture their partial change too (`partial: true`).
+- **HTTP surface**: `GET /artifacts/<taskId>` (manifest), `GET /artifact/<taskId>/diff?path=` (line hunks from a dependency-free LCS, added files diff against empty), `GET /artifact/<taskId>/raw?path=` (download with `content-disposition`).
+- **Dashboard**: a turn that changed files shows "files: N added, M modified"; opening it lists each path with a per-file diff and a download link.
+- Bounded by design: `.git`/`node_modules`/`dist`/`build`/`__pycache__`/`.venv` ignored, 2000 files per snapshot, 200 entries per list, binaries and files over 256 KB listed but not diffed, downloads capped at 4 MB.
+- Safe by construction: reads are confined to the manifest's recorded workspace **and** to the files it lists — `../`, absolute paths, unlisted names are all 404 (the manifest's workspace wins over a caller-derived one, which is what a stale config would otherwise get wrong).
+- `tests/companion-m14.test.mjs` — 11 tests: snapshot filtering, add/modify/delete detection, unchanged workspace, binary/oversize handling, LCS hunks, diff modes, path confinement, a real worker run recording what it changed, the HTTP surface (manifest/diff/raw/auth/traversal), thread wiring, dashboard wiring. Total 277.
+
+## [Unreleased] — companion/grok-bot-m0 (M13: approval bridge)
+
+### Added (M13: approve high-risk teammate actions from the phone)
+- **Approval bridge**: `GET /approvals` lists the requests the Reliability Harness parked for a headless teammate (`toolName`, policy `reason`, `summary`, `ageMs`, plus recent history), and `POST /approval/<requestId>` writes the decision the harness polls for. The dashboard shows them above the teammates with Approve/Deny, and hides the section when there is nothing to decide.
+- **Admin-only, and self-approval is impossible**: a scoped teammate credential gets 403 on both routes, so a teammate can never approve its own high-risk call. Deciding an id the harness never parked is 404; a decision other than approve/deny is 400; nothing is approved by default (an unanswered request is a denial).
+- `companion serve` now passes the project root and the configured `reliability.traceDir` to the webhook, so the queue it reads is the one the harness writes (a `unifiedConfig` reference would have crashed serve — caught by starting it, not by reading it).
+- `tests/companion-m13.test.mjs` — 7 tests: listing with age, empty queue, approve/deny durability through `readApprovalDecision`, unknown/bad-decision/foreign-origin refusals, admin-only enforcement with a scoped credential, dashboard wiring. Total 266.
+
+## [Unreleased] — companion/grok-bot-m0 (M12: continuity + conversation)
+
+### Added (M12: a teammate that remembers, and a thread to talk in)
+- **Session continuity** (`--context per-teammate`, the default): each teammate gets one stable `--session-id` allocated lazily and persisted with its profile, so a task resumes that teammate's own conversation instead of starting cold. The session lives in the teammate's private HOME, so two teammates never share a thread. `--context per-task` restores the old cold-start behaviour; `companion reset <name>` forgets the conversation on demand. Verified live: asked to remember `ORANGE-FALCON`, the *next* task (a fresh subprocess) recalled it.
+- **Conversation view**: `GET /thread/<teammate>?n=` returns the recent turns (instruction, result, status, usage) plus whether the thread is continuous; the dashboard gained a **chat** button that renders those turns as bubbles with a compose box. Sending a message reuses `POST /task/<name>`, so there is one code path and one audit trail.
+- Teammate profiles now surface continuity and spend in `companion list` / `show`.
+
+### Note
+`sessionId` and the usage counters are persisted fields: they are explicitly listed in `sanitizeTeammate` because the load path rebuilds records field by field (the M11 restart-reset bug is exactly that mistake). Tests cover the reload path for both.
+
+`tests/companion-m12.test.mjs` — 6 tests (stable/lazy session ids, reset, thread ordering and usage, continuity flag, 404/403/clamping, dashboard wiring + compiled JS). Total 259.
+
+## [Unreleased] — companion/grok-bot-m0 (M11: usable worker)
+
+### Added (M11: parallel worker, live logs, cancellation, cost accounting)
+- **Concurrency** (`--concurrency N`, default 2): the loop claims up to N tasks and runs them in parallel; each task gets its own AbortController. `--once` still means exactly one task and `--maxTasks` caps a batch — quotas count *claimed* work, so a wide pool cannot overshoot (the first attempt had exactly that bug and the test caught it).
+- **Per-task live logs**: the executor gained an `onOutput` hook; the worker appends the JSON-mode stream to `.pi/companion/logs/<task-id>.log`. New `companion logs <task-id> [--lines]`, `GET /log/<task-id>?lines=n` and a per-running-task "log" button in the dashboard.
+- **Real cancellation**: `cancelling` is a new task status. Cancelling a running task records the request (route returns `state: "cancelling"`); the worker aborts the process tree and finalizes `cancelled` with `cancelled while running`. Pending tasks still cancel immediately. A cancellation counts as neither success nor failure.
+- **Cost accounting**: `parsePiUsage` sums `turn_end.message.usage` (tokens, cache read/write, `cost.total`, model/provider), recorded per task even when the task is cancelled or fails, and rolled into teammate totals (`stats.totalTokens/totalCostUsd`) shown by `companion status` and in the dashboard.
+
+### Fixed (found by running the thing for real)
+- **A teammate's `model` setting never reached the subprocess** — it was only printed into the prompt, so a configured model silently did nothing. Now validated against the catalog at `create` time and passed as `--provider/--model`; ambiguous or unknown ids are refused with suggestions.
+- **Counters reset on every restart**: `load()` sanitizes records without an `existing` argument, so `stats.completed/failed` (and the new usage totals) were read only from `existing` and came back as 0. Same class of bug dropped `task.usage` and `cancelRequestedAt`; all are now explicitly preserved.
+- **`"[object Object]"` as a task result** (seen in real feed data): a transport wrapper leaking an object was stringified at every hop. `replyText()` now serializes objects and returns `""` for null/undefined.
+- The dashboard's JS is compiled in a test (`vm.Script`) after a template-literal escape (`"\n"` written as `"\n"`) produced invalid browser JS that no other test would have caught.
+
+Verified live: one real task completed (workspace cwd + private `$HOME`), two tasks ran in parallel, a third was cancelled from the HTTP route while running (worker aborted it, status `cancelled`, usage still recorded: 3972 tokens / $0.000655), and its log was tailed mid-run. `tests/companion-m11.test.mjs` — 13 tests. Total 253.
+
+## [Unreleased] — companion/grok-bot-m0 (M8/M9/M10)
+
+### Added (M8: credential rotation and expiry)
+- `credentials issue … --ttl 30d` bounds a credential's lifetime; expiry is **enforced on use** (`resolveCredential` fails closed), so an expired integration is a 401 even if nobody ran the CLI. `credentials rotate <id-prefix> [--ttl]` revokes and reissues, keeping teammate, label and lifetime policy (an explicit `--ttl` overrides the inherited one); rotating an already-revoked credential is refused with guidance. `credentials list` shows expiry and warns about anything expired or expiring within 7 days (`expiringCredentials`).
+
+### Added (M9: portable teammate templates)
+- `companion export <name>… [--all] [--out file]` writes a versioned, **secret-free** template (name, persona, workspace, model — no ids, stats, queue, inbox or credentials, so importing can never resurrect old authority). `companion import <file> [--rename name] [--overwrite] [--dry-run]` creates, stamps a copy under a new name (with its own workspace, so variants never overwrite each other's files) or updates in place. A bare JSON array is accepted; unknown template versions, unknown fields (usually a typo meant to do something), bad names and empty teammate lists are refused rather than silently dropped. `src/companion-templates.mjs`.
+
+### Changed (M10: microVM runner)
+- The microvm tier now has a real runner: `buildMicrovmArgs` produces qemu (virtfs/9p, no helper process) or cloud-hypervisor (requires a virtiofsd socket) argv, sharing the workspace and private HOME under fixed tags and carrying the command as base64 `equaxis.cmd=` in the kernel cmdline, with the guest-side contract documented (init reads the param, mounts the tags, runs the command, console to stdout).
+- Availability got **stricter, not looser**: the tier reports available only with a hypervisor binary *plus* `/dev/kvm` *plus* a bootable kernel and rootfs image; otherwise it names the missing piece (and `--microvm-kernel/--microvm-rootfs/--microvm-runtime/--microvm-virtiofs-socket` convey them from the CLI). On this host it correctly stays unavailable.
+- `tests/companion-m8.test.mjs` (8), `tests/companion-m9.test.mjs` (9), `tests/companion-m10.test.mjs` (8); M6's two microvm assertions retargeted from "no runner" to "no bootable images". Total 238. Verified live: issue --ttl → rotate → old value stops resolving / new resolves; export → dry-run import → `--rename` copy with its own workspace; `companion backends` still reports microvm as unavailable with the reason.
+
+## [Unreleased] — companion/grok-bot-m0 (M7)
+
+### Added (M7: routines from the dashboard)
+- **Schedule and unschedule teammates from the phone**: a Routines section in the PWA — `POST /routine` (`{teammate, every: "30m"|"2h"|"1d", instruction}`, or a numeric `everyMs`; the store's one-minute floor is enforced) and `POST /routine/<id>/remove`. `/status` gained `routineDetails` (id, teammate, instruction, `everyMs`, enabled, `lastRunAt`, computed `nextRunAt`; a never-run routine reports "due now").
+- Routines are **admin-only** on both routes — they change what will run unattended, so a scoped teammate credential gets 403 even for its own teammate, unlike task queueing.
+- Rejected schedules are 400 (missing fields, unparsable interval, unknown teammate, below the floor) and create nothing; malformed JSON is 400.
+- `tests/companion-m7.test.mjs` — 8 tests: creation from a duration and from `everyMs`, the reject matrix, admin-only enforcement, `routineDetails`/`nextRunAt`, removal and 404s, scoped-credential refusal, and asset wiring (every interval offered in the UI is at or above the store floor). Total 213. Verified live against a real `serve`: create → visible in `/status` → 403 for a scoped credential → 400 for a 1s interval → remove → gone.
+
+## [Unreleased] — companion/grok-bot-m0 (M6)
+
+### Added (M6: pluggable execution backends)
+- **`src/companion-backends.mjs`**: four-tier registry (weakest → strongest) — `directory` (no isolation), `bwrap` (namespaces), `container` (docker/podman), `microvm`. Each tier declares how it is detected, so a requested-but-unavailable backend is an error with the reason instead of a silent downgrade; only `auto` may fall back, and it reports which tier it chose and what it skipped. `--sandbox-ceiling` (default `bwrap`) keeps `auto` from starting a container unasked.
+- **Container tier argv**: read-only rootfs, `--cap-drop ALL`, `no-new-privileges`, `--user <uid>:<gid>`, project tree mounted ro with the teammate workspace re-mounted rw on top, private HOME rw with only `auth.json`/`models.json`/`settings.json` seeded ro (same discipline as the bwrap tier), nothing published.
+- **microvm is reported honestly**: detection looks for `cloud-hypervisor`/`firecracker`/`qemu-system-x86_64` and `/dev/kvm`, then reports *unavailable* because no runner is implemented — it never presents a container as a VM.
+- **`companion backends`** lists tiers, availability and the `auto` choice; **`npm run companion:backends`** (`scripts/companion-backend-smoke.mjs`) proves each tier for real: the child starts, cwd is the workspace, a write inside the workspace succeeds, and a write into the read-only project root is refused. Verified live here: bwrap answers `EROFS` for the outside write, `directory` allows it (documented as isolation-free), `microvm` reports the missing hypervisor and does not fail the run.
+- `tests/companion-m6.test.mjs` — 16 tests: detection matrices (missing binary / unreachable daemon / hypervisor-without-runner), explicit-vs-auto resolution, ceiling semantics, container argv lockdown, credential seeding, spawn wrappers per tier. Total 205.
+
+## [Unreleased] — companion/grok-bot-m0 (M5)
+
+### Added (M5: per-teammate scoped credentials)
+- **Scoped credentials** (`companion credentials issue <name> [--label …] | list | revoke <id-prefix>`). The global webhook token stays the admin key; a scoped credential may only `POST /task/<own-name>` (labeled `runSource: credential:<name>`), while `/status`, `/feed` and `/cancel` answer 403 for it. Only a SHA-256 digest is persisted (`.pi/companion/credentials.json`); the value is shown once at issuance. Revocation is prefix-matched and refused when ambiguous; deleting a teammate kills its credentials.
+- **Cross-process freshness**: the store now revalidates its credential cache against the file's mtime+size on every read, so a `companion credentials revoke` in another process takes effect in a running `companion serve` on the next request. This was a live-E2E catch — the first implementation kept serving a revoked credential (202) because the running server had cached it.
+- Fixed `sendJson` returning nothing, which made the `requireAdmin` guard fall through and double-write response headers (`ERR_HTTP_HEADERS_SENT`); the guard now short-circuits cleanly (the test harness surfaced it as asynchronous activity after the test ended).
+- `tests/companion-m5.test.mjs` — 10 tests: issuance/digest-only storage, resolve accept/reject matrix, prefix revocation, teammate deletion, scope enforcement on every route, revocation and admin continuity, Origin guard, and cross-process revoke/issue freshness. Total 189.
+
+## [Unreleased] — companion/grok-bot-m0 (M4)
+
+### Added (M4: dashboard write actions)
+- **Queue tasks from the phone.** Each teammate card gets a "＋ task" inline form → `POST /task/<name>`; same-origin dashboard requests are labeled `runSource: dashboard` in the audit trail (requests without an Origin header stay `webhook`). The submit button disables while in flight and surfaces server errors inline.
+- **Cancel pending tasks from the phone.** `POST /cancel/<taskId>` cancels a pending task (`error: "cancelled from the dashboard"`); running/done/failed tasks refuse with 409 — a running task's subprocess is owned by the worker, and marking it cancelled would mislead (the run continues and stores its real outcome). `/status` `teammateDetails` now includes `pendingTasks` (ids + instructions, capped at 5, oldest first) to power the ✕ buttons.
+- `tests/companion-m4.test.mjs` — 5 tests: runSource labeling, cancel happy path + auth, 404/409 refusals with FIFO claim semantics, `pendingTasks` shape/cap, asset wiring checks (encodeURIComponent on URLs, SW never intercepts non-GET, still no embedded credentials).
+
+## [Unreleased] — model slots（功能模型统一配置 + dream 回落）
+
+### Added (feature model slots: one CLI for every LLM Equaxis consumes)
+- **`equaxis model` 命令组**（`src/model-slots.mjs` + `scripts/equaxis.mjs`）：`model list|set|unset|main`，统一配置主模型（`.pi/settings.json` `defaultProvider/defaultModel`）、dream（`memory.dream.provider/model`）、advisor（`advisor.provider/model`）三个槽位，写入前对照目录校验。
+- **目录校验**：pi-ai 内置 provider（`dist/providers/data/*.json`，靠目录向上遍历定位——pi-ai 的 `exports` 字段挡住了 `require.resolve`）叠加 `~/.pi/agent/models.json` + `models-store.json`；未知 provider / 错误模型 id 拒绝并列出可用项；pi-ai 不可解析时降级为仅用户目录（标记 unverified 不拦截）。
+- **dream 自动回落**（`.pi/extensions/memory.ts`）：配置的模型在注册表找不到或凭据不可用时不再硬报错，自动回落当前会话/主模型并写 `memory_dream_model_fallback` trace。
+- `tests/model-slots.test.mjs` — 11 tests（目录合并/降级、校验语义、list 状态、set/unset 往返、未知槽位拒绝）。总测试 177。
+
+## [Unreleased] — companion/grok-bot-m0 (M3)
+
+### Added (M3: mobile dashboard)
+- **Read-only PWA dashboard** served by `companion serve` (`src/companion-pwa.mjs`, zero build step, assets embedded in the module so the npm package ships them): `GET /` returns a mobile-first dark dashboard — teammate cards (persona, model, done/failed, current/last task) and the recent feed, polling every 10 s while visible. The token is entered once on the phone and kept in localStorage; static assets carry no secrets. The service worker is best-effort (browsers refuse SW registration over plain-HTTP LAN, and the dashboard must still work there).
+- **New API routes**: `GET /feed?n=<1..200>` (auth; recent feed entries, clamped server-side) and `GET /status` now also returns `teammateDetails` (per-teammate stats, pending count, running task, last finished task) while keeping the M2 field shape for existing clients.
+- **LAN access for phones**: `companion serve --listen 0.0.0.0` (or a specific address) auto-extends the Host/Origin allowlist with the machine's own interface addresses; `--allow-host mybox.local:7890[,…]` declares mDNS/named hosts (bare `host` = any port). Default remains loopback-only, every route still requires the bearer credential, and DNS-rebinding hostnames never match the allowlist. `--no-pwa` disables the dashboard.
+- Origin policy refined: same-origin requests (the dashboard's own fetches) now pass; foreign origins are still refused before auth even with a valid credential (message wording updated; M2 test assertion adjusted to match).
+- `tests/companion-m3.test.mjs` — 8 tests: asset map integrity (valid manifest, no embedded credentials), shell serving without auth, exact-match static routes (no traversal), `servePwa:false`, `/feed` auth + clamping, `teammateDetails` shape + backward compatibility, same-origin vs foreign-origin, Host allowlist (bare-host wildcard, pinned `host:port`, rebinding refusal).
+
+## [Unreleased] — companion/grok-bot-m0 (M2)
+
+### Added (M2: isolated HOME, webhook ingress, serve)
+- **Per-teammate HOME (`--home isolated`, default when sandboxed).** Each teammate's Pi subprocess gets a private writable HOME (`.pi/companion/home/<name>`) seeded with only the three credential/config files (`auth.json`, `models.json`, `settings.json`) re-bound read-only; the real HOME is invisible inside the sandbox. Sessions/settings are per-teammate. `--home shared` keeps the M1 behavior (real HOME ro except `~/.pi`). Found and fixed live: (1) Pi needs `<HOME>/.pi/agent/sessions/` pre-created (non-recursive mkdir); (2) bwrap bind order — the project-root ro-bind must precede the deeper homeDir/workspace binds or it shadows them; both regressions are now unit-tested.
+- **Webhook ingress** (`src/companion-webhook.mjs`): loopback HTTP listener — `POST /task/<teammate>` (JSON body, 32 KB cap) queues a task with `runSource: webhook`, `GET /status` summarizes the queue, `GET /healthz` is the only unauthenticated route. Every state-changing route requires the bearer credential from `.pi/companion/webhook-token` (0600, `wx`-issued once, refuse-to-overwrite); requests carrying an `Origin` header or a foreign `Host` are refused before auth (CSRF/DNS-rebinding guard).
+- **`companion serve`**: webhook ingress + worker loop in one long-running process (default port 7890), the deployment unit for the systemd example now documented in `docs/COMPANION.md`.
+- `tests/companion-m2.test.mjs` — 8 tests: isolated/shared bind matrices with ordering assertions, teammateHome paths, credential issue-once semantics, webhook enqueue/status/auth/CSRF/bad-payload behavior (raw HTTP client for the Host-header case; fetch/undici drops it).
+
+## [Unreleased] — companion/grok-bot-m0 (M1)
+
+### Added (M1: collaboration, sandbox, routines, ntfy)
+- **Inter-teammate messaging and delegation.** Teammates have inbox messages (`companion message <name> "<text>"` CLI, `companion_send_message` session tool); unread messages are drained into the teammate's next task prompt exactly once. Teammate replies can carry single-line collaboration directives — `DELEGATE @<name>: <instruction>` (queued as a task with `runSource: delegated:<name>`) and `MESSAGE @<name>: <text>` — parsed by the worker after each turn; unknown recipients are rejected without failing the task.
+- **Scheduled routines.** `companion routine add <name> --every 30m "<instruction>"` stores interval-scheduled recurring tasks (floor: once per minute); the worker enqueues due routines before each claim and stamps `lastRunAt` on enqueue to prevent re-enqueue storms.
+- **Bubblewrap sandbox (`--sandbox auto|bwrap|off`, default auto).** Each teammate's Pi subprocess runs under bwrap: system/HOME/project read-only, the teammate's workspace and a private tmpfs `/tmp` writable, `--die-with-parent` + new session. Pi's own state dir (`~/.pi`) stays writable — required for settings lock files and provider auth to load at all; full read-isolation (per-teammate HOME, network namespace) is deferred to M2. Found and fixed live: an initial HOME-fully-ro design broke provider auth with `EROFS … settings.json.lock`.
+- **ntfy notification channel**: `COMPANION_NTFY_URL` posts the message body to a topic, alongside the existing local feed / Telegram / desktop channels.
+- `src/duration.mjs` (`parseDurationMs`), `tests/companion-m1.test.mjs` (16 tests).
+
+## [Unreleased] — companion/grok-bot-m0
+
+### Added
+- **Companion: persistent AI teammates (M0 of the Grok Bot-style product track).** A new data plane + headless worker, built on the existing subagent executor infrastructure:
+  - `src/companion-store.mjs` — teammate profiles (persona / workspace / model) and a crash-safe FIFO task queue (atomic tmp+rename writes; on load, tasks left `running` by a crashed worker are requeued under a 3-attempt cap or failed with the reason). State lives in the gitignored `.pi/companion/`.
+  - `src/companion-notify.mjs` — notification fan-out: local append-only feed (always), Telegram Bot API (optional, both env vars required), `notify-send` desktop (optional). Every channel is best-effort and can never fail a task.
+  - `src/companion-runtime.mjs` — the worker loop (claim → prompt → execute → record → notify) with an injectable executor, `once`/`maxTasks`/abort-signal controls, plus `buildTeammatePrompt` / `extractResult` (RESULT: section contract) and `parsePiJsonReply` (final assistant reply from a Pi JSON-mode JSONL stream).
+  - `scripts/companion.mjs` (`npm run companion`) — CLI: `create` / `list` / `show` / `task` / `status` / `feed` / `worker [--once]`. The worker runs each task as an isolated Pi JSON subprocess in the teammate's own workspace directory.
+  - `.pi/extensions/companion.ts` — in-session client tools (`companion_create_teammate`, `companion_list_teammates`, `companion_submit_task`, `companion_task_status`) + `/companion` command; execution stays in the headless worker.
+  - `tests/companion.test.mjs` — 18 tests: persistence/reload, kebab-case and duplicate guards, FIFO order, stats, crash recovery to the attempt cap, teammate-id stability across reloads, feed corruption tolerance, notifier channel matrix, prompt/RESULT extraction, JSONL reply parsing, worker drain/failure/once/abort.
+
+### Fixed
+- **`extension.integration.test.mjs` hard-coded the extension count (19).** The count is now derived from `.pi/extensions/contracts.json` (non-vendored entries), so a contracted extension that fails to load fails the test by name, and a new extension cannot silently skip loading.
+
+### Changed
+- `contracts.json` registers the `companion` extension (degrade failure mode, 4 tools + 1 command). Doctor now reports 27 contracts.
+
+## [0.4.10] - 2026-10-20
+
+### Fixed
+- **`npm run check` type-checked nothing.** The script was a bare `tsc --noEmit`, but the package root has no `tsconfig.json` (only `tsconfig.extensions.json`), so tsc printed its help and exited 0 — meaning `npm run verify` (`check && test`) had been passing without type-checking a single extension. Replaced with `scripts/check-types.mjs`, which points tsc at the real project file (19 extension sources) and reports an explicit skip when the config is not part of an install, instead of a silent success. Verified by injecting a scratch type error (caught, TS2322, exit 2) and removing it.
+- **`npm run test:protocols` referenced four files that never existed** (`tests/lsp-client.test.mjs`, `dap-client.test.mjs`, `ast-tools.test.mjs`, `extension.integration.test.mjs`), so the gate — and therefore `npm run release:equaxis`' `verify:full` step — could never pass. `runProtocolRegression` is now existence-aware: it runs only the protocol tests that are present, and when none are present it reports `Protocol regression SKIPPED (not a pass)` with the unwritten filenames, instead of spawning a doomed `node --test`. Partial suites run and pass while listing the not-yet-written files. 5 new unit tests in `tests/protocol-regression.test.mjs`.
+
+### Added
+- **Missing high-priority test suites** (`docs/FILE_ARCHITECTURE.md` listed an aspirational suite that mostly did not exist):
+  - `tests/policy.test.mjs` — 27 tests: `policyRuleVersion` stability, `classifyBash` risk tiers, protected-path matching, workspace/configured-root guards, `validateToolInput` (URLs, AST-rename hashes, advisor/protocol enums, payload bounds), credential detection, `classifyToolCall` across every tool family, and the per-turn/high-risk limits.
+  - `tests/extension.integration.test.mjs` — 8 tests that load the **real** extension files through Pi's own `discoverAndLoadExtensions` (all 19 load with zero errors) and drive the reliability harness' live `tool_call` handler: protected-path block, malformed-input block, credential block, allowed in-workspace write with checkpoint, high-risk approve/deny, and the risk-classified trace stream.
+  - `tests/ast-tools.test.mjs` — 11 tests: `inspectAst` symbol/definition resolution (file + workspace scope), workspace/extension/missing-target guards, rename preview → fresh-hash apply, cross-file apply, and the injected post-apply `verify: tsc` hook.
+  - `tests/lsp-client.test.mjs` (8) and `tests/dap-client.test.mjs` (11) — the in-memory transports (`createMemoryLspTransport` / `createMemoryDapTransport`) drive request/response correlation, out-of-order replies, error and timeout rejection, diagnostics caching, and the full DAP session state machine (initialize → threads → stopped/continued → output → exited/terminated, breakpoint/stack/scope/variable caches).
+  All four protocol files now exist, so `npm run test:protocols` reports **Protocol regression passed** with no missing-file note (previously it named four files that had never been written).
+- **`npm run setup:python`** (`scripts/setup-python.mjs`): creates a repo-local `.venv` and installs pytest, pytest-asyncio and the vendored `agent-memory` package — required on PEP 668 "externally managed" distributions where `pip install` into the system interpreter is refused.
+
+### Changed
+- **`npm run test:memory`** now runs through `scripts/memory-tests.mjs`, which prefers the repo-local `.venv` interpreter and prints an actionable setup hint instead of a bare `ModuleNotFoundError: No module named 'pytest'`. Note: the first test that touches the long-term store makes chromadb download its default `all-MiniLM-L6-v2` ONNX model from HuggingFace, so `verify:full` also needs reachability of that CDN — on a host that blocks it the suite blocks in that test even with a correct environment.
+- **`Builtin tool-search` doctor check**: records which side of the expected Pi replaceable-extension overlap is active, so the `builtin:tool-search was not loaded` startup warning is not mistaken for a failure.
+- **Rejected disabling `builtin:tool-search` by default.** Although `"extensions": ["-builtin:tool-search"]` silences the startup warning, Pi has no per-session settings, so the disable also strips plain `pi`'s built-in `tool_search` (visible via `-t tool_search` / `defaultTools`). Equaxis keeps the warning and keeps plain `pi`'s capability; the trade-off is documented for users who only run `equaxis`.
+
+### Documented
+- `docs/UNIFIED_RUNTIME.md` **Known Warnings** section: (1) the benign `builtin:tool-search` replacement warning and the suppress-vs-capability trade-off; (2) the vendored `effect` advisory **GHSA-38f7-945m-qr2g / CVE-2026-32887** (`effect < 3.20.0`, needs `@effect/rpc` + concurrent load), why equaxis is not exploitable, and why the fix is a future vendored `my-pi-setup` refresh rather than an in-place effect 2→3 upgrade.
+
+## [0.4.9] - 2026-10-19
+
+### Added
+- **Memory entry discovery** (optimization plan #7): persistent sidebar footer "Memory" button (next to Models/Skills/Plugins), global **Alt+M** shortcut to open the Equaxis Memory dashboard from anywhere (suppressed while typing in inputs/textareas), and the top-bar memory button now explains *why* it is disabled ("open a project to browse its memory") instead of a bare disabled state. Titles show the shortcut hint. i18n keys added for en/zh-CN.
+- **pi-web smoke chain** (optimization plan #10): `npm run smoke:web` → `scripts/smoke-piweb.mjs` launches pi-web on a free ephemeral port, probes `/`, `/api/home`, sessions / memory / harness / skills APIs (cwd-scoped), then shuts down. 9 checks, exit code reflects pass/fail; no browser or Docker needed. First run: **9/9 PASS**.
+
+### Documented
+- **Memory naming conventions** (plan #6): `docs/MEMORY.md` gains a wing/room/hall conventions section — wing = domain/project namespace, room = topic subdivision, hall = nature-of-memory enum (facts/events/discoveries/preferences/advice/general), plus 5 concrete classification rules.
+- **pi-web runtime artifact precedence** (plan #8): `docs/UNIFIED_RUNTIME.md` documents the launcher priority chain (override → repo `pi-web/` → source-cache → global), why repo-source-without-build errors instead of silently falling back, and the build → restart → verify order for "changed code but nothing happened" debugging.
+
+## [0.4.8] - 2026-10-19
+
+### Added
+- **Knowledge graph entity drill-down** (optimization plan #5): predicate filter chips (per-predicate counts, toggle to focus the graph), path tracing (select an entity, "trace path", click a target — BFS shortest path highlighted and listed with hop count), and a related-memories section in the entity detail panel (drawers mentioning the entity, wing/room + preview). The simulation, filtering, and tracing all consume the same visible-fact set.
+
+### Fixed
+- pi-web test baseline: **549/549 green** (was 7 failing). Root cause was a single CRLF/LF mismatch — source files are CRLF (Windows-authored fork) while the source-regex tests anchor on `\n`; the two affected test files now normalize line endings at read time. No product code changed.
+- Build artifacts no longer tracked in git (`pi-web/.next`, `tsconfig.tsbuildinfo` untracked + ignored).
+
+## [0.4.7] - 2026-10-19
+
+### Added
+- **Linux wake scheduling** (previously Windows-only): `scheduledTaskCommand` is now platform-aware — on Linux/macOS it emits a copy-pasteable systemd user timer registration snippet (oneshot service + `OnCalendar=*:0/N` timer written to `~/.config/systemd/user/`, `systemctl --user enable --now`, no root needed), with verify/remove instructions. Unit names are derived from the task name; interval is clamped to ≥1 minute; unit bodies are printf-escaped into single-quoted shell strings. `/equaxis-goal schedule` shows the platform-appropriate hint. Windows schtasks output is unchanged.
+
+## [0.4.6] - 2026-10-19
+
+### Added
+- **Skill-embedded MCP** (oh-my-opencode borrowing, previously blocked on the Pi kernel): a skill can declare the MCP servers it needs in SKILL.md frontmatter (`mcp: <json-array>` with name/command/args or url, exposure, description). When the skill becomes active — via auto-injection or skill_search — the skills extension registers those servers with `pi.registerMcpServer` (Pi 1.3.0 dynamic MCP), defaulting to `deferred` exposure so the system-prompt budget stays flat. Registration is idempotent per name, dual-kernel guarded (no-op on Pi < 1.x), mcp.json entries take precedence, and a broken declaration degrades to a trace line. `skill_learn` accepts the `mcp` parameter; `skill_list` shows declared servers; round-trip serialization is covered by tests.
+- `tool_search` now discovers and activates live MCP tools: matched `mcp__server__tool` candidates (from `pi.getAllTools()`) are merged ahead of static catalog hits and activated additively via `setActiveTools` (deferred-load semantics, mirroring the built-in tool_search that this extension replaces). Previously deferred MCP tools were invisible to search, defeating the deferred exposure model.
+- Verified end to end with a temporary echo-testing skill + stdio echo MCP server: skill injection → server registration (trace `skill_mcp_registered`) → tool_search discovery → `mcp__equaxis_echo__echo` call returning `echo: hello-equaxis`.
+
+## [0.4.5] - 2026-10-19
+
+### Added
+- **Local benchmark runner** (`npm run eval:local`, scripts/benchmark-local.mjs): runs the deterministic 20-task Harbor suite against the installed Equaxis and raw Pi control using the local gateway — no Docker/harbor CLI needed. Produces `harbor_eval/jobs/budget-v2-report.json` (equaxis/pi_control/gain) that the Harness dashboard Harbor tab and runtime gates consume. Resumable per-(arm,task) results store, 4s inter-session cooldown, raw session logs under `harbor_eval/jobs/raw/`, 0-token provider hiccups are classified as `throttled` and not persisted (retried on the next invocation), and token accounting includes cacheRead/cacheWrite (the billable surface).
+- Node test suite now ships in the npm package (`tests/` added to `files`) so `npm test` works from an installed package.
+
+### Findings (first full local run, 2026-10-19)
+- equaxis pass@1=0.90 (18/20), avg 64.6s/task, 251k input+output tokens; pi_control pass@1=0.95 (19/20), avg 132.1s/task, 612k tokens. Harness halves latency and token spend at a one-task pass difference (within 20-task sampling noise). Both arms failed `mask-email` (real agent-behavior failure).
+- Token totals for this run predate the cache-accounting fix: the equaxis figure understates consumption on cache-friendly routing.
+
+## [0.4.4] - 2026-10-19
+
+### Added
+- scripts/test-protocols-live.mjs (`npm run test:protocols:live`): fixture-free live probe of the configured LSP/DAP adapters — real initialize/hover for LSP and a full initialize→launch→configurationDone→output lifecycle for DAP. Ships the two sequencing lessons: debugpy answers `launch` only after `configurationDone` (keep the launch request pending), and typescript-language-server requires a TypeScript 5.x installation (TypeScript 7's restructured package layout is not recognized).
+
+## [0.4.3] - 2026-10-19
+
+### Fixed
+- **Data-only project roots no longer shadow the runtime.** A workspace whose `.pi/equaxis.json` exists without runtime artifacts (e.g. `~/.pi/equaxis.json` in the user's home) previously became the project root for EVERYTHING: the launcher looked for extensions/settings in the workspace and sessions failed to start, and doctor reported missing runtime files. Now the launcher, doctor, pi-web API routes and harness-snapshot distinguish PROJECT root (config + state) from RUNTIME root (`.pi/extensions` + `scripts/`, resolved via `src/runtime-root.mjs`: project when it carries markers, otherwise the installed package). Doctor reports the split as `Project: <root> (data-only; runtime from package)`.
+- Config layering gains the bundled package config as an explicit layer: defaults → bundled (package `.pi/equaxis.json`) → global → project. Installation defaults such as `runtime.profile=full` no longer drop out when a workspace supplies its own project config.
+
+### Added
+- tests/runtime-root.test.mjs: coverage for runtime markers, runtime resolution, and the four-layer config merge.
+
+## [0.4.2] - 2026-10-19
+
+### Fixed
+- pi-web API routes resolve the Equaxis RUNTIME (scripts/, bridge/) separately from the project root via the new `findEquaxisRuntime` (env EQUAXIS_RUNTIME_HOME → project-with-runtime → package-of-launcher). Global installs serving a data-only workspace (e.g. ~) previously failed with `Cannot find module <workspace>/scripts/memory-json.mjs` on every memory/harness API call. The /pi-web launcher sets EQUAXIS_RUNTIME_HOME from its own module location.
+
+## [0.4.1] - 2026-10-19
+
+### Added
+- pi-web developer override: `PI_WEB_HOME` env or `piWeb.home` in the global config points at a full built pi-web checkout, so web dashboard iterations go live with `npm run build` alone — no rebuild inside the protected global install (where Next.js cannot compile anyway: its SWC loader excludes everything under node_modules).
+
+## [0.4.0] - 2026-10-19
+
+### Changed
+- **Pi kernel upgrade 0.83.0 → 1.3.0.** The pinned dependency and all 26 extension contracts move to the new kernel. The nested-dependency advisories carried by pi 0.83 (brace-expansion, undici: 2 high + 1 moderate) are resolved by the upgrade.
+- Extension contracts now accept union Pi ranges (`a b || c d`): `satisfiesVersion` evaluates `||` alternatives, and manifest validation uses the new `isValidVersionRange`. Contracts currently admit `>=0.83.0 <0.84.0 || >=1.3.0 <2.0.0` so the same build runs on both kernels during rollout and rollback.
+- `before_agent_start` handlers migrate to the Pi 1.2+ union event via the new dual-compatible `src/pi-event-utils.mjs` (`beforeAgentStartText` / `isBeforeAgentStartUserRun`): user runs behave exactly as before; custom-message runs (pi.sendMessage with triggerTurn) are normalized for display/intent/skills/mission and excluded from memory recall/recording. The helpers also understand 0.83 events (no messageType), so extensions stay compatible with both kernels.
+- Pre-existing type bug fixed: doc-wiki `const docs = []` inferred `never[]`.
+
+### Added
+- tsconfig.extensions.json + tests/pi-upgrade.test.mjs: the extension tree now type-checks against the Pi 1.3.0 API surface in CI (`npx tsc -p tsconfig.extensions.json`, 0 errors), with unit coverage for union version ranges and the dual-kernel event helpers.
+
+### Security
+- One advisory remains, newly surfaced and documented: `effect <3.20.0` (GHSA-38f7-945m-qr2g, AsyncLocalStorage contamination inside Effect fibers under concurrent RPC load). It only affects the vendored my-pi-setup extensions, which run local processes rather than RPC workloads; bumping the pinned effect 2.x is deferred until the vendored code is refreshed.
+
+## [0.3.8] - 2026-10-19
+
+### Added
+- Memory CRUD audit trail: every remember/update/delete/add_fact appends a JSONL entry (actor, before/after previews, timestamp) to `<memoryRoot>/audit.jsonl`, bounded at 2MB by newest-half truncation. Auditing is best-effort and never breaks memory operations. New `audit_log` bridge action with pagination.
+- pi-web Memory dashboard "Activity" view showing recent memory changes (update diffs struck-through, actor and timestamp per entry).
+- Memory visualize pagination: `visualize({limit, offset})` pages drawers and facts (SQL OFFSET), reports `page.{limit,offset,total_drawers,total_facts}` and honest `truncated` flags for both collections; room counts now summarize the whole store.
+- pi-web memory API: `offset`/`limit` pass-through, 3s in-process snapshot cache (mutation-invalidated, `x-equaxis-cache` header), `?audit=` endpoint.
+- pi-web Memory dashboard "Load more" paging for stores beyond one page.
+- pi-web startup health: explicit "source found but not built" error naming the build command (no more silent fallback to stale artifacts), foreign-process port-occupancy detection, and a post-start `/api/memory` probe with classified failure reasons (bridge timeout / dependency missing / unreachable).
+
+### Changed
+- Memory visualize clamps: non-positive or non-numeric limit/offset fall back to the first full-size page.
+
+## [0.3.7] - 2026-10-19
+
+### Fixed
+- Policy: read-only shell commands with stderr/stdout redirects (`cat pkg.json 2>/dev/null`) no longer trigger `shell write targets protected path` blocks. Redirection analysis now inspects actual file targets (skipping fd duplication and /dev/null) instead of treating any `>` in the command plus any protected path mention as a write. Mutating commands (cp/mv/tee/sed -i/find -delete/...) keep the conservative whole-command scan.
+- Doctor Memory store: resolves `memory.rootDir` against the session cwd (matching the runtime extension) instead of the package root, reports the probed path, and checks backend-appropriate store layout (native drawers.json vs legacy python palace).
+- Doctor Python memory: only probes the Python import when `memory.backend === "python"`; native backend reports an honest skip instead of FAILing on a missing chromadb.
+- Doctor Provider credential: detects pi `auth.json` / `models.json` providers (incl. loopback providers with placeholder keys), dedupes symlinked agent-dir roots, and never prints key material.
+
+### Added
+- tests/policy-shell-write.test.mjs and tests/doctor.test.mjs: node:test coverage for the redirect-target policy analysis and the doctor checks above.
+
 ## [0.3.6] - 2026-08-16
 
 ### Added

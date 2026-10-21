@@ -59,7 +59,7 @@
     },
     "costBrake": {
       "enabled": true,
-      "maxSessionCostUsd": 2,
+      "maxSessionCostUsd": 20,
       "warnAtFraction": 0.8
     },
     "commandAllowlist": {

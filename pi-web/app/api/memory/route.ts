@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { findEquaxisRoot } from "@/lib/equaxis-project";
+import { findEquaxisRoot, findEquaxisRuntime } from "@/lib/equaxis-project";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 
@@ -10,6 +10,44 @@ export const dynamic = "force-dynamic";
 
 const RESPONSE_PREFIX = "__EQUAXIS_MEMORY__";
 const BRIDGE_TIMEOUT_MS = 30_000;
+const SNAPSHOT_CACHE_TTL_MS = 3_000;
+const MAX_PAGE_LIMIT = 500;
+
+// Short-TTL snapshot cache: the bridge spawns a fresh process per request, so
+// rapid dashboard refreshes would otherwise pay process + store load each
+// time. Mutations (POST) invalidate every cached entry for their root.
+interface CacheEntry { expiresAt: number; value: unknown }
+const snapshotCache = new Map<string, CacheEntry>();
+
+function cachedSnapshot(key: string): unknown | undefined {
+  const entry = snapshotCache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    snapshotCache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+function storeSnapshot(key: string, value: unknown): void {
+  if (snapshotCache.size > 64) {
+    const oldest = snapshotCache.keys().next().value;
+    if (oldest !== undefined) snapshotCache.delete(oldest);
+  }
+  snapshotCache.set(key, { expiresAt: Date.now() + SNAPSHOT_CACHE_TTL_MS, value });
+}
+
+function invalidateSnapshotsForRoot(root: string): void {
+  for (const key of snapshotCache.keys()) {
+    if (key.startsWith(`${root}|`)) snapshotCache.delete(key);
+  }
+}
+
+function parsePageParam(raw: string | null, fallback: number, max: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(Math.floor(parsed), max);
+}
 
 interface MemoryConfig {
   backend?: string;
@@ -35,16 +73,22 @@ function requestBridge(
 ): Promise<unknown> {
   const config = readMemoryConfig(projectRoot);
   const rootDir = resolve(projectRoot, config.rootDir ?? ".equaxis/memory");
+  // The runtime (scripts/, bridge/) lives in the installed package, which for
+  // global installs is NOT the project root — resolve it separately.
+  const runtimeRoot = findEquaxisRuntime(projectRoot);
+  if (!runtimeRoot) {
+    return Promise.reject(new Error("Equaxis runtime not found (scripts/memory-json.mjs) — set EQUAXIS_RUNTIME_HOME or run from an Equaxis package"));
+  }
   // memory.backend selects the process: native (Node core) or python (legacy bridge).
   const native = config.backend !== "python";
   const command = native ? process.execPath : (config.pythonCommand ?? "python");
   const args = native
-    ? [join(projectRoot, "scripts", "memory-json.mjs"), "--root", rootDir]
-    : ["-u", join(projectRoot, "bridge", "memory_bridge.py"), "--root", rootDir];
+    ? [join(runtimeRoot, "scripts", "memory-json.mjs"), "--root", rootDir]
+    : ["-u", join(runtimeRoot, "bridge", "memory_bridge.py"), "--root", rootDir];
 
   const { promise, resolve: settleResolve, reject: settleReject } = Promise.withResolvers<unknown>();
   const child = spawn(command, args, {
-    cwd: projectRoot,
+    cwd: runtimeRoot,
     env: {
       ...process.env,
       PYTHONIOENCODING: "utf-8",
@@ -140,8 +184,24 @@ export async function GET(request: Request) {
       const result = await requestBridge(root, "search", { query, limit: 20 }) as { matches?: unknown[] };
       return NextResponse.json({ matches: result.matches ?? [] });
     }
-    const snapshot = await requestBridge(root, "visualize", { limit: 500 });
-    return NextResponse.json(snapshot);
+    // CRUD audit trail: /api/memory?cwd=<root>&audit=<limit>[&auditOffset=<n>]
+    const auditParam = url.searchParams.get("audit");
+    if (auditParam !== null) {
+      const auditLimit = parsePageParam(auditParam, 50, MAX_PAGE_LIMIT);
+      const auditOffset = parsePageParam(url.searchParams.get("auditOffset"), 0, Number.MAX_SAFE_INTEGER);
+      const auditLog = await requestBridge(root, "audit_log", { limit: auditLimit || 50, offset: auditOffset });
+      return NextResponse.json(auditLog);
+    }
+    const limit = parsePageParam(url.searchParams.get("limit"), MAX_PAGE_LIMIT, MAX_PAGE_LIMIT);
+    const offset = parsePageParam(url.searchParams.get("offset"), 0, Number.MAX_SAFE_INTEGER);
+    const cacheKey = `${root}|visualize|${limit}|${offset}`;
+    const cached = cachedSnapshot(cacheKey);
+    if (cached !== undefined) {
+      return NextResponse.json(cached, { headers: { "x-equaxis-cache": "hit" } });
+    }
+    const snapshot = await requestBridge(root, "visualize", { limit, offset });
+    storeSnapshot(cacheKey, snapshot);
+    return NextResponse.json(snapshot, { headers: { "x-equaxis-cache": "miss" } });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
@@ -193,6 +253,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "drawer_id required" }, { status: 400 });
       }
       const result = await requestBridge(root, "delete_memory", { drawer_id: drawerId });
+      invalidateSnapshotsForRoot(root);
       return NextResponse.json(result);
     }
 
@@ -209,6 +270,7 @@ export async function POST(request: Request) {
         hall: typeof body.hall === "string" ? body.hall : undefined,
         source_file: typeof body.source_file === "string" ? body.source_file : undefined,
       });
+      invalidateSnapshotsForRoot(root);
       return NextResponse.json(result);
     }
 
@@ -229,6 +291,7 @@ export async function POST(request: Request) {
       source_file: typeof body.source_file === "string" ? body.source_file : "pi-web",
       metadata: body.metadata ?? { source: "pi-web" },
     });
+    invalidateSnapshotsForRoot(root);
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

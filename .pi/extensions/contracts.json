@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "manifestVersion": 1,
-  "piRange": ">=0.83.0 <0.84.0",
+  "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
   "config": {
     "path": ".pi/equaxis.json",
     "schemaVersion": 1
@@ -20,7 +20,7 @@
       "id": "provider",
       "entry": "provider.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "fatal",
       "services": [
         "config"
@@ -34,7 +34,7 @@
       "id": "reliability",
       "entry": "reliability-harness.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "fatal",
       "services": [
         "config",
@@ -68,7 +68,7 @@
       "id": "harness-panel",
       "entry": "harness-panel.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "diagnostics",
@@ -88,7 +88,7 @@
       "id": "dashboard-command",
       "entry": "dashboard-command.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -104,7 +104,7 @@
       "id": "pi-web-command",
       "entry": "pi-web.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -120,7 +120,7 @@
       "id": "memory",
       "entry": "memory.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -157,7 +157,7 @@
       "id": "web-crawler",
       "entry": "web-crawler.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config"
@@ -174,7 +174,7 @@
       "id": "tool-catalog",
       "entry": "tool-catalog.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config"
@@ -190,7 +190,7 @@
       "id": "tool-scheduler",
       "entry": "tool-scheduler.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config"
@@ -206,7 +206,7 @@
       "id": "protocol-tools",
       "entry": "protocol-tools.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -227,7 +227,7 @@
       "id": "ask-user",
       "entry": "vendor/my-pi-setup/extensions/ask-user",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config"
@@ -241,7 +241,7 @@
       "id": "copy-all",
       "entry": "vendor/my-pi-setup/extensions/copy-all",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config"
@@ -255,7 +255,7 @@
       "id": "firecrawl-search",
       "entry": "vendor/my-pi-setup/extensions/firecrawl-search",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config"
@@ -271,7 +271,7 @@
       "id": "model-info",
       "entry": "vendor/my-pi-setup/extensions/model-info",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -288,7 +288,7 @@
       "id": "summaries",
       "entry": "vendor/my-pi-setup/extensions/summaries",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -305,7 +305,7 @@
       "id": "ui-customization",
       "entry": "vendor/my-pi-setup/extensions/ui-customization",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -321,7 +321,7 @@
       "id": "workflows",
       "entry": "vendor/my-pi-setup/extensions/workflows",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -339,7 +339,7 @@
       "id": "skills",
       "entry": "skills.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -369,7 +369,7 @@
       "id": "subagent-engine",
       "entry": "subagent-engine.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -386,8 +386,7 @@
         "tool:subagent_list",
         "tool:subagent_cancel",
         "tool:subagent_message",
-        "tool:subagent_messages",
-        "tool:subagent_check"
+        "tool:subagent_messages"
       ],
       "promptImpact": {
         "systemPromptChars": 0,
@@ -396,10 +395,32 @@
       }
     },
     {
+      "id": "companion",
+      "entry": "companion.ts",
+      "contractVersion": 1,
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
+      "failureMode": "degrade",
+      "services": [],
+      "requires": [],
+      "provides": [
+        "tool:companion_create_teammate",
+        "tool:companion_list_teammates",
+        "tool:companion_submit_task",
+        "tool:companion_send_message",
+        "tool:companion_task_status",
+        "command:companion"
+      ],
+      "promptImpact": {
+        "systemPromptChars": 0,
+        "tools": 5,
+        "notes": "M1 companion 数据平面: 队友档案 + FIFO 队列 + 收件箱 + routine; 执行在 headless worker (scripts/companion.mjs), bwrap 写隔离"
+      }
+    },
+    {
       "id": "ast-tools",
       "entry": "ast-tools.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -419,7 +440,7 @@
       "id": "prefix-stability",
       "entry": "prefix-stability.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "trace",
@@ -441,7 +462,7 @@
       "id": "intent-gate",
       "entry": "intent-gate.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -462,7 +483,7 @@
       "id": "code-graph",
       "entry": "code-graph.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -487,7 +508,7 @@
       "id": "goal-state",
       "entry": "goal-state.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -511,7 +532,7 @@
       "id": "refine",
       "entry": "refine.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -534,7 +555,7 @@
       "id": "doc-wiki",
       "entry": "doc-wiki.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",
@@ -560,7 +581,7 @@
       "id": "settings-panel",
       "entry": "settings-panel.ts",
       "contractVersion": 1,
-      "piRange": ">=0.83.0 <0.84.0",
+      "piRange": ">=0.83.0 <0.84.0 || >=1.3.0 <2.0.0",
       "failureMode": "degrade",
       "services": [
         "config",

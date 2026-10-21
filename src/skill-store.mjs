@@ -11,6 +11,17 @@ import { selectWithinBudget } from "./context-budget.mjs";
  * not executable instructions.
  */
 
+/** A minimal MCP server declaration: stdio (command) or HTTP (url), with a
+ * valid server name. Same shape as an mcpServers entry in mcp.json. */
+function isValidMcpDeclaration(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+  const name = String(entry.name ?? "").trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) return false;
+  if (typeof entry.command === "string" && entry.command.trim()) return true;
+  if (typeof entry.url === "string" && /^https?:\/\//.test(entry.url.trim())) return true;
+  return false;
+}
+
 /** Parse frontmatter (---\n...\n---) + body from a SKILL.md file. */
 export function parseSkillFile(content, filePath = "") {
   const text = String(content ?? "");
@@ -23,7 +34,8 @@ export function parseSkillFile(content, filePath = "") {
       triggers: [],
       body: text.trim(),
       filePath,
-      baseDir: path.dirname(filePath)
+      baseDir: path.dirname(filePath),
+      mcpServers: []
     };
   }
   const rawFrontmatter = match[1];
@@ -42,6 +54,16 @@ export function parseSkillFile(content, filePath = "") {
       meta[key] = value;
     }
   }
+  // Skill-embedded MCP: `mcp: <json-array>` declares servers the skill
+  // needs. Parsed defensively — a malformed declaration must never break
+  // loading the skill itself.
+  let mcpServers = [];
+  if (typeof meta.mcp === "string" && meta.mcp.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(meta.mcp);
+      if (Array.isArray(parsed)) mcpServers = parsed.filter(isValidMcpDeclaration);
+    } catch { /* keep empty */ }
+  }
   return {
     name: meta.name || path.basename(path.dirname(filePath)) || "untitled",
     description: meta.description ?? "",
@@ -55,6 +77,7 @@ export function parseSkillFile(content, filePath = "") {
     related: meta.related ?? [],
     source: meta.source ?? "",
     created: meta.created ?? "",
+    mcpServers,
     retired: meta.retired ?? false,
     retiredReason: meta.retiredreason ?? "",
     body,
@@ -245,6 +268,7 @@ export function serializeSkill(skill) {
   if (skill.category) frontmatter.push(`category: ${oneLine(skill.category)}`);
   if (skill.dontUse) frontmatter.push(`dontUse: ${oneLine(skill.dontUse)}`);
   if (skill.related?.length) frontmatter.push(`related: [${skill.related.join(", ")}]`);
+  if (skill.mcpServers?.length) frontmatter.push(`mcp: ${JSON.stringify(skill.mcpServers)}`);
   // Provenance (血缘): evidence-backed skills stay auditable after deploy.
   // PracticeUnsafe (2608.12851) shows unsafe successes harden into skills and
   // get reused across sessions; persisting source+evidence makes every skill

@@ -6,6 +6,28 @@ Equaxis 复用 Pi 的 Provider 系统，模型来源有三类：
 2. **Extension 注册 Provider**：`.pi/extensions/provider.ts` 通过 `pi.registerProvider()` 注册（如 `openai-inprior`）。
 3. **`models.json` 自定义 Provider**：在 `.pi/models.json` 的 `providers` 里声明（代理、网关等）。
 
+## 功能模型槽位（`equaxis model`）
+
+每个需要 LLM 的功能都有一个模型槽位，用 CLI 统一配置（写入对应配置文件，写入前对照目录校验）：
+
+```bash
+equaxis model list                                  # 主模型 + 各槽位 + 解析状态
+equaxis model set dream magpie deepworks/DeepSeek-V4-Flash
+equaxis model set advisor deepseek deepseek-v4-pro
+equaxis model main magpie deepworks/Kimi-K3         # 主模型（默认会话模型）
+equaxis model unset dream                           # 清除 → 跟随会话模型
+```
+
+| 槽位 | 配置位置 | 回落 |
+|---|---|---|
+| `main` | `.pi/settings.json` `defaultProvider/defaultModel` | 无（它就是回落目标） |
+| `dream` | `.pi/equaxis.json` `memory.dream.provider/model` | 不可用时自动回落会话/主模型 |
+| `advisor` | `.pi/equaxis.json` `advisor.provider/model` | 同上 |
+
+校验目录 = pi-ai 内置 provider（`node_modules/@earendil-works/pi-ai/dist/providers/data/*.json`）叠加 `~/.pi/agent/models.json` + `models-store.json`。未知 provider / 已知 provider 下不存在的模型会被拒绝并列出可用项；pi-ai 不可解析时降级为仅用户目录（未知 provider 标记 unverified 而非拒绝）。
+
+**自动回落**：dream 运行时（`/memory-dream` 或 shutdown 触发）若配置的模型在注册表里找不到或凭据不可用（例如配了 `deepseek` 但没写 key），不会报错中断，而是回落到当前会话模型并写入 `memory_dream_model_fallback` trace。
+
 ## DeepSeek（内置）
 
 把 Key 写入 `.pi/auth.json`（或设置环境变量 `DEEPSEEK_API_KEY`）即可：
@@ -21,7 +43,7 @@ Equaxis 复用 Pi 的 Provider 系统，模型来源有三类：
 
 `.pi/auth.json` 已在 `.gitignore` 中，不要提交。
 
-可用模型（Pi 0.83.0 自带目录）：
+可用模型（Pi 自带目录）：
 
 | Provider | Model | Context | Max Out | Thinking |
 |---|---|---|---|---|

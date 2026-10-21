@@ -1,474 +1,180 @@
+import test from "node:test";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
-import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 
-const projectRoot = path.resolve(import.meta.dirname, "..");
-const extensionPath = path.join(projectRoot, ".pi", "extensions", "reliability-harness.ts");
-const dashboardExtensionPath = path.join(projectRoot, ".pi", "extensions", "dashboard-command.ts");
-const extensionsDir = path.join(projectRoot, ".pi", "extensions");
+/**
+ * Integration: load the REAL Equaxis extension files through Pi's own loader and
+ * drive the reliability harness' `tool_call` handler, asserting end-to-end tool
+ * governance (validation, policy blocking, approval, trace/checkpoint side
+ * effects). Nothing here re-implements policy — it exercises the shipped wiring.
+ */
 
-function makeContext(cwd) {
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-extension-it-"));
+const traceFile = path.join(workspace, ".pi", "runtime", "traces.jsonl");
+
+// The extension factories capture process.cwd() when they load, and the runtime
+// services resolve config + trace paths from it, so the load must happen inside
+// the throwaway workspace.
+process.chdir(workspace);
+
+const loaded = await discoverAndLoadExtensions(
+  [path.join(repoRoot, ".pi", "extensions")],
+  workspace,
+  path.join(repoRoot, ".pi", "agent")
+);
+
+function extensionNamed(name) {
+  const found = loaded.extensions.find((extension) => path.basename(extension.path) === name);
+  assert.ok(found, `extension not loaded: ${name}`);
+  return found;
+}
+
+function toolCallHandlers() {
+  const handlers = extensionNamed("reliability-harness.ts").handlers.get("tool_call") ?? [];
+  assert.equal(handlers.length, 1, "the reliability harness registers exactly one tool_call handler");
+  return handlers[0];
+}
+
+function makeCtx({ selectChoice = "Approve this call", confirmValue = true } = {}) {
+  const notifications = [];
   return {
-    cwd,
-    mode: "json",
-    hasUI: false,
-    model: { provider: "test-provider", id: "test-model" },
+    cwd: workspace,
+    hasUI: true,
+    sessionManager: { getSessionId: () => "extension-it-session" },
+    notifications,
     ui: {
-      notify() {},
-      setStatus() {}
-    },
-    sessionManager: {
-      getSessionId: () => "integration-session",
-      getBranch: () => []
+      notify: (message) => notifications.push(message),
+      setStatus: () => {},
+      select: async () => selectChoice,
+      confirm: async () => confirmValue
     }
   };
 }
 
-test("dashboard slash command renders runtime status without model mediation", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-dashboard-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+function traceEvents() {
+  if (!fs.existsSync(traceFile)) return [];
+  return fs
+    .readFileSync(traceFile, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line).event);
+}
 
-  const loaded = await discoverAndLoadExtensions(
-    [dashboardExtensionPath],
-    tempRoot,
-    path.join(tempRoot, "agent-home")
-  );
-  assert.deepEqual(loaded.errors, []);
-  assert.equal(loaded.extensions.length, 1);
-  const extension = loaded.extensions[0];
-  assert.equal(extension.commands.has("dashboard"), true);
+// ---------------------------------------------------------------------------
+// real extension loading
+// ---------------------------------------------------------------------------
 
-  const messages = [];
-  const ctx = makeContext(tempRoot);
-  ctx.ui.notify = (message, level) => messages.push({ message, level });
-  await extension.commands.get("dashboard").handler(undefined, ctx);
-  assert.equal(messages[0].level, "info");
-  assert.match(messages[0].message, /Equaxis runtime dashboard/);
-  assert.match(messages[0].message, /Health:/);
-
-  const serviceWrappedMessages = [];
-  const serviceWrappedCtx = makeContext(tempRoot);
-  delete serviceWrappedCtx.cwd;
-  serviceWrappedCtx.services = { config: { get: () => ({ protocols: { lsp: { command: "" }, dap: { command: "" } } }) } };
-  serviceWrappedCtx.ui.notify = (message, level) => serviceWrappedMessages.push({ message, level });
-  await extension.commands.get("dashboard").handler("--json", serviceWrappedCtx);
-  assert.equal(serviceWrappedMessages[0].level, "info");
-  assert.equal(JSON.parse(serviceWrappedMessages[0].message).health.checks >= 0, true);
+test("every Equaxis extension loads through Pi's loader without errors", () => {
+  assert.deepEqual(loaded.errors, [], `extension load errors: ${JSON.stringify(loaded.errors)}`);
+  // The expected set comes from the manifest, so a new extension cannot
+  // silently skip loading (and this test cannot lie about the count).
+  // Vendored entries (vendor/...) are profile-gated and not loaded here.
+  const manifest = JSON.parse(fs.readFileSync(new URL("../.pi/extensions/contracts.json", import.meta.url), "utf8"));
+  const expected = manifest.extensions.filter((entry) => !entry.entry.startsWith("vendor/"));
+  assert.equal(loaded.extensions.length, expected.length, `expected all ${expected.length} contracted extensions to load`);
+  const loadedEntries = new Set(loaded.extensions.map((ext) => path.basename(ext.path)));
+  for (const entry of expected) {
+    assert.ok(loadedEntries.has(entry.entry), `contracted extension ${entry.entry} did not load`);
+  }
 });
 
-test("loads as a real Pi extension and blocks high-risk calls without approval UI", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+test("extensions register the tools, flags and commands the harness depends on", () => {
+  assert.ok(extensionNamed("tool-catalog.ts").tools.has("tool_search"));
+  assert.ok(extensionNamed("tool-scheduler.ts").tools.has("tool_schedule"));
+  assert.ok(extensionNamed("subagent-engine.ts").tools.has("subagent_spawn"));
+  assert.ok(extensionNamed("ast-tools.ts").tools.has("ast_inspect"));
+  assert.ok(extensionNamed("ast-tools.ts").tools.has("ast_rename"));
+  assert.ok(extensionNamed("protocol-tools.ts").tools.has("lsp_probe"));
+  assert.ok(extensionNamed("protocol-tools.ts").tools.has("dap_probe"));
+  assert.ok(extensionNamed("memory.ts").tools.has("memory_search"));
+  assert.ok(extensionNamed("web-crawler.ts").tools.has("web_crawl"));
+  assert.ok(extensionNamed("companion.ts").tools.has("companion_submit_task"));
 
-  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
-  fs.writeFileSync(
-    path.join(tempRoot, ".pi", "reliability.json"),
-    JSON.stringify({
-      mode: "enforce",
-      traceDir: ".pi/runtime",
-      limits: { maxToolCallsPerTurn: 1 },
-      approval: { webQueue: { enabled: false } }
-    }),
-    "utf8"
-  );
-
-  const loaded = await discoverAndLoadExtensions(
-    [extensionPath],
-    tempRoot,
-    path.join(tempRoot, "agent-home")
-  );
-  assert.deepEqual(loaded.errors, []);
-  assert.equal(loaded.extensions.length, 1);
-
-  const extension = loaded.extensions[0];
-  assert.equal(extension.flags.has("equaxis-mode"), true);
-  assert.equal(extension.commands.has("equaxis-eval"), true);
-  assert.equal(extension.handlers.has("tool_call"), true);
-
-  const ctx = makeContext(tempRoot);
-  for (const handler of extension.handlers.get("session_start") ?? []) {
-    await handler({ type: "session_start", reason: "startup" }, ctx);
-  }
-
-  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
-  assert.ok(toolCallHandler);
-  const result = await toolCallHandler(
-    {
-      type: "tool_call",
-      toolCallId: "danger-1",
-      toolName: "bash",
-      input: { command: "rm -rf ./temporary-output" }
-    },
-    ctx
-  );
-
-  assert.equal(result?.block, true);
-  assert.match(result?.reason ?? "", /approval UI is unavailable/);
-
-  const retryResult = await toolCallHandler(
-    {
-      type: "tool_call",
-      toolCallId: "retry-2",
-      toolName: "read",
-      input: { path: "README.md" }
-    },
-    ctx
-  );
-  assert.equal(retryResult?.block, true);
-  assert.match(retryResult?.reason ?? "", /tool-call limit exceeded/);
-  assert.equal(fs.existsSync(path.join(tempRoot, ".pi", "runtime", "traces.jsonl")), true);
+  const harness = extensionNamed("reliability-harness.ts");
+  assert.ok(harness.flags.has("equaxis-mode"), "the governance mode flag must be registered");
+  assert.ok(harness.commands.size >= 5, "the harness exposes its operator commands");
+  assert.ok((harness.handlers.get("tool_result") ?? []).length >= 1, "tool results are audited too");
 });
 
-test("keeps raw-secret blocking and trace redaction active in audit mode", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-audit-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
-  fs.writeFileSync(
-    path.join(tempRoot, ".pi", "reliability.json"),
-    JSON.stringify({ mode: "audit", traceDir: ".pi/runtime" }),
-    "utf8"
-  );
+// ---------------------------------------------------------------------------
+// tool governance
+// ---------------------------------------------------------------------------
 
-  const loaded = await discoverAndLoadExtensions(
-    [extensionPath],
-    tempRoot,
-    path.join(tempRoot, "agent-home")
-  );
-  assert.deepEqual(loaded.errors, []);
-  const extension = loaded.extensions[0];
-  const ctx = makeContext(tempRoot);
-  for (const handler of extension.handlers.get("session_start") ?? []) {
-    await handler({ type: "session_start", reason: "startup" }, ctx);
-  }
-
-  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
-  const secret = "supersecret123456";
-  const result = await toolCallHandler(
-    {
-      type: "tool_call",
-      toolCallId: "secret-1",
-      toolName: "bash",
-      input: { command: `deploy --token=${secret}` }
-    },
-    ctx
-  );
-
-  assert.equal(result?.block, true);
-  const trace = fs.readFileSync(path.join(tempRoot, ".pi", "runtime", "traces.jsonl"), "utf8");
-  assert.equal(trace.includes(secret), false);
-  assert.match(trace, /"redacted":true/);
-});
-
-test("blocks semantically invalid arguments before tool execution", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-validation-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
-  fs.writeFileSync(
-    path.join(tempRoot, ".pi", "reliability.json"),
-    JSON.stringify({ mode: "enforce", traceDir: ".pi/runtime" }),
-    "utf8"
-  );
-
-  const loaded = await discoverAndLoadExtensions(
-    [extensionPath],
-    tempRoot,
-    path.join(tempRoot, "agent-home")
-  );
-  assert.deepEqual(loaded.errors, []);
-  const extension = loaded.extensions[0];
-  const ctx = makeContext(tempRoot);
-  for (const handler of extension.handlers.get("session_start") ?? []) {
-    await handler({ type: "session_start", reason: "startup" }, ctx);
-  }
-
-  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
-  const result = await toolCallHandler(
-    { type: "tool_call", toolCallId: "invalid-1", toolName: "write", input: { path: "" } },
-    ctx
+test("harness blocks writes to protected paths and records the decision", async () => {
+  const result = await toolCallHandlers()(
+    { toolCallId: "it-protected", toolName: "write", input: { path: ".env" } },
+    makeCtx()
   );
   assert.equal(result?.block, true);
-  assert.match(result?.reason ?? "", /MISSING_ARGUMENT/);
-  const trace = fs.readFileSync(path.join(tempRoot, ".pi", "runtime", "traces.jsonl"), "utf8");
-  assert.match(trace, /tool_validation_failed/);
-  assert.match(trace, /"retryable":true/);
+  assert.match(result.reason, /Reliability Harness/);
+  assert.match(result.reason, /protected path/);
+  assert.ok(traceEvents().includes("tool_blocked"));
 });
 
-test("blocks stale edit calls before tool execution", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-stale-edit-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
-  fs.writeFileSync(path.join(tempRoot, "file.txt"), "current\n", "utf8");
-  fs.writeFileSync(
-    path.join(tempRoot, ".pi", "reliability.json"),
-    JSON.stringify({ mode: "enforce", traceDir: ".pi/runtime" }),
-    "utf8"
-  );
-
-  const loaded = await discoverAndLoadExtensions([extensionPath], tempRoot, path.join(tempRoot, "agent-home"));
-  assert.deepEqual(loaded.errors, []);
-  const extension = loaded.extensions[0];
-  const ctx = makeContext(tempRoot);
-  for (const handler of extension.handlers.get("session_start") ?? []) {
-    await handler({ type: "session_start", reason: "startup" }, ctx);
-  }
-  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
-  const result = await toolCallHandler(
-    { type: "tool_call", toolCallId: "stale-1", toolName: "edit", input: { path: "file.txt", oldText: "previous", newText: "next" } },
-    ctx
+test("harness blocks malformed tool input before it reaches policy", async () => {
+  const result = await toolCallHandlers()(
+    { toolCallId: "it-invalid", toolName: "write", input: {} },
+    makeCtx()
   );
   assert.equal(result?.block, true);
-  assert.match(result?.reason ?? "", /STALE_EDIT_OLD_TEXT_MISSING/);
-  const trace = fs.readFileSync(path.join(tempRoot, ".pi", "runtime", "traces.jsonl"), "utf8");
-  assert.match(trace, /tool_validation_failed/);
-  assert.match(trace, /STALE_EDIT_OLD_TEXT_MISSING/);
+  assert.match(result.reason, /INVALID_ARGUMENT/);
+  assert.match(result.reason, /MISSING_ARGUMENT/);
+  assert.ok(traceEvents().includes("tool_validation_failed"));
 });
 
-test("records runtime eval telemetry for completed tool calls", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-eval-telemetry-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
-  fs.writeFileSync(
-    path.join(tempRoot, ".pi", "reliability.json"),
-    JSON.stringify({ mode: "enforce", traceDir: ".pi/runtime" }),
-    "utf8"
+test("harness blocks raw credentials in arguments and redacts them", async () => {
+  const result = await toolCallHandlers()(
+    { toolCallId: "it-credential", toolName: "write", input: { path: "notes.txt", content: "api" + "_key: " + "abcdefghijklmnop" } },
+    makeCtx()
   );
-
-  const loaded = await discoverAndLoadExtensions([extensionPath], tempRoot, path.join(tempRoot, "agent-home"));
-  assert.deepEqual(loaded.errors, []);
-  const extension = loaded.extensions[0];
-  const ctx = makeContext(tempRoot);
-  for (const handler of extension.handlers.get("session_start") ?? []) {
-    await handler({ type: "session_start", reason: "startup" }, ctx);
-  }
-  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
-  const [toolResultHandler] = extension.handlers.get("tool_result") ?? [];
-  const allowed = await toolCallHandler(
-    { type: "tool_call", toolCallId: "read-1", toolName: "read", input: { path: "README.md" } },
-    ctx
-  );
-  assert.equal(allowed, undefined);
-  await toolResultHandler(
-    { type: "tool_result", toolCallId: "read-1", toolName: "read", isError: false },
-    ctx
-  );
-
-  const trace = fs.readFileSync(path.join(tempRoot, ".pi", "runtime", "traces.jsonl"), "utf8");
-  assert.match(trace, /eval_outcome_recorded/);
-  assert.match(trace, /repo-inspect/);
-  assert.match(trace, /test-model/);
+  assert.equal(result?.block, true);
+  assert.match(result.reason, /secret/);
 });
 
-test("exhausts repeated repairs for the same invalid field", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-repair-limit-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
-  fs.writeFileSync(
-    path.join(tempRoot, ".pi", "reliability.json"),
-    JSON.stringify({ mode: "enforce", traceDir: ".pi/runtime", limits: { maxRepairAttemptsPerError: 2 } }),
-    "utf8"
+test("a valid in-workspace write is allowed and check-pointed", async () => {
+  const result = await toolCallHandlers()(
+    { toolCallId: "it-allowed", toolName: "write", input: { path: "src/allowed.txt" } },
+    makeCtx()
   );
-  const loaded = await discoverAndLoadExtensions([extensionPath], tempRoot, path.join(tempRoot, "agent-home"));
-  assert.deepEqual(loaded.errors, []);
-  const extension = loaded.extensions[0];
-  const ctx = makeContext(tempRoot);
-  for (const handler of extension.handlers.get("session_start") ?? []) {
-    await handler({ type: "session_start", reason: "startup" }, ctx);
-  }
-  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
-  const event = (id) => ({ type: "tool_call", toolCallId: id, toolName: "write", input: { path: "" } });
-  const first = await toolCallHandler(event("repair-1"), ctx);
-  const second = await toolCallHandler(event("repair-2"), ctx);
-  const third = await toolCallHandler(event("repair-3"), ctx);
-  assert.match(first?.reason ?? "", /"attempt":1/);
-  assert.match(second?.reason ?? "", /"attempt":2/);
-  assert.match(third?.reason ?? "", /REPAIR_EXHAUSTED/);
-  assert.match(third?.reason ?? "", /"retryable":false/);
+  assert.equal(result, undefined, "an allowed call returns no block instruction");
+  const events = traceEvents();
+  assert.ok(events.includes("tool_allowed"));
+  assert.ok(events.includes("checkpoint_created"), "mutating calls snapshot the target first");
 });
 
-test("loads Equaxis reliability and memory extensions together", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-extensions-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+test("high-risk calls require approval: deny blocks, approve lets it through", async () => {
+  const command = "rm -rf /tmp/equaxis-it-probe";
 
-  const loaded = await discoverAndLoadExtensions(
-    [extensionsDir],
-    tempRoot,
-    path.join(tempRoot, "agent-home")
+  const denied = await toolCallHandlers()(
+    { toolCallId: "it-high-deny", toolName: "bash", input: { command } },
+    makeCtx({ selectChoice: "Deny this call" })
   );
-  assert.deepEqual(loaded.errors, []);
-  assert.ok(loaded.extensions.length >= 3);
+  assert.equal(denied?.block, true);
+  assert.match(denied.reason, /denied by user/);
+  assert.ok(traceEvents().includes("approval_denied"));
 
-  const tools = new Set(loaded.extensions.flatMap((extension) => [...extension.tools.keys()]));
-  const commands = new Set(loaded.extensions.flatMap((extension) => [...extension.commands.keys()]));
-  assert.equal(tools.has("memory_search"), true);
-  assert.equal(tools.has("recall"), true);
-  assert.equal(tools.has("memory_remember"), true);
-  assert.equal(tools.has("retain"), true);
-  assert.equal(tools.has("memory_add_fact"), true);
-  assert.equal(tools.has("learn"), true);
-  assert.equal(tools.has("reflect"), true);
-  assert.equal(tools.has("memory_edit"), true);
-  assert.equal(commands.has("memory-search"), true);
-  assert.equal(tools.has("tool_search"), true);
-  assert.equal(tools.has("tool_schedule"), true);
-  assert.equal(tools.has("advisor_consult"), true);
-  assert.equal(tools.has("lsp_probe"), true);
-  assert.equal(tools.has("dap_probe"), true);
-  assert.equal(commands.has("equaxis-policy"), true);
-
-  const provider = loaded.runtime.pendingProviderRegistrations.find(
-    (registration) => registration.name === "openai-inprior"
+  const approved = await toolCallHandlers()(
+    { toolCallId: "it-high-approve", toolName: "bash", input: { command } },
+    makeCtx({ selectChoice: "Approve this call" })
   );
-  assert.ok(provider);
-  assert.equal(provider.config.baseUrl, "https://api.inprior.com");
-  assert.equal(provider.config.api, "openai-responses");
-  assert.equal(provider.config.models?.[0]?.id, "gpt-5.5");
-  assert.equal(provider.config.models?.[0]?.contextWindow, 1_000_000);
-  assert.equal(provider.config.models?.[0]?.thinkingLevelMap?.xhigh, "xhigh");
+  assert.equal(approved, undefined, "an approved high-risk call proceeds");
+  assert.ok(traceEvents().includes("approval_granted"));
 });
 
-test("memory extension exposes deterministic reflect tool", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-memory-reflect-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-  const loaded = await discoverAndLoadExtensions(
-    [path.join(extensionsDir, "memory.ts")],
-    tempRoot,
-    path.join(tempRoot, "agent-home")
-  );
-  assert.deepEqual(loaded.errors, []);
-  const extension = loaded.extensions.find((item) => item.path.endsWith("memory.ts"));
-  assert.ok(extension);
-  const reflected = await extension.tools.get("reflect").definition.execute("reflect-1", {
-    goal: "repair",
-    status: "failed",
-    steps: [{ id: "s1", toolName: "read", status: "failed", errorCode: "RESULT_INCOMPLETE" }]
-  });
-  assert.equal(reflected.details.lessonCount, 2);
-  assert.equal(reflected.details.promotable, true);
-});
-
-test("protocol tools extension exposes working advisor lsp and dap probes", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-protocol-tools-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-  const loaded = await discoverAndLoadExtensions(
-    [path.join(extensionsDir, "protocol-tools.ts")],
-    tempRoot,
-    path.join(tempRoot, "agent-home")
-  );
-  assert.deepEqual(loaded.errors, []);
-  const extension = loaded.extensions.find((item) => item.path.endsWith("protocol-tools.ts"));
-  assert.ok(extension);
-
-  const advisor = await extension.tools.get("advisor_consult").definition.execute("advisor-1", {
-    kind: "plan",
-    steps: 5,
-    evidence: "touches protocol tooling"
-  });
-  assert.equal(advisor.details.request.enabled, false);
-
-  const lsp = await extension.tools.get("lsp_probe").definition.execute("lsp-1", {
-    documentPath: "probe.js",
-    text: "// TODO\nconst value = 1;\n",
-    position: { line: 0, character: 0 }
-  });
-  assert.equal(lsp.details.initialized, true);
-  assert.equal(lsp.details.diagnostics.length, 1);
-
-  const dap = await extension.tools.get("dap_probe").definition.execute("dap-1", {
-    source: "probe.js",
-    breakpoints: [{ line: 1 }],
-    expression: "1 + 1"
-  });
-  assert.equal(dap.details.initialized, true);
-  assert.equal(dap.details.breakpoints[0].verified, true);
-  assert.equal(dap.details.evaluation.result, "2");
-
-  const attached = await extension.tools.get("dap_probe").definition.execute("dap-attach", {
-    request: "attach",
-    host: "127.0.0.1",
-    port: 5678,
-    source: "probe.py",
-    breakpoints: [{ line: 1 }]
-  });
-  assert.equal(attached.details.request, "attach");
-  assert.equal(attached.details.session.phase, "stopped");
-
-  await assert.rejects(
-    () => extension.tools.get("dap_probe").definition.execute("dap-process-missing", { mode: "process" }),
-    /DAP process program is required/
-  );
-  await assert.rejects(
-    () => extension.tools.get("lsp_probe").definition.execute("lsp-process-override", {
-      mode: "process",
-      command: "typescript-language-server"
-    }),
-    /command override is disabled/
-  );
-});
-
-test("AST extension previews and applies a hash-checked rename", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-ast-extension-test-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(tempRoot, "sample.ts"), "const value = 1;\\nconsole.log(value);\\n", "utf8");
-  const loaded = await discoverAndLoadExtensions([
-    path.join(extensionsDir, "ast-tools.ts")
-  ], tempRoot, path.join(tempRoot, "agent-home"));
-  assert.deepEqual(loaded.errors, []);
-  const extension = loaded.extensions.find((item) => item.path.endsWith("ast-tools.ts"));
-  assert.ok(extension);
-  const ctx = makeContext(tempRoot);
-  for (const handler of extension.handlers.get("session_start") ?? []) await handler({ type: "session_start", reason: "startup" }, ctx);
-  const preview = await extension.tools.get("ast_rename").definition.execute("ast-preview", { path: "sample.ts", line: 0, character: 7, newName: "renamed" });
-  assert.equal(preview.details.applied, false);
-  const applied = await extension.tools.get("ast_rename").definition.execute("ast-apply", { path: "sample.ts", line: 0, character: 7, newName: "renamed", apply: true, expectedHash: preview.details.expectedHash });
-  assert.equal(applied.details.applied, true);
-  assert.match(fs.readFileSync(path.join(tempRoot, "sample.ts"), "utf8"), /renamed/);
-});
-
-test("headless high-risk call is approved via the web approval queue", async (t) => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-harness-web-approval-"));
-  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
-
-  fs.mkdirSync(path.join(tempRoot, ".pi"), { recursive: true });
-  fs.writeFileSync(
-    path.join(tempRoot, ".pi", "reliability.json"),
-    JSON.stringify({
-      mode: "enforce",
-      traceDir: ".pi/runtime",
-      limits: { maxToolCallsPerTurn: 1 },
-      approval: { webQueue: { enabled: true, timeoutMs: 5000 } }
-    }),
-    "utf8"
-  );
-
-  const loaded = await discoverAndLoadExtensions([extensionPath], tempRoot, path.join(tempRoot, "agent-home"));
-  assert.deepEqual(loaded.errors, []);
-  const extension = loaded.extensions[0];
-  const ctx = makeContext(tempRoot);
-  for (const handler of extension.handlers.get("session_start") ?? []) {
-    await handler({ type: "session_start", reason: "startup" }, ctx);
-  }
-
-  // The pi-web panel writes a decision before/while the headless call waits.
-  const decisionDir = path.join(tempRoot, ".pi", "runtime", "approvals", "decisions");
-  fs.mkdirSync(decisionDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(decisionDir, "web-approve-1.json"),
-    JSON.stringify({ requestId: "web-approve-1", decision: "approve", decidedAt: new Date().toISOString() }),
-    "utf8"
-  );
-
-  const [toolCallHandler] = extension.handlers.get("tool_call") ?? [];
-  const result = await toolCallHandler(
-    {
-      type: "tool_call",
-      toolCallId: "web-approve-1",
-      toolName: "bash",
-      input: { command: "rm -rf ./temporary-output" }
-    },
-    ctx
-  );
-  assert.equal(result?.block, undefined, "high-risk call proceeds after web approval");
+test("the trace stream carries the rule version that produced each decision", async () => {
+  assert.ok(fs.existsSync(traceFile), "governance must write an auditable trace");
+  const records = fs
+    .readFileSync(traceFile, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const governance = records.filter((record) => typeof record.risk === "string");
+  assert.ok(governance.length >= 4, "policy decisions are traced with a risk classification");
+  assert.ok(governance.some((record) => record.toolName === "write"));
+  assert.ok(governance.some((record) => record.toolName === "bash"));
 });

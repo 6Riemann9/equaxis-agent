@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import net from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const HOST = "127.0.0.1";
@@ -29,19 +31,31 @@ export default function piWebCommandExtension(pi: ExtensionAPI) {
       }
 
       if (!(await isRunning(url))) {
+        let launch: LaunchPlan;
         try {
-          launchPiWeb(root);
+          launch = piWebLauncher(root);
+        } catch (error) {
+          ctx.ui.notify(`Unable to start pi-web: ${messageOf(error)}\nInstall it with: npm install -g @agegr/pi-web@latest`, "error");
+          return;
+        }
+        if (await isPortOccupied(url)) {
+          ctx.ui.notify(`Port ${PORT} is occupied by a process that is not pi-web. Free the port or stop that process, then retry /pi-web.`, "error");
+          return;
+        }
+        try {
+          launchPiWeb(root, launch);
         } catch (error) {
           ctx.ui.notify(`Unable to start pi-web: ${messageOf(error)}\nInstall it with: npm install -g @agegr/pi-web@latest`, "error");
           return;
         }
         if (!(await waitUntilReady(url))) {
-          ctx.ui.notify(`pi-web did not become ready at ${url}. Check whether port ${PORT} is occupied.`, "error");
+          ctx.ui.notify(`pi-web did not become ready at ${url}. The server process started but never answered /api/sessions — check the pi-web build and Node version (see /pi-web status).`, "error");
           return;
         }
       }
 
       const lines = await connectProject(url, root, true);
+      lines.push(await checkMemoryApi(url, root));
       openBrowser(workspaceUrl);
       ctx.ui.notify([`Pi Web ready: ${workspaceUrl}`, `Equaxis project: ${root}`, ...lines].join("\n"), "info");
     }
@@ -68,10 +82,10 @@ function findEquaxisRoot(cwd: string): string {
   }
 }
 
-function launchPiWeb(root: string): void {
+function launchPiWeb(root: string, launch: LaunchPlan): void {
   const agentDir = path.join(root, ".pi");
   const sessionDir = historicalSessionDir();
-  const { command, args } = piWebLauncher(root);
+  const { command, args } = launch;
   // Pass the agent/session dirs through the spawn env option instead of a
   // cmd.exe/sh wrapper: nested quotes in `cmd /c "set ... && ..."` break on
   // Windows (Node escapes embedded quotes as \" which cmd misparses), so the
@@ -81,6 +95,10 @@ function launchPiWeb(root: string): void {
     ...process.env,
     PI_CODING_AGENT_DIR: agentDir,
     PI_CODING_AGENT_SESSION_DIR: sessionDir,
+    // The runtime root (scripts/, bridge/) is this package's root — pi-web
+    // API routes resolve it via findEquaxisRuntime() for global installs
+    // whose workspace holds only project data.
+    EQUAXIS_RUNTIME_HOME: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".."),
     PATH: [gitBashDir(), process.env.PATH].filter(Boolean).join(path.delimiter)
   };
   const child = spawn(command, [...args, "-H", HOST, "-p", String(PORT), "--no-open"], {
@@ -103,24 +121,80 @@ function gitBashDir(): string {
   return candidates.find((candidate) => existsSync(path.join(candidate, "bash.exe"))) ?? "";
 }
 
-function piWebLauncher(root: string): { command: string; args: string[] } {
-  // Prefer the versioned fork in the repo (pi-web/), then the legacy
-  // source-cache copy, then the global install.
-  const candidates = [
-    path.join(root, "pi-web", "bin", "pi-web.js"),
-    path.join(root, ".pi", "runtime", "source-cache", "agegr-pi-web", "bin", "pi-web.js")
-  ];
-  for (const localBin of candidates) {
-    const localBuild = path.join(path.dirname(path.dirname(localBin)), ".next", "BUILD_ID");
-    if (existsSync(localBin) && existsSync(localBuild)) {
-      return { command: process.execPath, args: [localBin] };
+interface LaunchPlan { command: string; args: string[]; via: string }
+
+/** Developer override: PI_WEB_HOME env, or piWeb.home in the global config
+ * (~/.equaxis/config.json), points at a full pi-web checkout (built). Lets
+ * development iterations go live with just `npm run build` — no copying into
+ * the runtime and no rebuild inside the protected global install. */
+function piWebHomeOverride(): string | null {
+  if (process.env.PI_WEB_HOME?.trim()) return path.resolve(process.env.PI_WEB_HOME.trim());
+  try {
+    const globalConfig = JSON.parse(readFileSync(path.join(homedir(), ".equaxis", "config.json"), "utf8")) as { piWeb?: { home?: unknown } };
+    const home = globalConfig?.piWeb?.home;
+    if (typeof home === "string" && home.trim()) return path.resolve(home.trim());
+  } catch { /* no global config or unreadable */ }
+  return null;
+}
+
+function piWebLauncher(root: string): LaunchPlan {
+  // Developer override first (checked for a real build), then the versioned
+  // fork in the repo (pi-web/), then the legacy source-cache copy, then the
+  // global install. A repo fork whose source is present but never built must
+  // NOT silently fall through to a stale artifact: say so explicitly and name
+  // the fix.
+  const override = piWebHomeOverride();
+  if (override) {
+    const overrideBin = path.join(override, "bin", "pi-web.js");
+    const overrideBuild = path.join(override, ".next", "BUILD_ID");
+    if (existsSync(overrideBin) && existsSync(overrideBuild)) {
+      return { command: process.execPath, args: [overrideBin], via: `override ${override}` };
     }
+  }
+  const repoBin = path.join(root, "pi-web", "bin", "pi-web.js");
+  const repoBuild = path.join(root, "pi-web", ".next", "BUILD_ID");
+  const repoSourcePresent = existsSync(repoBin);
+  if (repoSourcePresent && existsSync(repoBuild)) {
+    return { command: process.execPath, args: [repoBin], via: "repo pi-web" };
+  }
+  const cacheBin = path.join(root, ".pi", "runtime", "source-cache", "agegr-pi-web", "bin", "pi-web.js");
+  const cacheBuild = path.join(root, ".pi", "runtime", "source-cache", "agegr-pi-web", ".next", "BUILD_ID");
+  if (existsSync(cacheBin) && existsSync(cacheBuild)) {
+    return { command: process.execPath, args: [cacheBin], via: "source-cache build" };
+  }
+  if (repoSourcePresent) {
+    throw new Error("pi-web/ source found but no production build (.next/BUILD_ID missing) — build it first: cd pi-web && npm ci && npm run build");
   }
   if (process.platform === "win32" && process.env.APPDATA) {
     const bin = path.join(process.env.APPDATA, "npm", "node_modules", "@agegr", "pi-web", "bin", "pi-web.js");
-    if (existsSync(bin)) return { command: process.execPath, args: [bin] };
+    if (existsSync(bin)) return { command: process.execPath, args: [bin], via: "global install" };
   }
-  return { command: "pi-web", args: [] };
+  return { command: "pi-web", args: [], via: "PATH lookup" };
+}
+
+async function isPortOccupied(url: string): Promise<boolean> {
+  // Distinguish "port taken by something that is not pi-web" from a failed
+  // launch: /api/sessions already failed, so any listener here is foreign.
+  const { port, hostname } = new URL(url);
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: hostname, port: Number(port) });
+    socket.once("connect", () => { socket.destroy(); resolve(true); });
+    socket.once("error", () => resolve(false));
+    socket.setTimeout(1000, () => { socket.destroy(); resolve(false); });
+  });
+}
+
+async function checkMemoryApi(url: string, root: string): Promise<string> {
+  // The first memory request spawns the bridge (native node core or python),
+  // so allow a generous timeout and classify the failure cause.
+  const params = new URLSearchParams({ cwd: root });
+  const result = await get(`${url}/api/memory?${params}`, 15000);
+  if (result.ok) return "memory api: available";
+  const text = result.text.toLowerCase();
+  if (result.status === 0) return `memory api: unreachable (${oneLine(result.text)})`;
+  if (text.includes("timed out")) return "memory api: bridge timed out (first embedding download may be in progress)";
+  if (text.includes("python") || text.includes("modulenotfound")) return `memory api: bridge dependency missing (${oneLine(result.text)})`;
+  return `memory api: unavailable (${result.status} ${oneLine(result.text)})`;
 }
 
 function historicalSessionDir(): string {
@@ -178,9 +252,9 @@ async function waitUntilReady(url: string): Promise<boolean> {
   return false;
 }
 
-async function get(url: string): Promise<{ ok: boolean; status: number; text: string }> {
+async function get(url: string, timeoutMs = 5000): Promise<{ ok: boolean; status: number; text: string }> {
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     return { ok: response.ok, status: response.status, text: await response.text() };
   } catch (error) {
     return { ok: false, status: 0, text: messageOf(error) };

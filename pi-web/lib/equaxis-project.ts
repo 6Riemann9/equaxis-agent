@@ -19,6 +19,31 @@ export function findEquaxisRoot(cwd: string): string | null {
   }
 }
 
+const RUNTIME_MARKER = join("scripts", "memory-json.mjs");
+
+/**
+ * Locate the Equaxis RUNTIME (scripts/, bridge/, .pi/extensions) — which is
+ * not necessarily the project root. Global installs serve workspaces that
+ * only hold project data (.pi/equaxis.json, memory store); the runtime lives
+ * in the installed package. Resolution order:
+ *  1. EQUAXIS_RUNTIME_HOME env (the /pi-web launcher sets it from the
+ *     extension's own module location — deterministic for every layout)
+ *  2. the project root itself (repo checkout / source-cache layouts)
+ *  3. the package containing this pi-web (bin/pi-web.js → <pkg>/pi-web/bin)
+ * Returns null when no candidate carries the runtime marker.
+ */
+export function findEquaxisRuntime(projectRoot?: string | null): string | null {
+  const envHome = process.env.EQUAXIS_RUNTIME_HOME?.trim();
+  if (envHome && existsSync(join(envHome, RUNTIME_MARKER))) return resolve(envHome);
+  if (projectRoot && existsSync(join(projectRoot, RUNTIME_MARKER))) return projectRoot;
+  const launcher = process.argv[1];
+  if (launcher) {
+    const bundled = resolve(launcher, "..", "..");
+    if (existsSync(join(bundled, RUNTIME_MARKER))) return bundled;
+  }
+  return null;
+}
+
 /**
  * Pi's per-project session directory: ~/.pi/agent/sessions/--<encoded-cwd>--
  * (matches the coding-agent's encoding: strip leading slash, then / \ : -> -).
@@ -38,10 +63,14 @@ export function getProjectSessionDir(projectRoot: string): string {
  */
 export function runEquaxisScript(projectRoot: string, scriptName: string, args: string[] = []): Promise<unknown> {
   const { promise, resolve, reject } = Promise.withResolvers<unknown>();
-  const scriptPath = join(projectRoot, "scripts", scriptName);
+  // The SCRIPT comes from the runtime root, but it runs with the PROJECT
+  // root as cwd: snapshots resolve workspace state (sessions, memory store,
+  // project config) from cwd and borrow runtime files themselves.
+  const runtimeRoot = findEquaxisRuntime(projectRoot) ?? projectRoot;
+  const scriptPath = join(runtimeRoot, "scripts", scriptName);
   const child = spawn(process.execPath, [scriptPath, ...args], {
     cwd: projectRoot,
-    env: process.env,
+    env: { ...process.env, EQUAXIS_PROJECT_ROOT: projectRoot },
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });

@@ -18,7 +18,12 @@ import { buildRuntimeDashboard } from "../src/runtime-dashboard.mjs";
 import { runDoctor } from "../src/doctor.mjs";
 import { collectEvalEventsFromTraceDir, EvalLoop } from "../src/eval-loop.mjs";
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Runtime root (this package: scripts/, bridge/, harbor_eval/) vs project
+// root (workspace holding config + .pi/runtime state). pi-web spawns this
+// script with the project root as cwd and EQUAXIS_PROJECT_ROOT set; running
+// it manually from a checkout makes both the same directory.
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = path.resolve(process.env.EQUAXIS_PROJECT_ROOT ?? process.cwd());
 
 function readJsonl(relativePath, maxEntries = 50000) {
   const absolute = path.resolve(projectRoot, relativePath);
@@ -48,13 +53,15 @@ function probeMemoryBridge() {
   const rootDir = path.resolve(projectRoot, config?.memory?.rootDir ?? ".equaxis/memory");
   const native = config?.memory?.backend !== "python";
   const command = native ? process.execPath : (config?.memory?.pythonCommand ?? "python");
+  // Bridge scripts are runtime artifacts: they live in the package, not the
+  // (possibly data-only) project root.
   const args = native
-    ? [path.join(projectRoot, "scripts", "memory-json.mjs"), "--root", rootDir]
-    : ["-u", path.join(projectRoot, "bridge", "memory_bridge.py"), "--root", rootDir];
+    ? [path.join(packageRoot, "scripts", "memory-json.mjs"), "--root", rootDir]
+    : ["-u", path.join(packageRoot, "bridge", "memory_bridge.py"), "--root", rootDir];
   if (native && !fs.existsSync(args[0])) return { ok: false, error: "native memory script missing" };
   if (!native && !fs.existsSync(args[1])) return { ok: false, error: "bridge script missing" };
   const result = spawnSync(command, args, {
-    cwd: projectRoot,
+    cwd: packageRoot,
     input: '{"id":"snapshot","action":"ping","payload":{}}\n{"id":"snapshot","action":"close","payload":{}}\n',
     encoding: "utf8",
     timeout: 15000,
@@ -154,9 +161,9 @@ function collectSessionCosts() {
 // Harbor evaluation artifacts: paired budget comparison + latest improvement cycle.
 let harbor = null;
 try {
-  const budgetPath = path.join(projectRoot, "harbor_eval", "jobs", "budget-v2-report.json");
+  const budgetPath = path.join(packageRoot, "harbor_eval", "jobs", "budget-v2-report.json");
   const budget = fs.existsSync(budgetPath) ? JSON.parse(fs.readFileSync(budgetPath, "utf8")) : null;
-  const reportsDir = path.join(projectRoot, "harbor_eval", "reports");
+  const reportsDir = path.join(packageRoot, "harbor_eval", "reports");
   let cycle = null;
   if (fs.existsSync(reportsDir)) {
     let newest = null;

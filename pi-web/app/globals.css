@@ -1450,6 +1450,22 @@ span.linenumber {
 .memory-fact { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(80px, .7fr) minmax(80px, 1fr); align-items: center; gap: 10px; padding: 11px 13px; border: 1px solid var(--border); font: 12px var(--font-mono); overflow-wrap: anywhere; }
 .memory-fact span { color: var(--accent); text-align: center; }
 .memory-error, .memory-empty { padding: 34px; color: var(--text-muted); text-align: center; font-size: 12px; }
+.memory-more { display: flex; justify-content: center; padding: 14px 0 6px; }
+.memory-activity { display: grid; gap: 10px; align-content: start; }
+.memory-activity s { color: var(--text-muted); }
+.memory-graph-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; margin-right: 8px; }
+.memory-graph-chip { padding: 2px 8px; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-muted); font: 11px var(--font-mono); cursor: pointer; border-radius: 10px; }
+.memory-graph-chip.active { color: var(--accent); border-color: var(--accent); }
+.memory-graph-chip em { font-style: normal; opacity: 0.6; margin-left: 3px; }
+.memory-graph-trace { padding: 6px 0; border-bottom: 1px dashed var(--border); margin-bottom: 6px; }
+.memory-graph-trace em { display: block; color: var(--warn); font-size: 11px; margin-bottom: 2px; }
+.memory-graph-trace span { font: 11px var(--font-mono); color: var(--text); word-break: break-all; }
+.memory-graph-mentions { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+.memory-graph-mentions em { color: var(--text-muted); font-size: 11px; }
+.memory-graph-mention { display: flex; flex-direction: column; gap: 2px; padding: 5px 0; border-bottom: 1px dotted var(--border); }
+.memory-graph-mention b { font-size: 11px; color: var(--accent); }
+.memory-graph-mention span { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-graph-empty { padding: 8px 0; color: var(--text-muted); font-size: 11px; }
 .memory-error button { margin-left: 12px; padding: 6px 10px; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text); cursor: pointer; }
 @media (max-width: 700px) { .memory-dashboard-header, .memory-dashboard-body { padding-left: 18px; padding-right: 18px; } .memory-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .memory-content-grid { grid-template-columns: 1fr; gap: 12px; } .memory-rail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .memory-toolbar { align-items: stretch; flex-direction: column-reverse; gap: 10px; } .memory-toolbar input { width: 100%; } .memory-edit-fields { grid-template-columns: 1fr; } .memory-toolbar-right { flex-wrap: wrap; } }
 /* Equaxis memory atlas — edit controls */

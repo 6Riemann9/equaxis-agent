@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatDoctorReport, runDoctor, runStartupPreflight } from "../src/doctor.mjs";
-import { loadEquaxisConfig } from "../src/equaxis-config.mjs";
+import { loadEquaxisConfig, loadEquaxisConfigLayers } from "../src/equaxis-config.mjs";
+import { applyModelSlot, describeProviderModels, hasCredentials, listModelSlots, loadModelCatalog } from "../src/model-slots.mjs";
 import { compareCandidate, createEvalLoopFromTrace } from "../src/eval-loop.mjs";
 import { exportEvalLoopForHarbor } from "../src/eval-harbor-bridge.mjs";
 import { isRuntimeProfile, profileExtensionSelection } from "../src/runtime-profiles.mjs";
@@ -19,8 +20,16 @@ import { evaluateRuntimeGates, formatRuntimeGateReport } from "../src/runtime-ga
 import { createDefaultResourceProviderRegistry } from "../src/resource-provider-registry.mjs";
 import { checkExtensionContracts, extensionPaths, formatExtensionContractReport } from "../src/extension-compat.mjs";
 import { formatEquaxisBanner, shouldShowBanner } from "../src/cli-banner.mjs";
+import { resolveRuntimeRoot } from "../src/runtime-root.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function computeRuntimeRoot() {
+  // The project root is the nearest config carrier; the runtime root must
+  // also carry .pi/extensions + scripts (repo checkout). Otherwise the
+  // runtime comes from this installed package.
+  return resolveRuntimeRoot(findProjectRoot(process.cwd()), packageRoot);
+}
 
 /**
  * The active Equaxis root: the nearest ancestor of the working directory with
@@ -89,6 +98,88 @@ function localEvalLoop() {
 
 async function handleLocalCommand(args) {
   const [group, command, payload] = args;
+  if (group === "model") {
+    const configLayers = loadEquaxisConfigLayers(projectRoot);
+    let piSettings = {};
+    try {
+      piSettings = JSON.parse(fs.readFileSync(path.join(projectRoot, ".pi", "settings.json"), "utf8"));
+    } catch {
+      // no project settings yet
+    }
+    const catalog = loadModelCatalog();
+    const asJson = args.includes("--json");
+    if (command === "list" || !command) {
+      const slots = listModelSlots({ effective: configLayers.effective, piSettings, catalog });
+      if (asJson) { printJson(slots); return true; }
+      const fallbackNote = {
+        true: "falls back to the main model",
+        false: "no fallback (this IS the main model)"
+      };
+      for (const slot of slots) {
+        const status = !slot.configured
+          ? "not configured — uses the session model"
+          : slot.error
+            ? `BROKEN: ${slot.error}`
+            : slot.unverified
+              ? "set (not in local catalog — built-in or remote?)"
+              : "ok";
+        console.log(`${slot.slot.padEnd(8)} ${String(slot.resolved ?? "-").padEnd(42)} ${status}`);
+        console.log(`         ${slot.label}; ${fallbackNote[String(slot.fallback !== "none")]}`);
+      }
+      console.log(`\ncatalog: ${catalog.size} provider(s) from ~/.pi/agent/models.json + models-store.json`);
+      return true;
+    }
+    if (command === "set" || command === "main") {
+      // `model main <provider> <model>` is shorthand for `model set main …`
+      const [slotId, provider, model] = command === "main"
+        ? ["main", args[2], args[3]]
+        : [args[2], args[3], args[4]];
+      if (!slotId || !provider || !model) {
+        throw new Error("usage: equaxis model set <slot> <provider> <model> | main <provider> <model>  (slots: main, dream, advisor)");
+      }
+      const result = applyModelSlot({ slotId, provider, model, cwd: projectRoot, layers: configLayers });
+      if (asJson) { printJson(result); return true; }
+      console.log(`${result.slot}: ${provider}/${model} → ${path.relative(projectRoot, result.file)}`);
+      if (result.unverified) console.log("  (not in the local catalog — accepted as a built-in/provider; verify the id)");
+      return true;
+    }
+    if (command === "unset") {
+      const slotId = args[2];
+      if (!slotId) throw new Error("usage: equaxis model unset <slot>");
+      const result = applyModelSlot({ slotId, clear: true, cwd: projectRoot, layers: configLayers });
+      if (asJson) { printJson(result); return true; }
+      console.log(`${result.slot}: cleared → falls back to the session model (${path.relative(projectRoot, result.file)})`);
+      return true;
+    }
+    if (command === "catalog") {
+      const providerName = args[2];
+      if (!providerName) {
+        const providers = [...catalog.entries()]
+          .map(([name, models]) => ({ name, count: models.size, creds: hasCredentials(name) }))
+          .sort((a, b) => (b.creds.ok - a.creds.ok) || a.name.localeCompare(b.name));
+        if (asJson) { printJson(providers); return true; }
+        console.log("providers (usable first — \u2713 = local key found):\n");
+        for (const p of providers) {
+          console.log(`  ${p.name.padEnd(24)} ${String(p.count).padStart(3)} models  ${p.creds.ok ? "\u2713 " + p.creds.source : "no local key"}`);
+        }
+        console.log("\npick with: equaxis model catalog <provider>   then: equaxis model set <slot> <provider> <model>");
+        return true;
+      }
+      const models = describeProviderModels(catalog, providerName);
+      if (!models) {
+        throw new Error(`unknown provider "${providerName}" — try: equaxis model catalog`);
+      }
+      const creds = hasCredentials(providerName);
+      if (asJson) { printJson({ provider: providerName, creds, models }); return true; }
+      console.log(`${providerName} — ${models.length} models  ${creds.ok ? "\u2713 key via " + creds.source : "no local key (env vars may still apply)"}\n`);
+      for (const model of models) {
+        console.log(`  ${model.id.padEnd(36)} ${model.name ?? ""}`);
+      }
+      console.log(`\nset with: equaxis model set <slot> ${providerName} <model-id>`);
+      return true;
+    }
+    throw new Error("usage: equaxis model [list|set|main|unset|catalog] [--json]");
+  }
   if (group === "protocols" && command === "verify") {
     const report = runProtocolRegression({ projectRoot, config: unifiedConfig });
     console.log(formatProtocolRegressionReport(report));
@@ -162,16 +253,21 @@ try {
   process.exit(1);
 }
 
-const startup = runStartupPreflight({ projectRoot, cwd: process.cwd(), env: process.env, piEntry });
+// Data-only project roots (a workspace with just .pi/equaxis.json, e.g. the
+// user's home) borrow the runtime — extensions, scripts, settings template —
+// from the installed package; the project root still supplies config/state.
+const runtimeRoot = computeRuntimeRoot();
+
+const startup = runStartupPreflight({ projectRoot, runtimeRoot, cwd: process.cwd(), env: process.env, piEntry });
 if (!startup.ok) {
-  const report = runDoctor({ projectRoot, cwd: process.cwd(), env: process.env, piEntry });
+  const report = runDoctor({ projectRoot, runtimeRoot, cwd: process.cwd(), env: process.env, piEntry });
   if (cliArgs.includes("--json")) console.log(JSON.stringify(report, null, 2));
   else console.error(formatDoctorReport(report));
   process.exit(1);
 }
 const extensionContracts = startup.extensionContracts ?? checkExtensionContracts({
-  projectRoot,
-  manifestPath: path.resolve(projectRoot, unifiedConfig.extensions.manifest)
+  projectRoot: runtimeRoot,
+  manifestPath: path.resolve(runtimeRoot, unifiedConfig.extensions.manifest)
 });
 if (!extensionContracts.ok) {
   console.error(formatExtensionContractReport(extensionContracts));
@@ -181,7 +277,7 @@ const runtimeProfile = unifiedConfig.runtime.profile;
 const profileSelection = profileExtensionSelection(runtimeProfile, unifiedConfig.extensions);
 const extensionArgs = profileSelection === null
   ? []
-  : extensionPaths(projectRoot, extensionContracts.manifest, profileSelection).flatMap((extensionPath) => [
+  : extensionPaths(runtimeRoot, extensionContracts.manifest, profileSelection).flatMap((extensionPath) => [
       "--extension",
       extensionPath
     ]);
@@ -191,7 +287,7 @@ if (shouldShowBanner({ args: cliArgs })) {
 }
 
 if (cliArgs[0] === "--doctor") {
-  const report = runDoctor({ projectRoot, cwd: process.cwd() });
+  const report = runDoctor({ projectRoot, runtimeRoot, cwd: process.cwd() });
   if (cliArgs.includes("--json")) console.log(JSON.stringify(report, null, 2));
   else console.log(formatDoctorReport(report));
   process.exit(report.ok ? 0 : 1);
@@ -205,7 +301,7 @@ if (cliArgs[0] === "--doctor") {
 function readPiSettings() {
   const candidates = [
     path.join(process.cwd(), ".pi", "settings.json"),
-    path.join(projectRoot, ".pi", "settings.json")
+    path.join(runtimeRoot, ".pi", "settings.json")
   ];
   for (const file of candidates) {
     try {

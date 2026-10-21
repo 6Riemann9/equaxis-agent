@@ -43,7 +43,7 @@ function nodeRadius(degree: number): number {
   return 6 + Math.min(degree, 6) * 2.2;
 }
 
-export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?: number }) {
+export function KnowledgeGraph({ facts, drawers, height }: { facts: GraphEdge[]; drawers?: Array<{ id: string; content: string; wing?: string; room?: string }>; height?: number }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
   const [hovered, setHovered] = useState<string | null>(null);
@@ -51,13 +51,32 @@ export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?:
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [links, setLinks] = useState<GraphLink[]>([]);
   const [fitted, setFitted] = useState(false);
+  // Predicate filter: null = show all; otherwise only these predicates render.
+  const [predicates, setPredicates] = useState<string[] | null>(null);
+  // Path tracing: traceFrom marks the start entity; clicking another node
+  // while set computes and shows the shortest path between them.
+  const [traceFrom, setTraceFrom] = useState<string | null>(null);
+  const [tracePath, setTracePath] = useState<string[] | null>(null);
   const simulationRef = useRef<Simulation<GraphNode, GraphLink> | null>(null);
   const transformRef = useRef(transform);
   transformRef.current = transform;
 
+  // Predicate filter state derives from the full fact set; the simulation and
+  // path tracing consume the filtered view.
+  const allPredicates = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const fact of facts) counts.set(fact.predicate, (counts.get(fact.predicate) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [facts]);
+
+  const visibleFacts = useMemo(
+    () => (predicates === null ? facts : facts.filter((fact) => predicates.includes(fact.predicate))),
+    [facts, predicates]
+  );
+
   const { nodeMap } = useMemo(() => {
     const map = new Map<string, GraphNode>();
-    for (const fact of facts) {
+    for (const fact of visibleFacts) {
       for (const name of [fact.subject, fact.object]) {
         if (!map.has(name)) map.set(name, { id: name, degree: 0, x: 0, y: 0, fx: null, fy: null });
       }
@@ -65,7 +84,7 @@ export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?:
       map.get(fact.object)!.degree += 1;
     }
     return { nodeMap: map };
-  }, [facts]);
+  }, [visibleFacts]);
 
   const startSimulation = useCallback(() => {
     const initialNodes = [...nodeMap.values()].map((node) => ({
@@ -75,7 +94,7 @@ export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?:
       fx: null,
       fy: null,
     }));
-    const initialLinks: GraphLink[] = facts.map((fact) => ({
+    const initialLinks: GraphLink[] = visibleFacts.map((fact) => ({
       id: fact.id,
       source: initialNodes.find((node) => node.id === fact.subject)!,
       target: initialNodes.find((node) => node.id === fact.object)!,
@@ -102,7 +121,7 @@ export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?:
     simulationRef.current?.stop();
     simulationRef.current = simulation;
     setFitted(false);
-  }, [nodeMap, facts]);
+  }, [nodeMap, visibleFacts]);
 
   const fitToNodes = useCallback((nodeList: GraphNode[]) => {
     if (nodeList.length === 0) return;
@@ -223,14 +242,109 @@ export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?:
     return facts.filter((fact) => fact.subject === selected || fact.object === selected);
   }, [selected, facts]);
 
+  // Memories that mention the selected entity: cheap containment check over
+  // the loaded drawer page (the snapshot carries up to 500).
+  const mentionedDrawers = useMemo(() => {
+    if (!selected || !drawers?.length) return [];
+    const needle = selected.toLowerCase();
+    return drawers
+      .filter((drawer) => (drawer.content ?? "").toLowerCase().includes(needle))
+      .slice(0, 5)
+      .map((drawer) => ({
+        id: drawer.id,
+        wing: drawer.wing ?? "",
+        room: drawer.room ?? "",
+        preview: (drawer.content ?? "").replace(/\s+/g, " ").slice(0, 120)
+      }));
+  }, [selected, drawers]);
+
+  /** BFS shortest path (entity names) over the visible fact edges. */
+  const findPath = useCallback(
+    (from: string, to: string): string[] | null => {
+      const adjacency = new Map<string, string[]>();
+      for (const fact of visibleFacts) {
+        if (!adjacency.has(fact.subject)) adjacency.set(fact.subject, []);
+        if (!adjacency.has(fact.object)) adjacency.set(fact.object, []);
+        adjacency.get(fact.subject)!.push(fact.object);
+        adjacency.get(fact.object)!.push(fact.subject);
+      }
+      const queue: Array<{ node: string; path: string[] }> = [{ node: from, path: [from] }];
+      const visited = new Set([from]);
+      while (queue.length) {
+        const current = queue.shift()!;
+        if (current.node === to) return current.path;
+        for (const next of adjacency.get(current.node) ?? []) {
+          if (visited.has(next)) continue;
+          visited.add(next);
+          queue.push({ node: next, path: [...current.path, next] });
+        }
+      }
+      return null;
+    },
+    [visibleFacts]
+  );
+
+  const traceNodeSet = useMemo(() => new Set(tracePath ?? []), [tracePath]);
+
+  // Adjacent pairs along the traced path, for edge highlighting.
+  const tracePairs = useMemo(() => {
+    const pairs = new Set<string>();
+    if (tracePath) {
+      for (let i = 0; i < tracePath.length - 1; i += 1) {
+        pairs.add(`${tracePath[i]}\u0000${tracePath[i + 1]}`);
+        pairs.add(`${tracePath[i + 1]}\u0000${tracePath[i]}`);
+      }
+    }
+    return pairs;
+  }, [tracePath]);
+
+  const handleNodeClick = useCallback(
+    (nodeId: string) => {
+      setSelected(nodeId);
+      if (traceFrom && traceFrom !== nodeId) {
+        setTracePath(findPath(traceFrom, nodeId));
+      } else {
+        setTracePath(null);
+      }
+    },
+    [traceFrom, findPath]
+  );
+
   if (facts.length === 0) {
     return <div className="memory-empty">No graph facts match this search.</div>;
   }
 
+  const togglePredicate = (predicate: string) => {
+    if (predicates === null) {
+      // First toggle-off starts from the full set minus the toggled one.
+      setPredicates(allPredicates.map(([name]) => name).filter((name) => name !== predicate));
+      return;
+    }
+    const next = predicates.includes(predicate)
+      ? predicates.filter((name) => name !== predicate)
+      : [...predicates, predicate];
+    // Toggling everything back on returns to "all" (null).
+    setPredicates(next.length === allPredicates.length ? null : next);
+  };
+
   return (
     <div className="memory-graph" style={height ? { height } : undefined}>
       <div className="memory-graph-toolbar">
-        <span className="memory-graph-hint">drag nodes · scroll to zoom · drag background to pan · click a node for details</span>
+        <span className="memory-graph-hint">drag nodes · scroll to zoom · click a node for details</span>
+        <div className="memory-graph-chips">
+          {allPredicates.length > 1 && allPredicates.map(([predicate, count]) => {
+            const active = predicates === null || predicates.includes(predicate);
+            return (
+              <button
+                key={predicate}
+                className={`memory-graph-chip${active ? " active" : ""}`}
+                onClick={() => togglePredicate(predicate)}
+              >
+                {predicate} <em>{count}</em>
+              </button>
+            );
+          })}
+        </div>
         <button className="memory-action-btn" onClick={startSimulation}>↻ Relayout</button>
       </div>
       <div className="memory-graph-canvas">
@@ -261,9 +375,9 @@ export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?:
                 <g key={link.id}>
                   <line
                     x1={source.x} y1={source.y} x2={target.x} y2={target.y}
-                    stroke={active ? "var(--accent)" : "var(--text-dim)"}
+                    stroke={tracePairs.has(`${source.id}\u0000${target.id}`) ? "var(--warn)" : active ? "var(--accent)" : "var(--text-dim)"}
                     strokeOpacity={dim ? 0.12 : active ? 0.9 : 0.45}
-                    strokeWidth={active ? 1.8 : 1}
+                    strokeWidth={tracePairs.has(`${source.id}\u0000${target.id}`) ? 2.6 : active ? 1.8 : 1}
                     markerEnd={active ? "url(#memory-arrow)" : undefined}
                     onMouseEnter={() => setHovered(source.id)}
                     onMouseLeave={() => setHovered(null)}
@@ -294,16 +408,16 @@ export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?:
                   onPointerDown={(event) => handleNodePointerDown(event, node)}
                   onPointerMove={handleNodePointerMove}
                   onPointerUp={handleNodePointerUp}
-                  onClick={(event) => event.stopPropagation()}
+                  onClick={(event) => { event.stopPropagation(); handleNodeClick(node.id); }}
                   onMouseEnter={() => setHovered(node.id)}
                   onMouseLeave={() => setHovered(null)}
                   style={{ cursor: "grab", opacity: dim ? 0.15 : 1 }}
                 >
                   <circle
                     r={radius}
-                    fill={isSelected ? "var(--accent)" : isHovered ? "var(--accent)" : "var(--bg-panel)"}
-                    stroke={isSelected || isHovered ? "var(--accent)" : "var(--text-muted)"}
-                    strokeWidth={isSelected || isHovered ? 2 : 1.2}
+                    fill={traceFrom === node.id ? "var(--warn)" : isSelected || isHovered ? "var(--accent)" : "var(--bg-panel)"}
+                    stroke={traceFrom === node.id ? "var(--warn)" : isSelected || isHovered ? "var(--accent)" : "var(--text-muted)"}
+                    strokeWidth={isSelected || isHovered || traceFrom === node.id ? 2 : 1.2}
                   />
                   <text
                     y={radius + 13}
@@ -323,8 +437,25 @@ export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?:
           <div className="memory-graph-detail">
             <div className="memory-graph-detail-title">
               <strong>{selected}</strong>
-              <button onClick={() => setSelected(null)}>×</button>
+              <button
+                className={`memory-action-btn${traceFrom === selected ? " active" : ""}`}
+                onClick={() => { setTraceFrom(traceFrom === selected ? null : selected); setTracePath(null); }}
+                title={traceFrom === selected ? "Cancel path tracing from this entity" : "Trace shortest path from this entity, then click another node"}
+              >
+                {traceFrom === selected ? "tracing from here..." : "trace path"}
+              </button>
+              <button onClick={() => { setSelected(null); setTracePath(null); }}>×</button>
             </div>
+            {tracePath && tracePath.length > 1 && (
+              <div className="memory-graph-trace">
+                <em>path: {tracePath.length - 1} hops</em>
+                <span>{tracePath.join(" → ")}</span>
+              </div>
+            )}
+            {tracePath && tracePath.length <= 1 && (
+              <div className="memory-graph-trace"><em>no path found within the current page</em></div>
+            )}
+            {selectedFacts.length === 0 && <div className="memory-graph-empty">No facts on the current page involve this entity.</div>}
             {selectedFacts.map((fact) => (
               <div key={fact.id} className="memory-fact">
                 <b>{fact.subject}</b>
@@ -332,6 +463,17 @@ export function KnowledgeGraph({ facts, height }: { facts: GraphEdge[]; height?:
                 <b>{fact.object}</b>
               </div>
             ))}
+            {mentionedDrawers.length > 0 && (
+              <div className="memory-graph-mentions">
+                <em>mentioned in {mentionedDrawers.length} memor{mentionedDrawers.length === 1 ? "y" : "ies"}</em>
+                {mentionedDrawers.map((drawer) => (
+                  <div key={drawer.id} className="memory-graph-mention" title={drawer.preview}>
+                    <b>{drawer.wing}/{drawer.room}</b>
+                    <span>{drawer.preview}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

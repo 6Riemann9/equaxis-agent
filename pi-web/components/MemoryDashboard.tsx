@@ -20,9 +20,23 @@ type Snapshot = {
   rooms: Record<string, Record<string, number>>;
   drawers: Drawer[];
   facts: Fact[];
+  page?: { limit: number; offset: number; total_drawers: number; total_facts: number };
   truncated?: { drawers: boolean; facts: boolean };
 };
 type SearchMatch = { id: string; content: string; metadata: Record<string, unknown>; score: number };
+type AuditEntry = {
+  ts: string;
+  action: string;
+  actor?: string;
+  drawer_id?: string;
+  wing?: string;
+  room?: string;
+  subject?: string;
+  predicate?: string;
+  preview?: string;
+  before?: { wing?: string; room?: string; hall?: string; preview?: string };
+  after?: { wing?: string; room?: string; hall?: string; preview?: string };
+};
 
 const hallNames: Record<string, string> = {
   hall_facts: "Facts", hall_events: "Events", hall_discoveries: "Discoveries",
@@ -47,8 +61,11 @@ export function MemoryDashboard({ cwd, onClose }: { cwd: string | null; onClose:
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [query, setQuery] = useState("");
   const [wing, setWing] = useState("all");
-  const [view, setView] = useState<"memories" | "graph">("memories");
+  const [view, setView] = useState<"memories" | "graph" | "activity">("memories");
+  const [audit, setAudit] = useState<{ entries: AuditEntry[]; total: number } | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -79,7 +96,45 @@ export function MemoryDashboard({ cwd, onClose }: { cwd: string | null; onClose:
       .finally(() => setLoading(false));
   }, [cwd]);
 
+  const loadMore = useCallback(() => {
+    if (!cwd || !snapshot?.page || loadingMore) return;
+    const nextOffset = snapshot.page.offset + snapshot.page.limit;
+    setLoadingMore(true);
+    setError(null);
+    fetch(`/api/memory?cwd=${encodeURIComponent(cwd)}&offset=${nextOffset}`, { cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(String(body?.error ?? `HTTP ${response.status}`));
+        const next: Snapshot = body;
+        setSnapshot((current) => {
+          if (!current) return next;
+          const seenDrawers = new Set(current.drawers.map((item) => item.id));
+          const seenFacts = new Set(current.facts.map((item) => item.id));
+          return {
+            ...next,
+            drawers: [...current.drawers, ...next.drawers.filter((item) => !seenDrawers.has(item.id))],
+            facts: [...current.facts, ...next.facts.filter((item) => !seenFacts.has(item.id))],
+          };
+        });
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
+      .finally(() => setLoadingMore(false));
+  }, [cwd, snapshot?.page, loadingMore]);
+
   useEffect(() => { load(); }, [cwd, load]);
+
+  useEffect(() => {
+    if (view !== "activity" || !cwd) return;
+    setAuditLoading(true);
+    fetch(`/api/memory?cwd=${encodeURIComponent(cwd)}&audit=100`, { cache: "no-store" })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(String(body?.error ?? `HTTP ${response.status}`));
+        setAudit({ entries: (body.entries ?? []) as AuditEntry[], total: Number(body.total ?? 0) });
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
+      .finally(() => setAuditLoading(false));
+  }, [view, cwd, snapshot?.generated_at]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -229,6 +284,7 @@ export function MemoryDashboard({ cwd, onClose }: { cwd: string | null; onClose:
               <div className="memory-tabs">
                 <button className={view === "memories" ? "active" : ""} onClick={() => setView("memories")}>Memories</button>
                 <button className={view === "graph" ? "active" : ""} onClick={() => setView("graph")}>Knowledge graph</button>
+                <button className={view === "activity" ? "active" : ""} onClick={() => setView("activity")}>Activity</button>
               </div>
               <div className="memory-toolbar-right">
                 <button className={adding ? "memory-add-toggle active" : "memory-add-toggle"} onClick={() => { setAdding((value) => !value); setEditingId(null); setEditDraft(null); }} disabled={busy}>+ Add memory</button>
@@ -312,8 +368,36 @@ export function MemoryDashboard({ cwd, onClose }: { cwd: string | null; onClose:
                   );
                 })}
                 {visibleDrawers.length === 0 && <div className="memory-empty">No memories match this view.</div>}
+                {(snapshot?.truncated?.drawers || snapshot?.truncated?.facts) && (
+                  <div className="memory-more">
+                    <button className="memory-action-btn" onClick={() => { void loadMore(); }} disabled={loadingMore}>
+                      {loadingMore ? "Loading…" : `Load more (${snapshot?.page ? `${snapshot.drawers.length + snapshot.facts.length} of ${snapshot.page.total_drawers + snapshot.page.total_facts}` : "next page"})`}
+                    </button>
+                  </div>
+                )}
               </div>
-            </div> : <KnowledgeGraph facts={facts} />}
+            </div> : view === "graph" ? <KnowledgeGraph facts={facts} drawers={snapshot?.drawers ?? []} /> : (
+              <div className="memory-activity">
+                {auditLoading && <div className="memory-empty">Loading activity…</div>}
+                {!auditLoading && (audit?.entries.length ?? 0) === 0 && <div className="memory-empty">No recorded changes yet.</div>}
+                {(audit?.entries ?? []).map((entry, index) => (
+                  <article className="memory-entry" key={`${entry.ts}-${index}`}>
+                    <div className="memory-entry-meta">
+                      <span>{entry.action}{entry.wing ? ` · ${entry.wing}/${entry.room}` : ""}{entry.subject ? ` · ${entry.subject} ${entry.predicate ?? ""}` : ""}</span>
+                      <em>{entry.actor || "equaxis"}{entry.ts ? ` · ${new Date(entry.ts).toLocaleString()}` : ""}</em>
+                    </div>
+                    {entry.action === "update" && entry.before ? (
+                      <p><s>{entry.before.preview}</s><br />{entry.after?.preview}</p>
+                    ) : (
+                      <p>{entry.preview ?? entry.before?.preview ?? ""}</p>
+                    )}
+                  </article>
+                ))}
+                {(audit?.total ?? 0) > (audit?.entries.length ?? 0) && (
+                  <div className="memory-more"><span className="memory-empty">Showing latest {audit?.entries.length} of {audit?.total} changes</span></div>
+                )}
+              </div>
+            )}
           </>}
         </div>
       </div>

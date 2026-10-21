@@ -297,7 +297,10 @@ export default function equaxisGoalState(pi: ExtensionAPI): void {
           }
           case "schedule": {
             const command = scheduledTaskCommand({ projectRoot: services.paths.workspace, intervalMinutes: config.autoWake?.intervalMinutes ?? 30 });
-            ctx.ui.notify(`Register the wake cadence in an admin shell:\n\n${command}\n\nRemove with:\nschtasks /Delete /TN "EquaxisWake" /F`, "info");
+            const removeHint = process.platform === "win32"
+              ? 'schtasks /Delete /TN "EquaxisWake" /F'
+              : "systemctl --user disable --now equaxiswake.timer";
+            ctx.ui.notify(`Register the wake cadence${process.platform === "win32" ? " in an admin shell" : " (systemd user timer)"}:\n\n${command}\n\nRemove with:\n${removeHint}`, "info");
             return;
           }
           default:
