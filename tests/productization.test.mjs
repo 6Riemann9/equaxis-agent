@@ -87,7 +87,15 @@ test("install command runs dependency setup and doctor", (t) => {
     npmCommand: "npm"
   });
   assert.equal(report.ok, true);
-  assert.deepEqual(calls.map((item) => item[1]), [["install"], ["run", "setup:memory"]]);
+  // The npm steps come first; the doctor that follows also probes the protocol
+  // adapters (read-only `--version` calls), which is why the call list is
+  // longer than the two dependency steps.
+  const args = calls.map((item) => item[1]);
+  assert.deepEqual(args.slice(0, 2), [["install"], ["run", "setup:memory"]]);
+  assert.ok(
+    calls.some((item) => String(item[0]).includes("typescript-language-server") || String(item[0]).includes("python")),
+    `expected protocol adapter probes, got: ${JSON.stringify(calls.map((item) => item[0]))}`
+  );
   assert.match(formatProductizationReport(report), /Equaxis install/);
 });
 
@@ -151,7 +159,10 @@ test("dry-run update reports planned work without spawning npm", (t) => {
     dryRun: true
   });
   assert.equal(report.ok, true);
-  assert.deepEqual(calls, []);
+  // The intent is that a dry run installs nothing: assert no npm invocation
+  // happened. Read-only protocol adapter probes may still run so the plan can
+  // report whether the adapters are actually present.
+  assert.equal(calls.filter((item) => String(item[0]).includes("npm")).length, 0, JSON.stringify(calls));
   assert.ok(report.steps.some((item) => item.detail === "skipped by --dry-run"));
 });
 

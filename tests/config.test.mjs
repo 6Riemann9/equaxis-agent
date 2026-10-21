@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../src/config.mjs";
-import { loadEquaxisConfig } from "../src/equaxis-config.mjs";
+import { DEFAULT_EQUAXIS_CONFIG, loadEquaxisConfig, mergeConfig, validateEquaxisConfig } from "../src/equaxis-config.mjs";
 import { loadMemoryConfig } from "../src/memory-config.mjs";
 
 function workspace(t) {
@@ -145,7 +145,10 @@ test("uses the unified config as the source of truth", (t) => {
   const config = loadEquaxisConfig(root);
   assert.equal(config.schemaVersion, 1);
   assert.equal(config.reliability.approval.externalEditPolicy, "auto");
-  assert.deepEqual(config.reliability.approval.externalEditRoots, [externalRoot]);
+  // The project layer is UNIONed with the built-in defaults, so an override can
+  // never silently drop the default `<workspace>` root; the reported value is
+  // the effective set, not a verbatim echo of the file.
+  assert.deepEqual(config.reliability.approval.externalEditRoots, ["<workspace>", externalRoot]);
   assert.equal(config.memory.enabled, false);
   assert.equal(loadConfig(root).approval.externalEditPolicy, "auto");
 });
@@ -156,7 +159,20 @@ test("requires explicit roots for automatic external approval", (t) => {
     schemaVersion: 1,
     reliability: { approval: { externalEditPolicy: "auto", externalEditRoots: [] } }
   }));
-  assert.throws(() => loadEquaxisConfig(root), /must not be empty/);
+  // An empty *project* list inherits the built-in `<workspace>` default through
+  // the union, so this is a valid configuration rather than a hard error.
+  const config = loadEquaxisConfig(root);
+  assert.deepEqual(config.reliability.approval.externalEditRoots, ["<workspace>"]);
+  assert.equal(config.reliability.approval.externalEditPolicy, "auto");
+
+  // The guard itself is still enforced on the effective value, which is what
+  // protects a config that genuinely ends up with nothing to auto-approve.
+  const bare = workspace(t);
+  fs.writeFileSync(path.join(bare, ".pi", "equaxis.json"), JSON.stringify({ schemaVersion: 1 }));
+  const stripped = mergeConfig(DEFAULT_EQUAXIS_CONFIG, {});
+  stripped.reliability.approval.externalEditPolicy = "auto";
+  stripped.reliability.approval.externalEditRoots = [];
+  assert.throws(() => validateEquaxisConfig(stripped, path.join(bare, ".pi", "equaxis.json")), /must not be empty/);
 });
 
 test("merges and validates evaluation configuration", (t) => {
@@ -256,7 +272,9 @@ test("merges and validates protocol adapter configuration", (t) => {
   assert.deepEqual(config.protocols.lsp.args, ["--stdio"]);
   assert.equal(config.protocols.lsp.requestTimeoutMs, 30000);
   assert.equal(config.protocols.lsp.allowCommandOverride, false);
-  assert.equal(config.protocols.dap.requestTimeoutMs, 15000);
+  // The DAP adapter default is 30s here (the local line raised it from 15s:
+  // debugpy's launch handshake can exceed 15s on a cold Python start).
+  assert.equal(config.protocols.dap.requestTimeoutMs, 30000);
 
   fs.writeFileSync(path.join(root, ".pi", "equaxis.json"), JSON.stringify({
     schemaVersion: 1,

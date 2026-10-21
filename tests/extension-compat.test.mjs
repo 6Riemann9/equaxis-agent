@@ -148,7 +148,10 @@ test("selects extension paths from manifest and preserves fatal contracts", () =
 test("validates and loads the repository extension contracts against Pi", async (t) => {
   const report = checkExtensionContracts({ projectRoot });
   assert.equal(report.ok, true, report.errors.map((item) => item.message).join("; "));
-  assert.equal(report.piVersion, "0.83.0");
+  // The contracts accept a dual range (>=0.83 <0.84 || >=1.3 <2.0), so the
+  // reported version is whatever Pi is installed — assert it is one of the
+  // supported lines rather than a hardcoded single version.
+  assert.match(report.piVersion, /^(?:0\.83\.|1\.3\.)/, `unexpected Pi version: ${report.piVersion}`);
 
   const loaded = await discoverAndLoadExtensions(
     extensionPaths(projectRoot, report.manifest),

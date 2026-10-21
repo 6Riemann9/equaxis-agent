@@ -7,12 +7,43 @@ import { MemoryBridge } from "../src/memory-bridge.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 
+// The vendored bridge needs the Python deps. The rest of the memory suite runs
+// against the project venv (scripts/memory-tests.mjs does the same), so use it
+// when present and fall back to the system interpreter otherwise.
+const venvPython = path.join(projectRoot, ".venv", "bin", "python");
+const pythonCommand = fs.existsSync(venvPython) ? venvPython : "python";
+
+/**
+ * The bridge's `remember` needs the chromadb ONNX embedding model. It is
+ * fetched from the HuggingFace CDN on first use, and on a host without that
+ * access chromadb leaves a truncated `onnx.tar.gz` behind and every embed
+ * hangs until the request times out. That is an environment limitation, not a
+ * product failure, so the suite says so explicitly instead of failing — or
+ * worse, passing silently.
+ */
+function embeddingModelStatus() {
+  const cacheDir = path.join(os.homedir(), ".cache", "chroma", "onnx_models", "all-MiniLM-L6-v2");
+  const archive = path.join(cacheDir, "onnx.tar.gz");
+  const MIN_PLAUSIBLE_BYTES = 5 * 1024 * 1024;
+  if (!fs.existsSync(archive)) return { ok: false, reason: "embedding model is not cached" };
+  const size = fs.statSync(archive).size;
+  if (size < MIN_PLAUSIBLE_BYTES) {
+    return { ok: false, reason: `embedding model download is truncated (${size} bytes at ${archive})` };
+  }
+  return { ok: true };
+}
+
 test("runs the vendored Python memory core through the persistent bridge", async (t) => {
+  const model = embeddingModelStatus();
+  if (!model.ok) {
+    t.skip(`requires the chromadb embedding model: ${model.reason}. Fetch it once with network access (see docs/MEMORY.md).`);
+    return;
+  }
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-memory-"));
   const diagnostics = [];
   const bridge = new MemoryBridge({
     cwd: projectRoot,
-    pythonCommand: "python",
+    pythonCommand,
     rootDir: tempRoot,
     requestTimeoutMs: 30000,
     onDiagnostic: (message) => diagnostics.push(message)

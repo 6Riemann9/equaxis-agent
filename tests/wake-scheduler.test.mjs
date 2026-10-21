@@ -46,7 +46,9 @@ test("wouldRun requires autoWake enabled AND a nextAction", () => {
 });
 
 test("scheduledTaskCommand builds a schtasks registration string", () => {
-  const command = scheduledTaskCommand({ projectRoot: "C:/proj", intervalMinutes: 30, taskName: "EquaxisWake", nodeCmd: "C:/node.exe" });
+  // The command is platform-aware; the platform is injected so the Windows
+  // path is exercised on any host.
+  const command = scheduledTaskCommand({ projectRoot: "C:/proj", intervalMinutes: 30, taskName: "EquaxisWake", nodeCmd: "C:/node.exe", platform: "win32" });
   assert.match(command, /^schtasks \/Create \/TN "EquaxisWake"/);
   assert.match(command, /\/SC MINUTE \/MO 30/);
   assert.match(command, /--scheduled/);
@@ -57,8 +59,18 @@ test("scheduledTaskCommand builds a schtasks registration string", () => {
   const winPath = (value) => String(value).replaceAll("/", "\\");
   const expectedScript = winPath(path.resolve("C:/proj", "scripts", "equaxis-wake.mjs"));
   assert.ok(command.includes(`"${winPath("C:/node.exe")}" "${expectedScript}" --scheduled`), `command: ${command}`);
-  const clamped = scheduledTaskCommand({ projectRoot: "C:/proj", intervalMinutes: 0 });
+  const clamped = scheduledTaskCommand({ projectRoot: "C:/proj", intervalMinutes: 0, platform: "win32" });
   assert.match(clamped, /\/MO 1/);
+});
+
+test("scheduledTaskCommand registers a systemd user timer on Linux", () => {
+  const command = scheduledTaskCommand({ projectRoot: "/proj", intervalMinutes: 30, taskName: "EquaxisWake", nodeCmd: "/usr/bin/node", platform: "linux" });
+  // No root required: a user timer under ~/.config/systemd/user.
+  assert.match(command, /~\/\.config\/systemd\/user/);
+  assert.match(command, /systemctl --user/);
+  assert.match(command, /equaxiswake\.timer/);
+  assert.match(command, /OnCalendar=\*:0\/30/);
+  assert.doesNotMatch(command, /schtasks/);
 });
 
 test("runScheduledWake never spawns when not wouldRun", async () => {

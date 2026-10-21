@@ -54,9 +54,9 @@ export function buildWakePlan({ goal, config = {}, now = () => new Date().toISOS
  *
  * @param {{ projectRoot: string, intervalMinutes?: number, taskName?: string, nodeCmd?: string }} options
  */
-export function scheduledTaskCommand({ projectRoot, intervalMinutes = 30, taskName = "EquaxisWake", nodeCmd = process.execPath } = {}) {
+export function scheduledTaskCommand({ projectRoot, intervalMinutes = 30, taskName = "EquaxisWake", nodeCmd = process.execPath, platform = process.platform } = {}) {
   const script = path.join(path.resolve(projectRoot), "scripts", "equaxis-wake.mjs");
-  if (process.platform !== "win32") {
+  if (platform !== "win32") {
     return systemdUserTimerSnippet({ projectRoot, intervalMinutes, taskName, nodeCmd, script });
   }
   const winPath = (value) => String(value).replaceAll("/", "\\");

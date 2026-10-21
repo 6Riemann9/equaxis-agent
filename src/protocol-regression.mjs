@@ -54,8 +54,9 @@ export function runProtocolRegression(options = {}) {
 
   // Nothing to run: report an explicit skip instead of spawning a command that
   // can only fail on missing files (the previous behaviour), or exiting 0 as if
-  // the suite had passed.
-  if (files.present.length === 0) {
+  // the suite had passed. An explicit `invocation` bypasses this: the caller
+  // has named the command it wants run, so resolution is not ours to second-guess.
+  if (!options.invocation && files.present.length === 0) {
     const reason = `no protocol test files present (expected ${files.candidates.join(", ")})`;
     trace.append({ event: "protocol_regression_skipped", startedAt, projectRoot, reason, missing: files.missing, adapters });
     return {
