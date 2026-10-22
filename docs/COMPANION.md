@@ -364,6 +364,30 @@ How it works and what it refuses:
   stale config cannot turn the dashboard into a file server;
 - a failed or cancelled task still captures artifacts (flagged `partial`), so
   a half-finished change is visible rather than invisible.
+- **Small text files are hashed**, not just size+mtime stamped: a same-length
+  edit written inside the same millisecond used to be invisible to the manifest.
+
+### Taking a change, or undoing it
+
+```bash
+companion patch <task-id> --out task.patch   # what a human applies to the repo
+companion revert <task-id> [--force]         # undo it in the teammate's workspace
+```
+
+- `patch` (`GET /patch/<taskId>`) produces a **real unified diff** by asking
+  `git diff --no-index` for it — the same engine that will consume it — so a
+  create is `--- /dev/null`, a delete is `+++ /dev/null`, and far-apart edits
+  become separate hunks. Files that were not captured as text are reported in
+  `x-exequaxis-skipped`/`skipped` rather than silently missing from a patch the
+  caller trusts.
+- `revert` (`POST /revert/<taskId>`) restores modified files from the baseline,
+  deletes what the task added, and recreates what it deleted. It **refuses with
+  409** when a later task also changed one of those paths — newer work is never
+  discarded silently; `force: true` (CLI `--force`) overrides deliberately.
+  Anything it cannot undo (a deletion whose content was never captured) is
+  reported per file instead of leaving a half-done revert unexplained.
+- The dashboard's files panel carries both: a `patch` link to download and a
+  `revert task` button.
 
 ## Approvals (high-risk actions)
 

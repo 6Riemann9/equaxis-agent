@@ -31,6 +31,7 @@ import { parseDurationMs } from "../src/duration.mjs";
 import { loadModelCatalog, teammateModelArgs } from "../src/model-slots.mjs";
 import { loadEquaxisConfigLayers } from "../src/equaxis-config.mjs";
 import { applyTemplate, buildTemplate, formatTemplateReport, parseTemplate } from "../src/companion-templates.mjs";
+import { buildTaskPatch, revertTask } from "../src/companion-artifacts.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -147,6 +148,8 @@ async function main() {
   status [--teammate <name>] [--all]                               task queue status
   feed [n]                                                         last n feed entries (default 20)
   logs <task-id> [--lines 100]                                     stream log of a task (works while running)
+  patch <task-id> [--out file.patch]                               unified diff of what the task changed (git apply-able)
+  revert <task-id> [--force]                                       undo a task in its workspace (refuses if later work touched it)
   reset <name>                                                     forget the teammate's conversation (next task starts cold)
   worker [--once] [--poll <ms>] [--concurrency 2] [--context per-teammate|per-task]
          [--sandbox auto|directory|bwrap|container|microvm|off] [--home isolated|shared]
@@ -341,6 +344,46 @@ State lives in ${path.relative(process.cwd(), storeRoot) || storeRoot}`);
       } catch (error) {
         return fail(error.message);
       }
+      return;
+    }
+    case "patch": {
+      const taskId = positional[0];
+      if (!taskId) return fail("patch requires <task-id>");
+      const task = store.getTask(taskId) ?? store.listTasks({}).find((t) => t.id.startsWith(taskId));
+      if (!task) return fail(`no task matches "${taskId}"`);
+      const teammate = store.teammates.find((t) => t.id === task.teammateId);
+      const workspace = teammate ? store.teammateDirectory(teammate, projectRoot) : projectRoot;
+      const result = buildTaskPatch({ rootDir: store.rootDir, taskId: task.id, workspace });
+      if (!result.ok) return fail(result.error);
+      for (const entry of result.skipped) console.error(`companion: patch skipped ${entry.path} — ${entry.reason}`);
+      if (!result.patch) return console.log("nothing to apply (no applicable text changes)");
+      if (flags.out) {
+        const target = path.resolve(process.cwd(), String(flags.out));
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, result.patch, "utf8");
+        console.log(`wrote ${target} (${result.counts.added} added, ${result.counts.modified} modified, ${result.counts.deleted} deleted)`);
+      } else {
+        process.stdout.write(result.patch);
+      }
+      return;
+    }
+    case "revert": {
+      const taskId = positional[0];
+      if (!taskId) return fail("revert requires <task-id>");
+      const task = store.getTask(taskId) ?? store.listTasks({}).find((t) => t.id.startsWith(taskId));
+      if (!task) return fail(`no task matches "${taskId}"`);
+      const teammate = store.teammates.find((t) => t.id === task.teammateId);
+      const workspace = teammate ? store.teammateDirectory(teammate, projectRoot) : projectRoot;
+      const result = revertTask({
+        rootDir: store.rootDir,
+        taskId: task.id,
+        workspace,
+        tasks: store.listTasks({}),
+        force: flags.force === true
+      });
+      if (!result.ok) return fail(result.error);
+      console.log(`reverted ${task.id.slice(0, 8)}: restored ${result.restored.length}, removed ${result.removed.length}${result.forced ? " (forced)" : ""}`);
+      for (const entry of result.skipped) console.log(`  could not revert ${entry.path} — ${entry.reason}`);
       return;
     }
     case "logs": {

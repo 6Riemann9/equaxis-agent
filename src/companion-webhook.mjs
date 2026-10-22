@@ -4,7 +4,7 @@ import http from "node:http";
 import { COMPANION_PWA_ASSETS } from "./companion-pwa.mjs";
 import { parseDurationMs } from "./duration.mjs";
 import { listApprovalHistory, listPendingApprovals, writeApprovalDecision } from "./approval-queue.mjs";
-import { artifactDiff, readManifest, resolveArtifactFile } from "./companion-artifacts.mjs";
+import { artifactDiff, buildTaskPatch, readManifest, resolveArtifactFile, revertTask } from "./companion-artifacts.mjs";
 import { readStreamState } from "./companion-stream.mjs";
 
 /**
@@ -25,6 +25,8 @@ import { readStreamState } from "./companion-stream.mjs";
  *   GET  /artifacts/<taskId>                              → workspace change manifest
  *   GET  /artifact/<taskId>/diff?path=<rel>               → unified diff for one file
  *   GET  /artifact/<taskId>/raw?path=<rel>                → the file itself (download)
+ *   GET  /patch/<taskId>                                  → unified diff (git apply-able)
+ *   POST /revert/<taskId>  { force? }                      → undo the task in its workspace
  *   GET  /approvals                                       → pending high-risk requests + history
  *   POST /approval/<requestId> { decision }               → approve | deny (admin only)
  *   POST /routine  { teammate, every, instruction }        → 202 { routine }
@@ -356,6 +358,56 @@ export function startCompanionWebhook({
           startedAt: task.startedAt,
           progress: state
         });
+      }
+
+      // The task's whole change as one patch: what a human (or a teammate)
+      // applies to the real repository after reviewing it.
+      const patchMatch = req.method === "GET" && url.pathname.match(/^\/patch\/([a-f0-9-]{1,64})$/);
+      if (patchMatch) {
+        const denied = requireAdmin();
+        if (denied) return denied;
+        const task = store.getTask(patchMatch[1]);
+        const teammate = task ? store.teammates.find((entry) => entry.id === task.teammateId) : null;
+        if (!task) return sendJson(res, 404, { error: "unknown task" });
+        const workspace = teammate ? store.teammateDirectory(teammate, projectRoot) : projectRoot;
+        const result = buildTaskPatch({ rootDir: store.rootDir, taskId: task.id, workspace });
+        if (!result.ok) return sendJson(res, 404, { error: result.error });
+        res.writeHead(200, {
+          "content-type": "text/x-patch; charset=utf-8",
+          "content-length": Buffer.byteLength(result.patch),
+          "x-content-type-options": "nosniff",
+          "x-exequaxis-skipped": String(result.skipped.length)
+        });
+        return res.end(result.patch);
+      }
+
+      const revertMatch = req.method === "POST" && url.pathname.match(/^\/revert\/([a-f0-9-]{1,64})$/);
+      if (revertMatch) {
+        const denied = requireAdmin();
+        if (denied) return denied;
+        const task = store.getTask(revertMatch[1]);
+        const teammate = task ? store.teammates.find((entry) => entry.id === task.teammateId) : null;
+        if (!task) return sendJson(res, 404, { error: "unknown task" });
+        const raw = await readBody(req);
+        let payload = {};
+        try {
+          payload = JSON.parse(raw || "{}");
+        } catch {
+          return sendJson(res, 400, { error: "request body must be JSON" });
+        }
+        const workspace = teammate ? store.teammateDirectory(teammate, projectRoot) : projectRoot;
+        const result = revertTask({
+          rootDir: store.rootDir,
+          taskId: task.id,
+          workspace,
+          tasks: store.listTasks({}),
+          force: payload?.force === true
+        });
+        if (!result.ok) {
+          return sendJson(res, result.conflict ? 409 : 400, result);
+        }
+        log?.(`companion webhook: reverted task ${task.id.slice(0, 8)} (restored ${result.restored.length}, removed ${result.removed.length})`);
+        return sendJson(res, 200, result);
       }
 
       const artifactsMatch = req.method === "GET" && url.pathname.match(/^\/artifacts\/([a-f0-9-]{1,64})$/);

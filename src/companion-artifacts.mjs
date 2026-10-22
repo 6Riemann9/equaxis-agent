@@ -16,7 +16,10 @@
  * Layout: <rootDir>/artifacts/<taskId>/manifest.json + before/<relPath>
  */
 
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 /** Directories that are never part of a teammate's deliverable. */
@@ -63,7 +66,19 @@ export function snapshotWorkspace(workspaceDir, { maxFiles = SNAPSHOT_LIMITS.max
       const relPath = path.relative(root, absolute).split(path.sep).join("/");
       try {
         const stat = fs.lstatSync(absolute);
-        files.set(relPath, { size: stat.size, mtimeMs: Math.floor(stat.mtimeMs), symlink: entry.isSymbolicLink() });
+        const record = { size: stat.size, mtimeMs: Math.floor(stat.mtimeMs), symlink: entry.isSymbolicLink() };
+        // Size+mtime alone misses a same-length edit written inside the same
+        // millisecond, which a fast script can do. Small text files are already
+        // read for the baseline, so hashing them costs little and makes the
+        // manifest trustworthy.
+        if (!record.symlink && stat.size <= SNAPSHOT_LIMITS.maxBaselineBytes && isTextName(relPath)) {
+          try {
+            record.hash = createHash("sha256").update(fs.readFileSync(absolute)).digest("hex").slice(0, 32);
+          } catch {
+            // unreadable: fall back to size+mtime
+          }
+        }
+        files.set(relPath, record);
       } catch {
         // a file that vanished mid-walk is simply not part of the snapshot
       }
@@ -132,7 +147,8 @@ export function captureResult(rootDir, taskId, workspaceDir) {
       added.push({ path: relPath, size: info.size, diffable: isTextName(relPath) && info.size <= SNAPSHOT_LIMITS.maxDiffBytes });
       continue;
     }
-    if (previous.size !== info.size || previous.mtimeMs !== info.mtimeMs) {
+    const contentChanged = previous.hash && info.hash ? previous.hash !== info.hash : false;
+    if (previous.size !== info.size || previous.mtimeMs !== info.mtimeMs || contentChanged) {
       const previousInBaseline = fs.existsSync(path.join(beforeDir, relPath));
       modified.push({
         path: relPath,
@@ -267,4 +283,225 @@ export function formatArtifactSummary(manifest) {
   if (modified) parts.push(`${modified} modified`);
   if (deleted) parts.push(`${deleted} deleted`);
   return `${parts.join(", ")}`;
+}
+
+/**
+ * Build a real unified diff for one file.
+ *
+ * Hand-rolling hunk headers is a good way to produce a patch that looks right
+ * and does not apply, so the diff comes from `git diff --no-index` — the same
+ * engine that will consume it. A missing side is /dev/null, which gives proper
+ * create/delete semantics instead of a file that merely looks emptied.
+ */
+export function toUnifiedPatch({ relPath, beforeText, afterText, context = 3, gitCommand = "git" }) {
+  if (beforeText === afterText) return "";
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "equaxis-patch-"));
+  const name = path.basename(relPath) || "file";
+  const beforeFile = path.join(dir, "before", name);
+  const afterFile = path.join(dir, "after", name);
+  try {
+    fs.mkdirSync(path.dirname(beforeFile), { recursive: true });
+    fs.mkdirSync(path.dirname(afterFile), { recursive: true });
+    if (beforeText !== null) fs.writeFileSync(beforeFile, beforeText, "utf8");
+    if (afterText !== null) fs.writeFileSync(afterFile, afterText, "utf8");
+    const beforeArg = beforeText === null ? "/dev/null" : path.join("before", name);
+    const afterArg = afterText === null ? "/dev/null" : path.join("after", name);
+    const probe = spawnSync(gitCommand, ["diff", "--no-index", "--no-color", `--unified=${context}`, beforeArg, afterArg], {
+      cwd: dir,
+      encoding: "utf8",
+      windowsHide: true
+    });
+    // git exits 1 when the inputs differ, which is the normal case here.
+    if (probe.error || (probe.status !== 0 && probe.status !== 1)) {
+      return { error: `git diff failed: ${probe.error?.message ?? `exit ${probe.status}`}` };
+    }
+    const lines = String(probe.stdout ?? "").split("\n");
+    const kept = [];
+    for (const line of lines) {
+      if (line.startsWith("diff --git") || line.startsWith("index ")) continue;
+      // Rebuild the file headers from the logical paths: git prefixes its own
+      // a/ and b/ (and the temp directory), so textual replacement of the
+      // arguments does not match.
+      if (line.startsWith("--- ")) {
+        kept.push(beforeText === null ? "--- /dev/null" : `--- a/${relPath}`);
+        continue;
+      }
+      if (line.startsWith("+++ ")) {
+        kept.push(afterText === null ? "+++ /dev/null" : `+++ b/${relPath}`);
+        continue;
+      }
+      if (line.startsWith("@@") || line.startsWith("new file mode") || line.startsWith("deleted file mode")) {
+        kept.push(line);
+        continue;
+      }
+      if (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) kept.push(line);
+    }
+    if (!kept.some((line) => line.startsWith("@@"))) return "";
+    return `${kept.join("\n").replace(/\n+$/, "")}\n`;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const PATCHABLE = (entry) => Boolean(entry.diffable);
+
+/** A patch is either text or an error to report; never a silent gap. */
+function patchText(result, skipped, relPath) {
+  if (typeof result === "string") return result;
+  skipped.push({ path: relPath, reason: result?.error ?? "patch generation failed" });
+  return "";
+}
+
+/**
+ * Build a git-apply-able patch for everything a task changed. Files that were
+ * not captured as text (binaries, oversized) are reported as skipped rather
+ * than silently omitted from a patch the caller will trust.
+ */
+export function buildTaskPatch({ rootDir, taskId, workspace }) {
+  const manifest = readManifest(rootDir, taskId);
+  if (!manifest) return { ok: false, error: "no artifacts for this task" };
+  const root = path.resolve(manifest.workspace ?? workspace);
+  const baseline = readBaselineDir(rootDir, taskId);
+  const parts = [];
+  const skipped = [];
+
+  const read = (file) => {
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+  };
+
+  for (const entry of manifest.added ?? []) {
+    if (!PATCHABLE(entry)) {
+      skipped.push({ path: entry.path, reason: "not captured as text (binary or oversized)" });
+      continue;
+    }
+    const after = read(path.join(root, entry.path));
+    if (after === null) {
+      skipped.push({ path: entry.path, reason: "no longer readable" });
+      continue;
+    }
+    const patch = patchText(toUnifiedPatch({ relPath: entry.path, beforeText: null, afterText: after }), skipped, entry.path);
+    if (patch) parts.push(patch);
+  }
+  for (const entry of manifest.modified ?? []) {
+    if (!PATCHABLE(entry)) {
+      skipped.push({ path: entry.path, reason: "not captured as text (binary or oversized)" });
+      continue;
+    }
+    const before = read(path.join(baseline, entry.path));
+    const after = read(path.join(root, entry.path));
+    if (before === null || after === null) {
+      skipped.push({ path: entry.path, reason: "baseline or current content is missing" });
+      continue;
+    }
+    const patch = patchText(toUnifiedPatch({ relPath: entry.path, beforeText: before, afterText: after }), skipped, entry.path);
+    if (patch) parts.push(patch);
+  }
+  for (const entry of manifest.deleted ?? []) {
+    const before = read(path.join(baseline, entry.path));
+    if (before === null) {
+      skipped.push({ path: entry.path, reason: "deleted file was not captured as text" });
+      continue;
+    }
+    const patch = patchText(toUnifiedPatch({ relPath: entry.path, beforeText: before, afterText: null }), skipped, entry.path);
+    if (patch) parts.push(patch);
+  }
+
+  return {
+    ok: true,
+    taskId,
+    workspace: root,
+    counts: manifest.counts,
+    skipped,
+    patch: parts.join("")
+  };
+}
+
+/** Which later tasks also touched these paths (so a revert cannot clobber them). */
+export function findLaterTouches(rootDir, taskId, paths, { tasks = [] } = {}) {
+  const wanted = new Set(paths);
+  const touches = [];
+  for (const task of tasks) {
+    if (task.id === taskId) continue;
+    const manifest = readManifest(rootDir, task.id);
+    if (!manifest) continue;
+    const changed = [...(manifest.added ?? []), ...(manifest.modified ?? []), ...(manifest.deleted ?? [])]
+      .map((entry) => entry.path)
+      .filter((relPath) => wanted.has(relPath));
+    if (changed.length) touches.push({ taskId: task.id, status: task.status, finishedAt: task.finishedAt ?? null, paths: [...new Set(changed)] });
+  }
+  return touches;
+}
+
+/**
+ * Undo a task in its workspace: restore modified files from the baseline,
+ * delete files it added, and recreate files it deleted (when captured).
+ *
+ * Refuses when a later task also changed one of these paths unless `force` is
+ * set — silently discarding newer work would be worse than refusing.
+ */
+export function revertTask({ rootDir, taskId, workspace, tasks = [], force = false }) {
+  const manifest = readManifest(rootDir, taskId);
+  if (!manifest) return { ok: false, error: "no artifacts for this task" };
+  const root = path.resolve(manifest.workspace ?? workspace);
+  const baseline = readBaselineDir(rootDir, taskId);
+
+  const paths = [...(manifest.added ?? []), ...(manifest.modified ?? []), ...(manifest.deleted ?? [])].map((entry) => entry.path);
+  const later = findLaterTouches(rootDir, taskId, paths, { tasks });
+  if (later.length && !force) {
+    return {
+      ok: false,
+      conflict: true,
+      error: `later tasks changed the same files (${later.map((entry) => `${String(entry.taskId).slice(0, 8)}`).join(", ")}) — pass --force to revert anyway`,
+      later
+    };
+  }
+
+  const restored = [];
+  const removed = [];
+  const skipped = [];
+
+  for (const entry of manifest.modified ?? []) {
+    const from = path.join(baseline, entry.path);
+    const to = path.join(root, entry.path);
+    if (!fs.existsSync(from)) {
+      skipped.push({ path: entry.path, reason: "baseline copy not available" });
+      continue;
+    }
+    try {
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.copyFileSync(from, to);
+      restored.push(entry.path);
+    } catch (error) {
+      skipped.push({ path: entry.path, reason: String(error?.message ?? error) });
+    }
+  }
+  for (const entry of manifest.added ?? []) {
+    try {
+      fs.rmSync(path.join(root, entry.path), { force: true });
+      removed.push(entry.path);
+    } catch (error) {
+      skipped.push({ path: entry.path, reason: String(error?.message ?? error) });
+    }
+  }
+  for (const entry of manifest.deleted ?? []) {
+    const from = path.join(baseline, entry.path);
+    const to = path.join(root, entry.path);
+    if (!fs.existsSync(from)) {
+      skipped.push({ path: entry.path, reason: "deleted file was not captured as text" });
+      continue;
+    }
+    try {
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.copyFileSync(from, to);
+      restored.push(entry.path);
+    } catch (error) {
+      skipped.push({ path: entry.path, reason: String(error?.message ?? error) });
+    }
+  }
+
+  return { ok: true, taskId, workspace: root, restored, removed, skipped, forced: Boolean(force && later.length), later };
 }

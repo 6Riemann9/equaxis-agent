@@ -719,6 +719,10 @@ async function showFiles(taskId) {
     (manifest.modified || []).forEach((item) => add("modified", item));
     (manifest.deleted || []).forEach((item) => add("deleted", item));
     host.innerHTML = '<div class="card" style="padding:8px 10px">' + (rows.join("") || '<span class="muted">no file changes</span>') + "</div>"
+      + '<div class="actions" style="display:flex;gap:8px;margin-top:8px">'
+      + '<a class="chip" href="/patch/' + encodeURIComponent(taskId) + '">patch</a>'
+      + '<button class="ghost danger revert-task" data-id="' + esc(taskId) + '">revert task</button>'
+      + "</div>"
       + '<div class="diff" id="diff-' + esc(taskId) + '" hidden></div>';
   } catch (error) {
     host.innerHTML = '<p class="muted">' + esc(error.message) + "</p>";
@@ -785,6 +789,22 @@ $("messages").addEventListener("click", async (event) => {
   const target = event.target;
   if (target.classList.contains("show-files")) { showFiles(target.dataset.id); return; }
   if (target.classList.contains("diff-btn")) { showDiff(target.dataset.id, target.dataset.path); return; }
+  if (target.classList.contains("revert-task")) {
+    const id = target.dataset.id;
+    if (!confirm("Undo every change this task made in its workspace?")) return;
+    target.disabled = true;
+    try {
+      const result = await post("/revert/" + encodeURIComponent(id), {});
+      toast("reverted: " + result.restored.length + " restored, " + result.removed.length + " removed");
+      await refresh();
+    } catch (error) {
+      // 409 means newer work touched the same files: surface it instead of
+      // silently forcing.
+      target.disabled = false;
+      toast("revert refused: " + error.message);
+    }
+    return;
+  }
   if (target.classList.contains("cancel-task")) {
     target.disabled = true;
     try {
