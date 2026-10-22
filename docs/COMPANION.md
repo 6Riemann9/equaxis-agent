@@ -72,13 +72,29 @@ A teammate's reply may carry single-line directives, parsed by the worker
 after each turn:
 
 ```
-DELEGATE @builder: implement the config loader test
+DELEGATE @builder: implement the config loader test     # you pick who
+DELEGATE: implement the config loader test              # the worker picks who
 MESSAGE @builder: the config lives in equaxis-config.mjs
 ```
 
-- `DELEGATE` queues a task for the named teammate (`runSource: delegated:<name>`).
-- `MESSAGE` lands in the named teammate's inbox and is drained into their
-  next task's prompt exactly once.
+- `DELEGATE` queues a task for that teammate (`runSource: delegated:<name>`),
+  **carrying a handoff**: the delegator's own task, its result so far, and the
+  files it produced. The delegatee starts from what is already known instead of
+  from one line.
+- **Auto-routing**: `DELEGATE:` without a name lets the worker choose. It
+  scores the instruction against every other teammate's persona (with CJK
+  bigram segmentation, so Chinese instructions match too), takes the best match,
+  and logs why. A single available candidate is taken even with no lexical
+  match; with several candidates and no match the decision is *handed back* —
+  the delegator gets a turn to name someone, because it can read the roster.
+- **The loop closes**: when a delegated task finishes (or fails), the result is
+  delivered to the delegator's inbox and an integration turn is queued for it,
+  so a delegation is a conversation rather than fire-and-forget.
+- **Loops are bounded**: each hop increments a depth counter; past
+  `MAX_DELEGATION_DEPTH` (3) further delegation is refused with a reason, so two
+  teammates cannot ping-pong forever. Human-initiated tasks report to nobody.
+- Every teammate's prompt lists the rest of the team (name + persona), so
+  choosing *who* is a decision the model can make with understanding.
 - Directives to unknown teammates are rejected without failing the task.
 
 ## Sandbox model (`--sandbox bwrap`, the `auto` default)

@@ -67,7 +67,8 @@ test("m1 directives: parseDirectives extracts DELEGATE and MESSAGE lines", () =>
   ].join("\n");
   const { delegations, messages } = parseDirectives(reply);
   assert.equal(delegations.length, 2);
-  assert.deepEqual(delegations[0], { to: "builder", instruction: "write the config loader test" });
+  // `routed` distinguishes "name given" from "let the worker decide" (M18).
+  assert.deepEqual(delegations[0], { to: "builder", instruction: "write the config loader test", routed: false });
   assert.equal(delegations[1].to, "scout");
   assert.equal(messages.length, 1);
   assert.equal(messages[0].to, "builder");

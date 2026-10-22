@@ -1,3 +1,4 @@
+import { MAX_DELEGATION_DEPTH, buildHandoff, buildIntegrationRequest, delegationDepth, formatHandoff, formatRoster, routeTeammate } from "./companion-team.mjs";
 import { captureBaseline, captureResult, formatArtifactSummary } from "./companion-artifacts.mjs";
 /**
  * Companion runtime: the worker loop that drains the task queue.
@@ -24,6 +25,8 @@ export function buildTeammatePrompt(teammate, task, context = {}) {
   lines.push(`You are ${teammate.name}, a persistent AI teammate.`);
   if (teammate.persona) lines.push(`Your persona: ${teammate.persona}`);
 
+  for (const line of formatRoster(context.roster ?? [], { exclude: teammate.name })) lines.push(line);
+  for (const line of formatHandoff(task.handoff)) lines.push(line);
   lines.push("");
   lines.push(`TASK (${task.id}):`);
   lines.push(task.instruction);
@@ -43,7 +46,11 @@ export function buildTeammatePrompt(teammate, task, context = {}) {
   lines.push("You collaborate with other teammates through your reply. On their own lines, you may emit:");
   lines.push("  DELEGATE @<teammate>: <one instruction for them to run as a task>");
   lines.push("  MESSAGE @<teammate>: <informational note for their next task>");
-  lines.push("Use DELEGATE only for work that genuinely belongs to another teammate; do not delegate this task away entirely.");
+  lines.push("Collaboration directives (one per line, at the end of your reply):");
+  lines.push("  DELEGATE @name: instruction   — hand a piece of work to a named teammate");
+  lines.push("  DELEGATE: instruction         — hand it to whoever is best matched; the worker picks");
+  lines.push("  MESSAGE @name: text           — leave a note in their inbox");
+  lines.push("A delegated task carries your task, your findings and the files you produced, so the other teammate does not start blind. When they finish, their result is delivered back to you automatically and you get a turn to integrate it — do not wait for them in the same turn, and do not delegate this task away entirely.");
   lines.push("");
   lines.push("When you finish, end your reply with a section titled 'RESULT:' containing a concise summary (at most 20 lines) of what you did, decided, or found. That summary is delivered to your human as the task result.");
   return lines.join("\n");
@@ -87,7 +94,14 @@ export function parseDirectives(reply) {
   for (const line of replyText(reply).split("\n")) {
     const delegate = line.match(/^\s*DELEGATE\s+@([a-z0-9][a-z0-9_-]*)\s*:\s*(.+)$/i);
     if (delegate) {
-      delegations.push({ to: delegate[1].toLowerCase(), instruction: delegate[2].trim() });
+      delegations.push({ to: delegate[1].toLowerCase(), instruction: delegate[2].trim(), routed: false });
+      continue;
+    }
+    // "DELEGATE: instruction" with no name: the worker routes it to whoever is
+    // best matched, so the human does not have to pre-assign work by hand.
+    const routed = line.match(/^\s*DELEGATE\s*:\s*(.+)$/i);
+    if (routed) {
+      delegations.push({ to: null, instruction: routed[1].trim(), routed: true });
       continue;
     }
     const message = line.match(/^\s*MESSAGE\s+@([a-z0-9][a-z0-9_-]*)\s*:\s*(.+)$/i);
@@ -240,7 +254,7 @@ export async function runCompanionWorker(options) {
   const log = (...args) => logger?.(...args);
   const slots = Math.max(1, Math.floor(Number(concurrency) || 1));
 
-  const summary = { processed: 0, completed: 0, failed: 0, cancelled: 0, delegated: 0, stoppedBy: "drained" };
+  const summary = { processed: 0, completed: 0, failed: 0, cancelled: 0, delegated: 0, reported: 0, routingMissed: 0, routingDeferred: 0, loopsStopped: 0, stoppedBy: "drained" };
   /** taskId -> AbortController for the in-flight run. */
   const running = new Map();
 
@@ -266,7 +280,8 @@ export async function runCompanionWorker(options) {
 
     const prompt = buildTeammatePrompt(teammate, task, {
       workspacePath,
-      inbox: store.drainInbox(teammate.name)
+      inbox: store.drainInbox(teammate.name),
+      roster: store.listTeammates()
     });
     log(`companion: running task ${task.id} for @${teammate.name} (attempt ${task.attempts})`);
     // Artifacts: snapshot the workspace before the run, compare after. A
@@ -291,18 +306,23 @@ export async function runCompanionWorker(options) {
         log(`companion: task ${task.id} cancelled`);
         return;
       }
-      applyDirectives(store, reply, teammate, { log, summary });
       const result = extractResult(reply);
+      // Capture the change list BEFORE applying directives: a handoff tells the
+      // next teammate which files exist, so it has to be measured first.
+      let changedFiles = null;
       if (artifactRoot) {
         try {
           const manifest = captureResult(artifactRoot, task.id, workspacePath);
+          changedFiles = manifest;
           store.recordArtifacts(task.id, { counts: manifest.counts, capturedAt: manifest.capturedAt });
           log(`companion: artifacts for ${task.id}: ${formatArtifactSummary(manifest)}`);
         } catch (error) {
           log(`companion: artifact capture failed for ${task.id}: ${error?.message ?? error}`);
         }
       }
+      applyDirectives(store, reply, teammate, { log, summary, sourceTask: task, result, artifacts: changedFiles });
       store.complete(task.id, result);
+      deliverDelegationReport(store, store.getTask(task.id), { log, summary });
       summary.processed += 1;
       summary.completed += 1;
       log(`companion: task ${task.id} done`);
@@ -330,6 +350,8 @@ export async function runCompanionWorker(options) {
         }
       }
       store.fail(task.id, error);
+      // A failure is still news the delegator needs.
+      deliverDelegationReport(store, store.getTask(task.id), { log, summary });
       summary.processed += 1;
       summary.failed += 1;
       log(`companion: task ${task.id} failed: ${error?.message ?? error}`);
@@ -417,16 +439,99 @@ export async function runCompanionWorker(options) {
   return summary;
 }
 
+/**
+ * Close the loop on a delegated task: the delegator is told what came back and
+ * gets a turn to integrate it. Without this a delegation is fire-and-forget,
+ * the delegator never learns the outcome, and the human ends up chasing it.
+ */
+function deliverDelegationReport(store, finishedTask, { log, summary } = {}) {
+  const handoff = finishedTask?.handoff;
+  if (!handoff?.from) return;
+  const delegator = store.getTeammate(handoff.from);
+  if (!delegator) return;
+  const delegate = store.teammates.find((entry) => entry.id === finishedTask.teammateId) ?? null;
+  const result = finishedTask.result ?? finishedTask.error ?? "(no result recorded)";
+
+  // Always leave a note in the inbox: that is the record of what happened.
+  try {
+    store.sendMessage({
+      from: delegate?.name ?? "teammate",
+      to: delegator.name,
+      text: `Finished your task ${String(finishedTask.id).slice(0, 8)} (${finishedTask.status}):\n${String(result).slice(0, 2000)}`
+    });
+  } catch (error) {
+    log(`companion: could not report ${finishedTask.id} back to @${delegator.name}: ${error?.message ?? error}`);
+  }
+
+  const request = buildIntegrationRequest({
+    delegateTask: finishedTask,
+    delegateTeammate: delegate ?? { name: "teammate" },
+    result,
+    depth: handoff.depth ?? 0
+  });
+  if (request.refused) {
+    log(`companion: ${request.reason}`);
+    summary.loopsStopped = (summary.loopsStopped ?? 0) + 1;
+    return;
+  }
+  try {
+    const followUp = store.enqueue(delegator.name, request.instruction, { runSource: request.runSource });
+    summary.reported = (summary.reported ?? 0) + 1;
+    log(`companion: queued integration task ${followUp.id.slice(0, 8)} for @${delegator.name}`);
+  } catch (error) {
+    log(`companion: could not queue an integration task for @${delegator.name}: ${error?.message ?? error}`);
+  }
+}
+
 /** Queue DELEGATE directives and deliver MESSAGE directives from a reply. */
-function applyDirectives(store, reply, fromTeammate, { log, summary } = {}) {
+function applyDirectives(store, reply, fromTeammate, { log, summary, sourceTask = null, result = "", artifacts = null } = {}) {
   const { delegations, messages } = parseDirectives(reply);
+  const depth = delegationDepth(sourceTask);
   for (const delegation of delegations) {
+    // Auto-routing: the delegating teammate decided *what* needs doing, the
+    // worker decides who is best matched. A refusal is explained in the feed
+    // rather than silently dropped.
+    let target = delegation.to;
+    if (!target) {
+      const route = routeTeammate(delegation.instruction, store.listTeammates(), { exclude: fromTeammate.name });
+      if (!route) {
+        // Do not drop the work: give the delegator (which can read the roster
+        // in its prompt) a turn to name someone. Language-agnostic, and the
+        // decision stays with the model instead of a keyword table.
+        log(`companion: no teammate matched "${delegation.instruction.slice(0, 60)}" — asking @${fromTeammate.name} to pick by name`);
+        summary.routingMissed = (summary.routingMissed ?? 0) + 1;
+        if (depth >= MAX_DELEGATION_DEPTH) {
+          log(`companion: routing fallback skipped at depth ${depth} (cap ${MAX_DELEGATION_DEPTH})`);
+          summary.loopsStopped = (summary.loopsStopped ?? 0) + 1;
+          continue;
+        }
+        try {
+          store.enqueue(fromTeammate.name, [
+            `You asked to delegate: "${delegation.instruction}"`,
+            "The worker could not match it to anyone automatically.",
+            "Look at your team roster and name the teammate explicitly: re-issue it as",
+            `  DELEGATE @name: ${delegation.instruction}`,
+            "If nobody fits, say so and do it yourself."
+          ].join("\n"), { runSource: "routing:retry" });
+          summary.routingDeferred = (summary.routingDeferred ?? 0) + 1;
+        } catch (error) {
+          log(`companion: could not ask @${fromTeammate.name} to name a teammate: ${error?.message ?? error}`);
+        }
+        continue;
+      }
+      target = route.teammate.name;
+      log(`companion: auto-routed to @${target} — ${route.reason}`);
+    }
     try {
-      const task = store.enqueue(delegation.to, delegation.instruction, { runSource: `delegated:${fromTeammate.name}` });
+      const handoff = buildHandoff({ from: fromTeammate, task: sourceTask, result, artifacts, depth });
+      const task = store.enqueue(target, delegation.instruction, {
+        runSource: `delegated:${fromTeammate.name}`,
+        handoff
+      });
       summary.delegated = (summary.delegated ?? 0) + 1;
-      log(`companion: @${fromTeammate.name} delegated task ${task.id.slice(0, 8)} to @${delegation.to}`);
+      log(`companion: @${fromTeammate.name} delegated task ${task.id.slice(0, 8)} to @${target} (depth ${handoff.depth})`);
     } catch (error) {
-      log(`companion: delegation to @${delegation.to} rejected: ${error?.message ?? error}`);
+      log(`companion: delegation to @${target} rejected: ${error?.message ?? error}`);
     }
   }
   for (const message of messages) {

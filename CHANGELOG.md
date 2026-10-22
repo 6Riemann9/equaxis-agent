@@ -17,6 +17,35 @@ No headless browser exists on this host, so the design was checked mechanically 
 
 Total 285 tests.
 
+## [Unreleased] — companion/grok-bot-m0 (M18: teammates that organise themselves)
+
+### Added (M18: collaboration without a declared pipeline)
+The human should not have to author the workflow. Three things were missing for
+that, and all three now exist (`src/companion-team.mjs`):
+
+- **Auto-routing** — `DELEGATE: instruction` (no name) asks the worker to choose.
+  It scores the instruction against each other teammate's persona, takes the
+  best match, and logs the reason plus the runner-up. Tokenization splits CJK
+  into overlapping bigrams, because Chinese has no spaces and a whole sentence
+  otherwise arrives as one token that can never match (found by running it with
+  a Chinese instruction). A sole available candidate is taken even without a
+  lexical match; with several candidates and no match the decision is handed
+  *back* to the delegator — which can read the roster in its prompt — instead of
+  being dropped.
+- **Lossless handoff** — a delegated task carries the delegator's task, its
+  result so far and the files it produced, rendered into the delegatee's prompt.
+  Verified live: the delegatee's answer referenced the delegator's conclusion.
+- **A closed loop** — when a delegated task completes *or fails*, the result goes
+  to the delegator's inbox and an integration turn is queued for it, so a
+  delegation is a conversation. `MAX_DELEGATION_DEPTH` (3) caps hops so two
+  teammates cannot ping-pong; human-initiated tasks report to nobody.
+- Every teammate's prompt now lists the rest of the team (name + persona), and
+  the protocol text explains routing, handoff and the automatic report-back.
+
+`tests/companion-m18.test.mjs` — 15 tests (routing incl. CJK and the
+sole-candidate fallback, handoff rendering and persistence, the roster prompt,
+the loop, failure reporting, the depth cap). Total 663.
+
 ## [Unreleased] — companion/grok-bot-m0 (M16: the app)
 
 ### Added (M16: a chat application, not a dashboard)

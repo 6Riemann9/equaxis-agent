@@ -160,6 +160,9 @@ function sanitizeTask(input) {
     // Optional fields that must survive a reload: sanitizeTask rebuilds the
     // record field by field, so anything unlisted is silently dropped.
     ...(input?.usage ? { usage: input.usage } : {}),
+    // A delegated task carries the delegator's working set so the handoff is
+    // lossless and the result can be routed back (see companion-team.mjs).
+    ...(input?.handoff ? { handoff: input.handoff } : {}),
     ...(input?.artifacts ? { artifacts: input.artifacts } : {}),
     ...(input?.cancelRequestedAt ? { cancelRequestedAt: input.cancelRequestedAt } : {})
   };
@@ -608,7 +611,8 @@ export class CompanionStore {
       teammateId: teammate.id,
       instruction,
       runSource: options.runSource ?? "user",
-      priority: options.priority
+      priority: options.priority,
+      handoff: options.handoff
     });
     this.queue.push(task);
     this.flush();
