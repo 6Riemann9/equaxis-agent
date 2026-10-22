@@ -12,6 +12,10 @@ import assert from "node:assert/strict";
 import { killProcessTree } from "../src/process-cleanup.mjs";
 import { connectProtocolSocket, spawnProtocolProcess } from "../src/protocol-transport.mjs";
 
+const projectRoot = path.resolve(import.meta.dirname, "..");
+/** Memoised: the probe spawns a process, so it runs once per suite. */
+let cachedDapPython;
+
 function waitForPort(port, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs;
@@ -72,8 +76,41 @@ function dapAvailable() {
   // when installed, and spawnSync.error is only set when the process cannot
   // spawn — so a status-agnostic probe wrongly reports "available" when the
   // module is missing. Importing the module is the reliable check.
-  const probe = spawnSync("python", ["-c", "import debugpy.adapter"], { encoding: "utf8", windowsHide: true, timeout: 15000 });
-  return probe.status === 0;
+  return resolveDapPython() !== null;
+}
+
+/**
+ * Find an interpreter that actually has debugpy, in the order the product
+ * itself resolves it: the configured adapter command, the project venv, the
+ * managed DAP venv, then the system python. Hardcoding "python" skipped this
+ * real integration test on hosts where debugpy lives in a venv — the adapter
+ * works there, the test just never looked.
+ */
+function resolveDapPython() {
+  if (cachedDapPython !== undefined) return cachedDapPython;
+  const candidates = [];
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(projectRoot, ".pi", "equaxis.json"), "utf8"));
+    const configured = cfg?.protocols?.dap?.command;
+    if (configured) candidates.push(configured);
+  } catch {
+    // no project config: fall through to the well-known locations
+  }
+  candidates.push(
+    path.join(projectRoot, ".venv", "bin", "python"),
+    path.join(os.homedir(), ".equaxis", "venvs", "dap", "bin", "python"),
+    "python"
+  );
+  for (const candidate of candidates) {
+    if (candidate !== "python" && !fs.existsSync(candidate)) continue;
+    const probe = spawnSync(candidate, ["-c", "import debugpy.adapter"], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+    if (probe.status === 0) {
+      cachedDapPython = candidate;
+      return candidate;
+    }
+  }
+  cachedDapPython = null;
+  return null;
 }
 
 test("real debugpy adapter (TCP) initializes and launches a fixture", { skip: dapAvailable() ? false : "debugpy not installed" }, async (t) => {
@@ -83,7 +120,7 @@ test("real debugpy adapter (TCP) initializes and launches a fixture", { skip: da
   const port = 42000 + Math.floor(Math.random() * 10000);
   // debugpy.adapter is a TCP server, not a stdio process; the equaxis
   // protocol transport connects to it over a socket.
-  const adapter = spawn("python", ["-m", "debugpy.adapter", "--port", String(port), "--host", "127.0.0.1"], { stdio: "ignore", detached: true });
+  const adapter = spawn(resolveDapPython(), ["-m", "debugpy.adapter", "--port", String(port), "--host", "127.0.0.1"], { stdio: "ignore", detached: true });
   let handle = null;
   t.after(() => {
     handle?.close();
