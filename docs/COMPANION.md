@@ -95,6 +95,13 @@ MESSAGE @builder: the config lives in equaxis-config.mjs
   teammates cannot ping-pong forever. Human-initiated tasks report to nobody.
 - Every teammate's prompt lists the rest of the team (name + persona), so
   choosing *who* is a decision the model can make with understanding.
+- **The team grows itself**: `HIRE @name: persona` lets a teammate create the
+  colleague it needs when nobody fits. The hire is bounded in the worker, not in
+  the prompt — kebab-case name, a real persona, and `MAX_TEAMMATES` (8). The new
+  teammate inherits the hirer's model, receives a briefing in its inbox, and the
+  hire is announced in the feed (`teammate_hired`) so a human always sees the
+  team change. A malformed or duplicate name is refused with the reason, so the
+  hirer can adapt on its next turn instead of guessing why nothing happened.
 - Directives to unknown teammates are rejected without failing the task.
 
 ## Sandbox model (`--sandbox bwrap`, the `auto` default)

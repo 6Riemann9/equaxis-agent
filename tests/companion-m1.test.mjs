@@ -273,6 +273,6 @@ test("m1 result: an object reply is serialized, never stringified into [object O
   assert.equal(extractResult("did work\nRESULT:\nthe answer"), "the answer");
 
   // Directives are only parsed from strings; an object must not crash.
-  assert.deepEqual(parseDirectives({ not: "a string" }), { delegations: [], messages: [] });
+  assert.deepEqual(parseDirectives({ not: "a string" }), { delegations: [], messages: [], hires: [] });
   assert.equal(parsePiJsonReply({ not: "a stream" }), "");
 });

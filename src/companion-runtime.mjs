@@ -1,4 +1,4 @@
-import { MAX_DELEGATION_DEPTH, buildHandoff, buildIntegrationRequest, delegationDepth, formatHandoff, formatRoster, routeTeammate } from "./companion-team.mjs";
+import { MAX_DELEGATION_DEPTH, buildHandoff, buildIntegrationRequest, delegationDepth, formatHandoff, formatRoster, routeTeammate, validateHire } from "./companion-team.mjs";
 import { captureBaseline, captureResult, formatArtifactSummary } from "./companion-artifacts.mjs";
 /**
  * Companion runtime: the worker loop that drains the task queue.
@@ -49,6 +49,7 @@ export function buildTeammatePrompt(teammate, task, context = {}) {
   lines.push("Collaboration directives (one per line, at the end of your reply):");
   lines.push("  DELEGATE @name: instruction   — hand a piece of work to a named teammate");
   lines.push("  DELEGATE: instruction         — hand it to whoever is best matched; the worker picks");
+  lines.push("  HIRE @name: persona           — when nobody in the team fits, grow the team (bounded, and the human is told)");
   lines.push("  MESSAGE @name: text           — leave a note in their inbox");
   lines.push("A delegated task carries your task, your findings and the files you produced, so the other teammate does not start blind. When they finish, their result is delivered back to you automatically and you get a turn to integrate it — do not wait for them in the same turn, and do not delegate this task away entirely.");
   lines.push("");
@@ -91,10 +92,13 @@ export function extractResult(reply) {
 export function parseDirectives(reply) {
   const delegations = [];
   const messages = [];
+  const hires = [];
   for (const line of replyText(reply).split("\n")) {
-    const delegate = line.match(/^\s*DELEGATE\s+@([a-z0-9][a-z0-9_-]*)\s*:\s*(.+)$/i);
+    // Loosely captured for the same reason as HIRE: an invalid name should be
+    // reported as a rejected delegation, not silently dropped.
+    const delegate = line.match(/^\s*DELEGATE\s+@([^:\n]+):\s*(.+)$/i);
     if (delegate) {
-      delegations.push({ to: delegate[1].toLowerCase(), instruction: delegate[2].trim(), routed: false });
+      delegations.push({ to: delegate[1].trim().toLowerCase(), instruction: delegate[2].trim(), routed: false });
       continue;
     }
     // "DELEGATE: instruction" with no name: the worker routes it to whoever is
@@ -104,10 +108,20 @@ export function parseDirectives(reply) {
       delegations.push({ to: null, instruction: routed[1].trim(), routed: true });
       continue;
     }
+    // HIRE lets a teammate grow the team when nobody fits the work. Bounded by
+    // validateHire (name shape, persona, MAX_TEAMMATES) in the worker.
+    // The name is captured loosely on purpose: a malformed name ("@Bad Name")
+    // must reach validateHire and be refused WITH a reason, not vanish because
+    // the regex did not match.
+    const hire = line.match(/^\s*HIRE\s+@([^:\n]+):\s*(.+)$/i);
+    if (hire) {
+      hires.push({ name: hire[1].trim().toLowerCase(), persona: hire[2].trim() });
+      continue;
+    }
     const message = line.match(/^\s*MESSAGE\s+@([a-z0-9][a-z0-9_-]*)\s*:\s*(.+)$/i);
     if (message) messages.push({ to: message[1].toLowerCase(), text: message[2].trim() });
   }
-  return { delegations, messages };
+  return { delegations, messages, hires };
 }
 
 /** Enqueue every due routine as a task; returns the enqueued tasks. */
@@ -254,7 +268,7 @@ export async function runCompanionWorker(options) {
   const log = (...args) => logger?.(...args);
   const slots = Math.max(1, Math.floor(Number(concurrency) || 1));
 
-  const summary = { processed: 0, completed: 0, failed: 0, cancelled: 0, delegated: 0, reported: 0, routingMissed: 0, routingDeferred: 0, loopsStopped: 0, stoppedBy: "drained" };
+  const summary = { processed: 0, completed: 0, failed: 0, cancelled: 0, delegated: 0, reported: 0, routingMissed: 0, routingDeferred: 0, loopsStopped: 0, hired: 0, hiresRefused: 0, stoppedBy: "drained" };
   /** taskId -> AbortController for the in-flight run. */
   const running = new Map();
 
@@ -485,8 +499,40 @@ function deliverDelegationReport(store, finishedTask, { log, summary } = {}) {
 
 /** Queue DELEGATE directives and deliver MESSAGE directives from a reply. */
 function applyDirectives(store, reply, fromTeammate, { log, summary, sourceTask = null, result = "", artifacts = null } = {}) {
-  const { delegations, messages } = parseDirectives(reply);
+  const { delegations, messages, hires } = parseDirectives(reply);
   const depth = delegationDepth(sourceTask);
+
+  // Hiring runs FIRST so a reply that both hires and delegates can work in one
+  // turn (HIRE @designer: ... then DELEGATE @designer: ...). Every hire is
+  // bounded, audited and announced — an agent grows the team, it does not grow
+  // it invisibly.
+  for (const hire of hires) {
+    const verdict = validateHire({ name: hire.name, persona: hire.persona, teammates: store.listTeammates() });
+    if (!verdict.ok) {
+      log(`companion: @${fromTeammate.name} tried to hire @${hire.name}: ${verdict.reason}`);
+      summary.hiresRefused = (summary.hiresRefused ?? 0) + 1;
+      continue;
+    }
+    try {
+      store.createTeammate({ name: verdict.name, persona: verdict.persona, model: fromTeammate.model ?? null });
+      store.sendMessage({
+        from: fromTeammate.name,
+        to: verdict.name,
+        text: `Hired by @${fromTeammate.name}: ${verdict.persona}`
+      });
+      store.appendFeed({
+        at: new Date().toISOString(),
+        kind: "teammate_hired",
+        teammate: verdict.name,
+        text: `@${fromTeammate.name} hired @${verdict.name} — ${verdict.persona}`
+      });
+      summary.hired = (summary.hired ?? 0) + 1;
+      log(`companion: @${fromTeammate.name} hired @${verdict.name}`);
+    } catch (error) {
+      log(`companion: hiring @${hire.name} failed: ${error?.message ?? error}`);
+      summary.hiresRefused = (summary.hiresRefused ?? 0) + 1;
+    }
+  }
   for (const delegation of delegations) {
     // Auto-routing: the delegating teammate decided *what* needs doing, the
     // worker decides who is best matched. A refusal is explained in the feed

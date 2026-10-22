@@ -190,3 +190,58 @@ export function buildIntegrationRequest({ delegateTask, delegateTeammate, result
     runSource: `report:${delegateTeammate.name}`
   };
 }
+
+/** Hard ceiling on self-organising team growth: an agent must not be able to
+ * mint teammates without bound. Enforced in the worker, not in the prompt. */
+export const MAX_TEAMMATES = 8;
+export const MAX_PERSONA_CHARS = 600;
+
+/**
+ * Validate a teammate a teammate wants to hire.
+ *
+ * The hiring teammate writes the persona, so the checks are about shape and
+ * bounds, not content: a kebab-case name, a non-empty persona, and room left in
+ * the roster. Refusals carry a reason so the hirer can adapt in its next turn.
+ */
+export function validateHire({ name, persona, teammates }) {
+  const cleanName = String(name ?? "").trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(cleanName)) {
+    return { ok: false, reason: `"${name}" is not a kebab-case name (letters, digits, -, _)` };
+  }
+  if (teammates.some((teammate) => teammate.name === cleanName)) {
+    // Not an error worth stopping for: the teammate exists, so delegating is
+    // the right move and the caller should just do that.
+    return { ok: false, exists: true, reason: `@${cleanName} already exists — delegate to them instead` };
+  }
+  const cleanPersona = String(persona ?? "").trim();
+  if (cleanPersona.length < 8) {
+    return { ok: false, reason: "a persona of at least a few words is required; it is how the teammate knows what it is for" };
+  }
+  if (teammates.length >= MAX_TEAMMATES) {
+    return { ok: false, reason: `the team is at its ceiling of ${MAX_TEAMMATES} teammates — delegate to an existing one or ask the human to prune` };
+  }
+  return {
+    ok: true,
+    name: cleanName,
+    persona: cleanPersona.slice(0, MAX_PERSONA_CHARS)
+  };
+}
+
+/**
+ * The handoff a hired teammate receives: who hired it, why, and what the team
+ * already knows. Without this the new teammate starts with only its persona.
+ */
+export function buildHireBrief({ from, reason, result, artifacts = null, task = null }) {
+  return {
+    from: from?.name ?? String(from),
+    fromTaskId: task?.id ?? null,
+    instruction: `hired by @${from?.name ?? from}: ${String(reason ?? "").slice(0, 400)}`,
+    summary: String(result ?? "").slice(0, 4000),
+    artifacts: artifacts
+      ? { added: artifacts.added ?? [], modified: artifacts.modified ?? [], deleted: artifacts.deleted ?? [] }
+      : null,
+    depth: 1,
+    hired: true,
+    at: new Date().toISOString()
+  };
+}

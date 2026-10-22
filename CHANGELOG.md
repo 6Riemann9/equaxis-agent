@@ -17,6 +17,35 @@ No headless browser exists on this host, so the design was checked mechanically 
 
 Total 285 tests.
 
+## [Unreleased] — companion/grok-bot-m0 (M18b: the team grows itself)
+
+### Added (M18b: hiring)
+- **`HIRE @name: persona`** — a teammate that finds nobody suitable grows the
+  team instead of coming back to the human. Bounded in the *worker*, not merely
+  asked for in the prompt: kebab-case name, a persona of real length,
+  `MAX_TEAMMATES` (8), persona length cap. The hire inherits the hirer's model
+  (so it behaves like the teammate that created it), gets a briefing in its
+  inbox, and lands in the feed as `teammate_hired` — an agent grows the team, it
+  does not grow it invisibly.
+- A reply that hires and delegates in the same turn works: hires are applied
+  first, so `DELEGATE @designer: ...` can target the teammate hired a line above.
+- Refusals carry the reason (`not a kebab-case name`, `at least a few words`,
+  `already exists — delegate to them instead`, `the team is at its ceiling`), so
+  the hirer adapts next turn instead of silently losing the work.
+
+### Fixed
+- Directive parsing captured names with a strict kebab-case regex, so
+  `HIRE @Bad Name: ...` matched nothing and vanished. Names are now captured
+  loosely and validated with a reason — the same for `DELEGATE @Bad Name: ...`,
+  which now reports a rejected delegation instead of dropping it.
+
+Found while testing: three of my own tests ran the worker with an empty queue and
+hung, because the worker is a daemon (empty queue → poll). The worker was right;
+the tests had to supply work. Worth knowing when writing worker tests.
+
+Total 669 tests; live-verified: @researcher hired @designer with a persona it
+wrote, the feed recorded it, and the new teammate's inbox held the briefing.
+
 ## [Unreleased] — companion/grok-bot-m0 (M18: teammates that organise themselves)
 
 ### Added (M18: collaboration without a declared pipeline)

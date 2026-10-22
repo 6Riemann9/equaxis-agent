@@ -5,6 +5,9 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   MAX_DELEGATION_DEPTH,
+  MAX_PERSONA_CHARS,
+  MAX_TEAMMATES,
+  validateHire,
   buildHandoff,
   buildIntegrationRequest,
   delegationDepth,
@@ -251,4 +254,113 @@ test("m18 loop: an unmatched auto-routing request bounces back to the delegator,
   assert.ok(retry, "a retry turn was queued");
   assert.match(retry.instruction, /name the teammate explicitly/);
   assert.match(retry.instruction, /DELEGATE @name: xyzzy plugh/);
+});
+
+// ---- the team grows itself (bounded) ----
+
+test("m18 hire: a teammate can grow the team when nobody fits", async () => {
+  const store = team();
+  // The worker is a daemon: with an empty queue it polls forever by design, so
+  // every test that runs it must give it work.
+  store.enqueue("researcher", "design the thing");
+  const summary = await runCompanionWorker({
+    store,
+    concurrency: 1,
+    maxTasks: 1,
+    routines: false,
+    executor: async () => [
+      "I cannot do the visual design myself.",
+      "RESULT: surveyed; no suitable teammate.",
+      "HIRE @designer: turns findings into a visual layout and owns typography"
+    ].join("\n")
+  });
+  assert.equal(summary.hired, 1);
+  const hired = store.getTeammate("designer");
+  assert.ok(hired, "the teammate exists");
+  assert.match(hired.persona, /visual layout/);
+  assert.equal(hired.model, store.getTeammate("researcher").model, "the hire inherits the hirer's model, not whatever is default");
+
+  // The human can see it happened, with the reason.
+  const feed = store.readFeed(20).filter((entry) => entry.kind === "teammate_hired");
+  assert.equal(feed.length, 1);
+  assert.match(feed[0].text, /@researcher hired @designer/);
+  // And the new teammate has a briefing waiting in its inbox.
+  assert.match(store.unreadMessages("designer")[0].text, /Hired by @researcher/);
+});
+
+test("m18 hire: hiring and delegating to the hire work in the same turn", async () => {
+  const store = team();
+  store.enqueue("researcher", "get help and hand it over");
+  await runCompanionWorker({
+    store,
+    concurrency: 1,
+    maxTasks: 1,
+    routines: false,
+    executor: async () => [
+      "RESULT: need help.",
+      "HIRE @designer: owns visual layout and typography",
+      "DELEGATE @designer: lay out the findings"
+    ].join("\n")
+  });
+  const delegated = store.listTasks({}).find((task) => String(task.runSource).startsWith("delegated:researcher"));
+  assert.ok(delegated, "the delegation to the freshly hired teammate was queued");
+  const designer = store.getTeammate("designer");
+  assert.equal(delegated.teammateId, designer.id);
+});
+
+test("m18 hire: the roster ceiling is enforced, with a reason", async () => {
+  const store = team();
+  // Fill the team to the ceiling.
+  for (let i = store.listTeammates().length; i < MAX_TEAMMATES; i += 1) {
+    store.createTeammate({ name: `filler${i}`, persona: "exists to fill the roster" });
+  }
+  store.enqueue("researcher", "try to grow past the ceiling");
+  const summary = await runCompanionWorker({
+    store,
+    concurrency: 1,
+    maxTasks: 1,
+    routines: false,
+    executor: async () => "RESULT: x\nHIRE @one-more: somebody new entirely"
+  });
+  assert.equal(summary.hired, 0);
+  assert.equal(summary.hiresRefused, 1, "growth is capped");
+  assert.equal(store.listTeammates().length, MAX_TEAMMATES);
+  assert.equal(store.getTeammate("one-more"), null);
+});
+
+test("m18 hire: bad names, thin personas and existing teammates are refused (existing = delegate instead)", async () => {
+  const store = team();
+  const cases = [
+    ["HIRE @Bad Name: a persona that is long enough", /not a kebab-case name/],
+    ["HIRE @designer: short", /at least a few words/],
+    ["HIRE @builder: owns implementation code and tests", /already exists — delegate to them instead/]
+  ];
+  for (const [line, pattern] of cases) {
+    store.enqueue("researcher", "attempt a hire");
+    const summary = await runCompanionWorker({
+      store,
+      concurrency: 1,
+      maxTasks: 1,
+      routines: false,
+      executor: async () => `RESULT: x\n${line}`
+    });
+    assert.equal(summary.hired, 0, `${line} must not hire`);
+    assert.equal(summary.hiresRefused, 1);
+  }
+  assert.equal(store.listTeammates().length, 2, "the team is unchanged");
+});
+
+test("m18 hire: validateHire caps the persona length and reports the boundary", () => {
+  const verdict = validateHire({ name: "ok-name", persona: "p".repeat(MAX_PERSONA_CHARS + 200), teammates: [] });
+  assert.equal(verdict.ok, true);
+  assert.equal(verdict.persona.length, MAX_PERSONA_CHARS);
+});
+
+test("m18 protocol: HIRE is parsed and taught in the prompt", () => {
+  const parsed = parseDirectives("HIRE @designer: owns visual layout and typography");
+  assert.deepEqual(parsed.hires, [{ name: "designer", persona: "owns visual layout and typography" }]);
+  const store = team();
+  const prompt = buildTeammatePrompt(store.getTeammate("builder"), { id: "t", instruction: "x" }, { roster: store.listTeammates() });
+  assert.match(prompt, /HIRE @name: persona/);
+  assert.match(prompt, /grow the team \(bounded/);
 });
